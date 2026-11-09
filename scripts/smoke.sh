@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# Issue #135 adds the typed-codes section: the six digits in the verification and reset emails,
+# read from the log; {email, code} verifies and resets; an unknown address is the same bytes as a
+# wrong code; five wrong burn the code while its link still works; a new email retires the old
+# code; a used code is refused with its link spent; ten typed codes a day per address and twenty
+# presentations an hour per client address, each to its 429. Last run on 2026-11-09, on
+# feat/typed-email-codes, from a jar of 303a1df (main at f906903, #150, merged in), on a fresh
+# database that applied 44 migrations to V51, against its own compose project (moyi-41h:
+# Postgres 55458, Valkey 56348, MinIO 59275; 55448 and 59266 were held by a forward docker did
+# not list), the jar booted by hand (local profile) and --attach: 1454 passed, 0 failed,
+# 1 skipped (the tag across the erasure, the poller having won the race).
+#
 # Issue #132 (the late-entry grace, ADR-0033 decision 15) adds a late-entries section: a fresh bond
 # moved back three days into a region zone where it is between 01:00 and 05:59, the job writing
 # the day past its grace and not yesterday, an entry with an intendedAt before midnight counting for
@@ -184,6 +195,17 @@
 # (moyi-41d: Postgres 55444, Valkey 56344, MinIO 59247), the jar booted by hand (local profile)
 # and --attach: 1384 passed, 0 failed, 0 skipped. Before it, from 14ce084 (before the merge, the
 # CHECK then a decimal V45.1): 1350, 0 and 1 skipped (the tag across the erasure).
+# Since the member report (#127, ADR-0053 decision 14) a section of its own: a bond with nobody to
+# report and a stranger the same 404, 422 on reason, 201 with {id, reason} and its replay, one MEMBER
+# row holding nothing, the reported member's GET /bonds/{id} and GET /today byte for byte and ETag for
+# ETag the same after it, 201 after a block, the operator's list and dismissals, the detail in no log.
+# Last run on 2026-11-09 on feat/report-member after main's #150 (f906903) was merged in, from a
+# jar of that merge (a1ce621), on a fresh database that applied 44 migrations to V48, against its
+# own compose project (moyi-41e: Postgres 55445, Valkey 56345, MinIO 59249), the jar booted by hand
+# (local profile) and --attach: 1424 passed, 0 failed, 1 skipped (the tag across the erasure, the
+# poller having won the race), 38 sections. Before the merge, at V46 (since renumbered V48): 1362,
+# 0, 1 skipped, 35 sections; the run before that failed one probe, the entry reports' list check
+# still expecting the list's old columns.
 # Since semantic search S1 (FR-204, ADR-0054) it runs with the embedding provider `none`, as the
 # local profile and production name it: search 200 by words alone; "Remember when" 200 from the
 # words' ranking alone (and a plain question whose words are not all in one entry answers no day),
@@ -741,8 +763,32 @@ REFRESH="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
 expect "refresh rotates: 200 with a new pair" 200 '"refreshToken"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH\"}"
 REFRESH2="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
 [ "$REFRESH2" != "$REFRESH" ] && pass "…and the new refresh token differs from the old" || fail "rotation" "same refresh token returned"
-expect "presenting the rotated token again is 401 TOKEN_REUSE_DETECTED" 401 '"code":"TOKEN_REUSE_DETECTED"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH\"}"
-expect "…and the successor died with the family: REFRESH_TOKEN_INVALID" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH2\"}"
+# The grace window (ADR-0021, amended 2026-11-08, issue #136): a refresh whose
+# answer was lost may be retried for 30 s while the successor is unused. The
+# WARN "Refresh token REUSE detected" is written inside the revoking
+# transaction, before the response, so counting it is a synchronous check that
+# no reuse (and so no reuse email) happened.
+reuse_lines() { grep -c "Refresh token REUSE detected" "$MOYI_LOG" || true; }
+REUSES_BEFORE="$(reuse_lines)"
+expect "a second refresh of the same token within 30 s is 200 with a new pair" 200 '"refreshToken"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH\"}"
+REFRESH_RETRY="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+[ -n "$REFRESH_RETRY" ] && [ "$REFRESH_RETRY" != "$REFRESH2" ] && pass "…a different token from the one it voids" || fail "grace retry" "same or no refresh token returned"
+[ "$(reuse_lines)" = "$REUSES_BEFORE" ] && pass "…with no reuse detected, so no reuse email" || fail "grace retry" "a reuse was logged for the retry"
+grep -q "Refresh retried inside the grace window" "$MOYI_LOG" && pass "…logged as a grace retry" || fail "grace retry log" "no 'Refresh retried inside the grace window' line"
+expect "the voided successor presented afterwards is 401 TOKEN_REUSE_DETECTED" 401 '"code":"TOKEN_REUSE_DETECTED"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH2\"}"
+[ "$(reuse_lines)" -gt "$REUSES_BEFORE" ] && pass "…detected as a reuse (the person is emailed)" || fail "voided successor" "no reuse logged"
+expect "…and the family is dead: the retry's token is REFRESH_TOKEN_INVALID" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH_RETRY\"}"
+flush_buckets
+expect "login again (a family to use the successor of)" 200 '"refreshToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
+REFRESH_A="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+expect "refresh it" 200 '"refreshToken"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH_A\"}"
+REFRESH_B="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+expect "refresh the successor (now used)" 200 '"refreshToken"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH_B\"}"
+REFRESH_C="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+expect "presenting the rotated token after its successor was used is 401 TOKEN_REUSE_DETECTED" 401 '"code":"TOKEN_REUSE_DETECTED"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH_A\"}"
+expect "…and the successor died with the family: REFRESH_TOKEN_INVALID" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH_C\"}"
+# The window itself, 30 s, is not waited out here: RefreshGraceWindowTest moves
+# a clock past it. A token past the window answers as a used successor's does.
 expect "a never-issued refresh token is 401 REFRESH_TOKEN_INVALID" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d '{"refreshToken":"never-issued"}'
 expect "login again (fresh family)" 200 '"refreshToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
 REFRESH3="$(printf '%s' "$LAST_BODY" | jget refreshToken)"; ACCESS3="$(printf '%s' "$LAST_BODY" | jget accessToken)"
@@ -792,6 +838,96 @@ expect "the new one does" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$
 sleep 1
 for needle in "$PASSWORD" "$NEW_PASSWORD" "$REFRESH" "$REFRESH2" "$ACCESS"; do if grep -qF -- "$needle" "$MOYI_LOG"; then fail "secret in log" "a password or token appears in the log"; SECRET_LEAK=1; fi; done
 [ "${SECRET_LEAK:-0}" = 0 ] && pass "no password, refresh token or access token appears in the log"
+
+echo; echo "typed codes (#135, ADR-0018 and ADR-0022 amended 2026-11-08)"
+# The verification and reset emails carry six digits beside the link; verify-email and
+# reset-password take {email, code} in place of the token. Each probe comes from its own
+# X-Forwarded-For, so the twenty-an-hour per-IP bucket the two routes share is not what
+# this section ends up testing; the ten-a-day per-address bucket is driven at the end.
+flush_buckets
+# The last six-digit code in the log: the line after "It works for N minutes:" in the email
+# body, whether the log writes the body's newlines as they are or escaped.
+code_from_log() { python3 -c "import re,sys; m=re.findall(r'It works for \d+ minutes:(?:\\\\n|\s)*(\d{6})', open(sys.argv[1]).read()); print(m[-1] if m else '')" "$MOYI_LOG"; }
+await_email() { local before="$1"; for _ in $(seq 1 40); do [ "$(grep -c "Email NOT sent" "$MOYI_LOG" || true)" -gt "$before" ] && break; sleep 0.25; done; }
+other_code() { printf '%06d' $(( (10#$1 + 1) % 1000000 )); }
+CODE_EMAIL="code-$(date +%s)-$RANDOM@example.com"
+before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "register for the code probes" 201 "" -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.140' -d "$(register_body "$CODE_EMAIL")"
+await_email "$before"
+CODE1="$(code_from_log)"; LINK1="$(grep -oE 'token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
+[[ "$CODE1" =~ ^[0-9]{6}$ ]] && pass "the email carries a six-digit code beside the link" || fail "code in email" "got '$CODE1'"
+WRONG1="$(other_code "$CODE1")"
+expect "a wrong code is 422 VERIFICATION_TOKEN_INVALID" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.141' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$WRONG1\"}"
+WRONG_BODY="$LAST_BODY"
+expect "an unknown address is the same bytes as a wrong code" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.142' -d "{\"email\":\"nobody-$RANDOM@example.com\",\"code\":\"$CODE1\"}"
+[ "$LAST_BODY" = "$WRONG_BODY" ] && pass "…byte for byte, but the traceId" || fail "unknown address vs wrong code" "'${LAST_BODY:0:200}' vs '${WRONG_BODY:0:200}'"
+[[ "$LAST_RAW_BODY" != *"$CODE1"* ]] && pass "…and the code is not echoed" || fail "code echoed" "${LAST_RAW_BODY:0:200}"
+expect "a five-digit code is 422 VALIDATION_FAILED, before any lookup" 422 '"code":"VALID_VERIFICATION_CODE"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.143' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"12345\"}"
+expect "a token and a code together is 422 VALIDATION_FAILED" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.144' -d "{\"token\":\"$LINK1\",\"email\":\"$CODE_EMAIL\",\"code\":\"$CODE1\"}"
+
+# A new email retires the old code; its link stays live (ADR-0018 decision 6).
+before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "resend for the pending address is 202" 202 "" -- -X POST "$API/auth/resend-verification" -H 'X-Forwarded-For: 203.0.113.145' -d "{\"email\":\"$CODE_EMAIL\"}"
+await_email "$before"
+CODE2="$(code_from_log)"
+if [ "$CODE2" = "$CODE1" ]; then skip "a new email retires the old code (the two codes happen to be equal)"; else
+  expect "a new email retires the old code" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.146' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$CODE1\"}"
+fi
+expect "the code verifies by address: 200, empty body" 200 "" -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.147' -d "{\"email\":\"$(echo "$CODE_EMAIL" | tr a-z A-Z)\",\"code\":\"$CODE2\"}"
+expect "a used code is refused, and so is its link" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.148' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$CODE2\"}"
+# The first email's link was live when the code verified the account, so it was deleted: not recognised.
+expect "…the older link, retired by the verification, is 422" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.149' -d "{\"token\":\"$LINK1\"}"
+
+# Burning: five wrong codes, then the right one is refused; the link beside it still works.
+BURN_EMAIL="burn-$(date +%s)-$RANDOM@example.com"
+before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "register for the burn probes" 201 "" -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.150' -d "$(register_body "$BURN_EMAIL")"
+await_email "$before"
+BURN_CODE="$(code_from_log)"; BURN_LINK="$(grep -oE 'token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
+for i in 1 2 3 4 5; do
+  expect "wrong code $i of 5 is 422" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H "X-Forwarded-For: 203.0.113.15$i" -d "{\"email\":\"$BURN_EMAIL\",\"code\":\"$(other_code "$BURN_CODE")\"}"
+done
+expect "the right code after five wrong ones is refused: the code is burned" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.156' -d "{\"email\":\"$BURN_EMAIL\",\"code\":\"$BURN_CODE\"}"
+[ "$LAST_BODY" = "$WRONG_BODY" ] && pass "…the same bytes as a wrong code" || fail "burned vs wrong" "'${LAST_BODY:0:200}'"
+expect "…while the link beside it still verifies: 200" 200 "" -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.157' -d "{\"token\":\"$BURN_LINK\"}"
+
+# Reset by code.
+before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "forgot-password for the code account is 202" 202 "" -- -X POST "$API/auth/forgot-password" -H 'X-Forwarded-For: 203.0.113.160' -d "{\"email\":\"$CODE_EMAIL\"}"
+await_email "$before"
+RESET_CODE="$(code_from_log)"; RESET_LINK="$(grep -oE 'reset-password\?token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
+CODE_PASSWORD="a third good password"
+expect "reset by code for an unknown address" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.161' -d "{\"email\":\"nobody-$RANDOM@example.com\",\"code\":\"$RESET_CODE\",\"password\":\"$CODE_PASSWORD\"}"
+UNKNOWN_RESET_BODY="$LAST_BODY"
+expect "reset by a wrong code" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.162' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$(other_code "$RESET_CODE")\",\"password\":\"$CODE_PASSWORD\"}"
+[ "$LAST_BODY" = "$UNKNOWN_RESET_BODY" ] && pass "reset by code for an unknown address is the same bytes as a wrong code" || fail "reset unknown vs wrong" "'${LAST_BODY:0:200}' vs '${UNKNOWN_RESET_BODY:0:200}'"
+if [ "$RESET_CODE" != "$CODE2" ]; then
+  expect "the verification code is not a reset code" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.163' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$CODE2\",\"password\":\"$CODE_PASSWORD\"}"
+fi
+expect "a breached password by code is refused per field, code not spent" 422 '"code":"NOT_BREACHED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.164' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$RESET_CODE\",\"password\":\"password\"}"
+expect "reset by address and code is 200" 200 "" -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.165' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$RESET_CODE\",\"password\":\"$CODE_PASSWORD\"}"
+expect "…the same code again is 422, never 410" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.166' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$RESET_CODE\",\"password\":\"$CODE_PASSWORD\"}"
+expect "…and the link beside it is spent: 410" 410 '"code":"PASSWORD_RESET_TOKEN_EXPIRED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.167' -d "{\"token\":\"$RESET_LINK\",\"password\":\"$CODE_PASSWORD\"}"
+expect "the password set by code signs in" 200 '"accessToken"' -- -X POST "$API/auth/login" -H 'X-Forwarded-For: 203.0.113.168' -d "$(login_body "$CODE_EMAIL" "$CODE_PASSWORD")"
+# The code reaches the log only inside the logged email (provider=log, local only): no other line holds it.
+CODE_LEAK=0; for c in "$CODE1" "$CODE2" "$BURN_CODE" "$RESET_CODE"; do [ "$(grep -wF -- "$c" "$MOYI_LOG" | grep -vE "^\s*$c\s*\$" | grep -vc 'It works for' || true)" -gt 0 ] && CODE_LEAK=1; done
+[ "$CODE_LEAK" = 0 ] && pass "no code appears in the log outside the logged email" || fail "code in log" "a code appears on a log line that is not the email's"
+
+# Ten typed codes a day per address, both routes together, the same for an address with no account.
+flush_buckets
+LIMIT_CODE_EMAIL="nobody-codes-$RANDOM@example.com"
+for i in $(seq 1 10); do
+  expect "typed code $i of 10 for an unknown address is 422" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H "X-Forwarded-For: 203.0.113.$((170 + i))" -d "{\"email\":\"$LIMIT_CODE_EMAIL\",\"code\":\"000000\"}"
+done
+expect "the eleventh, on reset-password, is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.181' -d "{\"email\":\"$LIMIT_CODE_EMAIL\",\"code\":\"000000\",\"password\":\"$CODE_PASSWORD\"}"
+header_is "…waiting for one try back" "Retry-After" "8640"
+# Twenty an hour per client address on the two routes, links and codes alike.
+flush_buckets
+for i in $(seq 1 20); do
+  expect "presentation $i of 20 from one address" 422 "" -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.190' -d "{\"token\":\"not-a-token-$i\"}"
+done
+expect "the twenty-first from that address is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.190' -d "{\"token\":\"not-a-token\",\"password\":\"$CODE_PASSWORD\"}"
+flush_buckets
 
 etag_of() { printf '%s\n' "$LAST_HEADERS" | grep -i '^etag:' | head -1 | cut -d' ' -f2-; }
 
@@ -3255,7 +3391,7 @@ expect "reports: the reporter still reads the entry's words" 200 '"text":"for yo
 
 if [ "$PSQL_OK" = 1 ]; then
   RP_LIST="$(reports list 2>&1)"
-  case "$RP_LIST" in *"$RP_REPORT"$'\t'NON_CONSENSUAL$'\t'"$RP_ENTRY"$'\t'2$'\t't*) pass "reports: the operator's list shows the report, what it holds and that it has a detail";; *) fail "reports: list" "${RP_LIST:0:400}";; esac
+  case "$RP_LIST" in *"$RP_REPORT"$'\t'NON_CONSENSUAL$'\t'ENTRY$'\t'"$RP_ENTRY"$'\t-\t'2$'\t't*) pass "reports: the operator's list shows the report, what it holds and that it has a detail";; *) fail "reports: list" "${RP_LIST:0:400}";; esac
   case "$RP_LIST" in *"$RP_DETAIL"*) fail "reports: …and never the detail" "the detail is in the list";; *) pass "reports: …and never the detail";; esac
   RP_SHOW="$(reports show "$RP_REPORT" 2>&1)"
   case "$RP_SHOW" in *"\"$RP_DETAIL\""*"$RP_PHOTO"*) pass "reports: show gives the operator the detail and what is held";; *) fail "reports: show" "${RP_SHOW:0:400}";; esac
@@ -3335,6 +3471,56 @@ expect "the eleventh report in a day is 429 RATE_LIMITED" 429 '"code":"RATE_LIMI
 header_is "reports: …ten a day" "X-RateLimit-Limit" "10"
 if grep -q "$RP_DETAIL" "$MOYI_LOG"; then fail "the report's detail is in no log line" "it is in $MOYI_LOG"; else pass "the report's detail is in no log line"; fi
 rm -rf "$RP_DIR"
+flush_buckets
+
+echo; echo "member reports — a member reports the other member of the bond to a person (FR-100's member half, ADR-0053 amended for #127)"
+# The reported member's own reads are taken before and after, bytes and ETag: nothing they can see may change
+# (doc 26 §2.2). The report is then the operator's, in the same queue as an entry report.
+verified_account "mr-reported" "203.0.113.185"; MR_A="$ACCOUNT_ACCESS"
+verified_account "mr-reporter" "203.0.113.186"; MR_B="$ACCOUNT_ACCESS"
+verified_account "mr-stranger" "203.0.113.187"; MR_O="$ACCOUNT_ACCESS"
+expect "member reports: a bond for the two" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $MR_A" -d "$(bond_body "Us")"
+MR_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+MR_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "reporting the member of a bond with no partner yet is 404" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_A" -H "Idempotency-Key: $(new_key)" -d '{"reason":"OTHER"}'
+MR_ALONE="$(no_instance | sed "s/$MR_BOND/-/g")"
+expect "member reports: …joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$MR_CODE/accept" -H "Authorization: Bearer $MR_B"
+expect "a stranger reporting a member of the bond is 404" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_O" -H "Idempotency-Key: $(new_key)" -d '{"reason":"OTHER"}'
+is "member reports: …the same bytes as the bond with nobody to report" "$(no_instance | sed "s/$MR_BOND/-/g")" "$MR_ALONE"
+expect "member reports: the reported member writes" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$MR_BOND/entries" -H "Authorization: Bearer $MR_A" -H "Idempotency-Key: $(new_key)" -d '{"text":"for you"}'
+expect "member reports: the reporter writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$MR_BOND/entries" -H "Authorization: Bearer $MR_B" -H "Idempotency-Key: $(new_key)" -d '{"text":"and mine"}'
+expect "member reports: the reported member reads the bond, before" 200 "\"id\":\"$MR_BOND\"" -- "$API/bonds/$MR_BOND" -H "Authorization: Bearer $MR_A"
+MR_BOND_BEFORE="$LAST_BODY"; MR_BOND_TAG_BEFORE="$(tag)"
+expect "member reports: the reported member reads today, before" 200 '"myEntry"' -- "$API/bonds/$MR_BOND/today" -H "Authorization: Bearer $MR_A"
+MR_TODAY_BEFORE="$LAST_BODY"; MR_TODAY_TAG_BEFORE="$(tag)"
+expect "a report with an unknown reason is 422 on the member route too" 422 '"field":"reason"' -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_B" -H "Idempotency-Key: $(new_key)" -d '{"reason":"SPAM"}'
+MR_KEY="$(new_key)"
+expect "the reporter reports the other member: 201" 201 '"reason":"HARASSMENT"' -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_B" -H "Idempotency-Key: $MR_KEY" -d '{"reason":"HARASSMENT","detail":"smoke-fake-member-report-detail"}'
+MR_FIRST="$LAST_BODY"; MR_REPORT="$(printf '%s' "$LAST_BODY" | jget id)"
+is "member reports: …the answer is the id and the reason, nothing else" "$(python3 -c 'import json,sys; print(sorted(json.loads(sys.argv[1])))' "$MR_FIRST")" "['id', 'reason']"
+expect "the same key again is the same member report, replayed" 201 "\"id\":\"$MR_REPORT\"" -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_B" -H "Idempotency-Key: $MR_KEY" -d '{"reason":"HARASSMENT","detail":"smoke-fake-member-report-detail"}'
+header_is "member reports: …marked as a replay" "Idempotency-Replayed" "true"
+db_is "member reports: …one report, of the member, open, holding nothing" \
+  "$(sql "SELECT count(*) || '|' || min(target) || '|' || bool_and(entry_id IS NULL) || '|' || min(status) || '|' || (SELECT count(*) FROM media_report_holds WHERE report_id = '$MR_REPORT') FROM entry_reports WHERE bond_id = '$MR_BOND'")" "1|MEMBER|true|OPEN|0"
+expect "member reports: the reported member reads the bond, after" 200 "\"id\":\"$MR_BOND\"" -- "$API/bonds/$MR_BOND" -H "Authorization: Bearer $MR_A"
+is "member reports: …the reported member's GET /bonds/{id} is byte for byte what it was" "$LAST_BODY" "$MR_BOND_BEFORE"
+is "member reports: …and its ETag" "$(tag)" "$MR_BOND_TAG_BEFORE"
+case "$MR_BOND_TAG_BEFORE" in '"'*'"') pass "member reports: …which is a real ETag ($MR_BOND_TAG_BEFORE)";; *) fail "member reports: the bond's ETag" "got '$MR_BOND_TAG_BEFORE'";; esac
+expect "member reports: the reported member reads today, after" 200 '"myEntry"' -- "$API/bonds/$MR_BOND/today" -H "Authorization: Bearer $MR_A"
+is "member reports: …the reported member's GET /today is byte for byte what it was" "$LAST_BODY" "$MR_TODAY_BEFORE"
+is "member reports: …and its ETag" "$(tag)" "$MR_TODAY_TAG_BEFORE"
+expect "member reports: the reporter blocks the reported member" 204 '' -- -X POST "$API/bonds/$MR_BOND/block" -H "Authorization: Bearer $MR_B" -d '{"withdrawEntries":false}'
+expect "a member report after a block is 201" 201 '"reason":"VIOLENCE_OR_SELF_HARM"' -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_B" -H "Idempotency-Key: $(new_key)" -d '{"reason":"VIOLENCE_OR_SELF_HARM"}'
+MR_AFTER_BLOCK="$(printf '%s' "$LAST_BODY" | jget id)"
+if docker compose exec -T postgres true >/dev/null 2>&1; then
+  MR_LIST="$(reports list 2>&1)"
+  case "$MR_LIST" in *"$MR_REPORT"$'\t'HARASSMENT$'\t'MEMBER$'\t-\t'*$'\t'0$'\t't*) pass "member reports: the operator's list shows the member report, naming no entry and holding nothing";; *) fail "member reports: list" "${MR_LIST:0:400}";; esac
+  MR_OUT="$(reports dismiss "$MR_REPORT" "smoke: dismissed" 2>&1)" && MR_OUT2="$(reports dismiss "$MR_AFTER_BLOCK" "smoke: dismissed" 2>&1)" \
+    && pass "the operator dismisses the member reports" || fail "the operator dismisses the member reports" "$MR_OUT ${MR_OUT2:-}"
+else
+  skip "member reports: the operator's queue (psql not reachable through docker compose)"
+fi
+if grep -q "smoke-fake-member-report-detail" "$MOYI_LOG"; then fail "the member report's detail is in no log line" "it is in $MOYI_LOG"; else pass "the member report's detail is in no log line"; fi
 flush_buckets
 
 echo; echo "support — a message to a person, acknowledged without its words (FR-102, ADR-0057)"

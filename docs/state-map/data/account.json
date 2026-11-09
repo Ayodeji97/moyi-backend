@@ -113,7 +113,7 @@
     "from": "ANONYMOUS",
     "action": "POST /api/v1/auth/verify-email",
     "actor": "you",
-    "when": "",
+    "when": "a token is sent",
     "guards": [],
     "outcome": "refused",
     "to": "ANONYMOUS",
@@ -124,6 +124,24 @@
     "evidence": "test",
     "evidenceRef": "EmailVerificationEndpointTest#a token that was never issued is 422, not 500, and is not echoed",
     "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerifyEmail.kt#val token = tokens.findByHash(hash, VerificationPurpose.EMAIL_VERIFICATION) ?: throw VerificationTokenInvalidException()"
+  },
+  {
+    "id": "account-anonymous-verify-code",
+    "region": "account",
+    "from": "ANONYMOUS",
+    "action": "POST /api/v1/auth/verify-email",
+    "actor": "you",
+    "when": "an email and a code are sent",
+    "guards": [],
+    "outcome": "refused",
+    "to": "ANONYMOUS",
+    "status": 422,
+    "code": "VERIFICATION_TOKEN_INVALID",
+    "reason": "The address has no account, so no code is held for it. The answer is the same status, code and bytes (but the traceId) as a wrong code for an address that has one, and does the same work: one lookup of the address, one locking read, one keyed hash, one comparison, one update that touches nothing. Neither the address nor the code is echoed back.",
+    "rule": "#135, ADR-0018 (amended 2026-11-08), ADR-0015",
+    "evidence": "smoke",
+    "evidenceRef": "an unknown address is the same bytes as a wrong code",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerifyEmail.kt#if (verified != true) throw VerificationCodeRejectedException()"
   },
   {
     "id": "account-pending-verify",
@@ -180,6 +198,42 @@
     "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerifyEmail.kt#val token = tokens.findByHash(hash, VerificationPurpose.EMAIL_VERIFICATION) ?: throw VerificationTokenInvalidException()"
   },
   {
+    "id": "account-pending-verify-code",
+    "region": "account",
+    "from": "PENDING_VERIFICATION",
+    "action": "POST /api/v1/auth/verify-email",
+    "actor": "you",
+    "when": "an email and a code are sent, and the code is the one in this account's newest verification email: under 15 minutes old, fewer than 5 wrong codes tried against it, and neither it nor its link used",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ACTIVE_SIGNED_OUT",
+    "status": 200,
+    "code": null,
+    "reason": "The code and the link beside it are one credential on one row, so both are spent; the address is marked verified and the account becomes ACTIVE, and every other live link is deleted, as by the link. 200 with an empty body; verifying does not sign you in.",
+    "rule": "#135, ADR-0018 (amended 2026-11-08)",
+    "evidence": "smoke",
+    "evidenceRef": "the code verifies by address: 200, empty body",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerifyEmail.kt#val accepted = codes.check(email, VerificationPurpose.EMAIL_VERIFICATION, code, now)"
+  },
+  {
+    "id": "account-pending-verify-code-refused",
+    "region": "account",
+    "from": "PENDING_VERIFICATION",
+    "action": "POST /api/v1/auth/verify-email",
+    "actor": "you",
+    "when": "an email and a code are sent, and the code is anything else: wrong, from an older email, past its 15 minutes, burned by 5 wrong ones, or a password-reset code",
+    "guards": [],
+    "outcome": "refused",
+    "to": "PENDING_VERIFICATION",
+    "status": 422,
+    "code": "VERIFICATION_TOKEN_INVALID",
+    "reason": "One answer for every reason, and never 410, because the person typed an address and a 410 would say it has an account. A wrong code is counted against the code held, under a row lock; the fifth burns it, and then even the right code is refused. Ask for a new email: it carries a new code and retires this one. The link in the email is not burned with its code and still works.",
+    "rule": "#135, ADR-0018 (amended 2026-11-08)",
+    "evidence": "smoke",
+    "evidenceRef": "the right code after five wrong ones is refused: the code is burned",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerificationCodeCheck.kt#tokens.recordWrongCode(held?.id ?: NO_TOKEN)"
+  },
+  {
     "id": "account-active-verify-spent",
     "region": "account",
     "from": "ACTIVE_SIGNED_OUT",
@@ -214,6 +268,24 @@
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerifyEmail.kt#val retired = tokens.deleteLive(user.id, VerificationPurpose.EMAIL_VERIFICATION, now)"
+  },
+  {
+    "id": "account-active-verify-code",
+    "region": "account",
+    "from": "ACTIVE_SIGNED_OUT",
+    "action": "POST /api/v1/auth/verify-email",
+    "actor": "you",
+    "when": "an email and a code are sent",
+    "guards": [],
+    "outcome": "refused",
+    "to": "ACTIVE_SIGNED_OUT",
+    "status": 422,
+    "code": "VERIFICATION_TOKEN_INVALID",
+    "reason": "A verified account holds no live verification code: the one used is spent, and verifying deleted the rest. The same one answer as for an address with no account.",
+    "rule": "#135, ADR-0018 (amended 2026-11-08)",
+    "evidence": "smoke",
+    "evidenceRef": "a used code is refused, and so is its link",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerifyEmail.kt#if (verified != true) throw VerificationCodeRejectedException()"
   },
   {
     "id": "account-signed-in-verify",
@@ -268,6 +340,24 @@
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerifyEmail.kt#val token = tokens.findByHash(hash, VerificationPurpose.EMAIL_VERIFICATION) ?: throw VerificationTokenInvalidException()"
+  },
+  {
+    "id": "account-signed-in-verify-code",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "POST /api/v1/auth/verify-email",
+    "actor": "you",
+    "when": "no Authorization header is sent, or the access token it carries is accepted, and an email and a code are sent",
+    "guards": [],
+    "outcome": "ok",
+    "to": "SIGNED_IN",
+    "status": 200,
+    "code": null,
+    "reason": "As signed out: a live code for this account's address verifies it while you stay signed in (200), and any other code is the one 422 VERIFICATION_TOKEN_INVALID. Verifying needs no access token.",
+    "rule": "#135, ADR-0018 (amended 2026-11-08)",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerifyEmail.kt#val accepted = codes.check(email, VerificationPurpose.EMAIL_VERIFICATION, code, now)"
   },
   {
     "id": "account-anonymous-resend",
@@ -1649,7 +1739,7 @@
     "rule": "ADR-0021 §2",
     "evidence": "smoke",
     "evidenceRef": "a never-issued refresh token is 401 REFRESH_TOKEN_INVALID",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#val found = hash?.let(tokens::findByHash) ?: return@execute Outcome.Invalid"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#val found = hash?.let(tokens::findRefByHash) ?: return@execute Outcome.Invalid"
   },
   {
     "id": "session-valid-refresh",
@@ -1667,7 +1757,25 @@
     "rule": "FR-003, ADR-0021 §1",
     "evidence": "smoke",
     "evidenceRef": "refresh rotates: 200 with a new pair",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#if (tokens.rotate(previous.id, successor.id, now)) {"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#issueNext(previous, now) { successor -> tokens.rotate(previous.id, successor, now) }"
+  },
+  {
+    "id": "session-valid-refresh-grace-retry",
+    "region": "account.session",
+    "from": "ACCESS_VALID",
+    "action": "POST /api/v1/auth/refresh",
+    "actor": "you",
+    "when": "you send a refresh token of this session that was exchanged less than 30 seconds ago, for a newer one not yet used",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ACCESS_VALID",
+    "status": 200,
+    "code": null,
+    "reason": "A refresh whose answer was lost: the token was already exchanged less than 30 seconds ago (counted from that first exchange; a retry does not extend it), and the newer token it was exchanged for has not been used. It is exchanged again: the normal 200 with a new pair in the same session, and the newer token nobody received is cancelled. Nothing is ended and nobody is emailed. The cancelled token, if it does come back, is a reuse (see that row).",
+    "rule": "ADR-0021 §3 (amended 2026-11-08), issue #136",
+    "evidence": "smoke",
+    "evidenceRef": "a second refresh of the same token within 30 s is 200 with a new pair",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#tokens.void(unused.id, now) && tokens.repoint(previous.id, unused.id, successor)"
   },
   {
     "id": "session-valid-refresh-reuse",
@@ -1675,17 +1783,17 @@
     "from": "ACCESS_VALID",
     "action": "POST /api/v1/auth/refresh",
     "actor": "you",
-    "when": "you send a refresh token of this session that was already exchanged for a newer one",
+    "when": "you send a refresh token of this session that was already exchanged for a newer one, more than 30 seconds after that exchange, or after the newer one was itself used; or you send a newer token that a retry of the older one replaced before it was used",
     "guards": [],
     "outcome": "refused",
     "to": "ACCESS_VALID",
     "status": 401,
     "code": "TOKEN_REUSE_DETECTED",
-    "reason": "An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. There is no grace period: two refreshes of one token at the same moment let one through and treat the other as this.",
-    "rule": "ADR-0021 §2, §3",
+    "reason": "An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. The one exception is the grace retry (its own row): within 30 seconds of the exchange, while the newer token is still unused. A newer token that such a retry replaced is never retried in its turn: coming back, it is this, so a thief who replayed inside the window is still caught when the owner next refreshes.",
+    "rule": "ADR-0021 §2, §3 (amended 2026-11-08)",
     "evidence": "smoke",
-    "evidenceRef": "presenting the rotated token again is 401 TOKEN_REUSE_DETECTED",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#previous.rotatedAt != null -> reuse(previous, now)"
+    "evidenceRef": "presenting the rotated token after its successor was used is 401 TOKEN_REUSE_DETECTED",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#if (!previous.admitsRetry(unused, now, properties.graceWindow)) return reuse(previous, now)"
   },
   {
     "id": "session-expired-refresh",
@@ -1703,7 +1811,25 @@
     "rule": "FR-003, ADR-0021 §1",
     "evidence": "test",
     "evidenceRef": "SessionsEndpointTest#a refresh moves the session's last seen, and the new access token still marks it current",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#if (tokens.rotate(previous.id, successor.id, now)) {"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#issueNext(previous, now) { successor -> tokens.rotate(previous.id, successor, now) }"
+  },
+  {
+    "id": "session-expired-refresh-grace-retry",
+    "region": "account.session",
+    "from": "ACCESS_EXPIRED",
+    "action": "POST /api/v1/auth/refresh",
+    "actor": "you",
+    "when": "no Authorization header is sent, and you send a refresh token of this session that was exchanged less than 30 seconds ago, for a newer one not yet used",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ACCESS_VALID",
+    "status": 200,
+    "code": null,
+    "reason": "A refresh whose answer was lost: the token was already exchanged less than 30 seconds ago (counted from that first exchange; a retry does not extend it), and the newer token it was exchanged for has not been used. It is exchanged again: the normal 200 with a new pair in the same session, and the newer token nobody received is cancelled. Nothing is ended and nobody is emailed. The cancelled token, if it does come back, is a reuse (see that row).",
+    "rule": "ADR-0021 §3 (amended 2026-11-08), issue #136",
+    "evidence": "test",
+    "evidenceRef": "RefreshGraceWindowTest#a retry of the rotated token inside the window gets a new pair, voids the unused successor, and emails nobody",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#tokens.void(unused.id, now) && tokens.repoint(previous.id, unused.id, successor)"
   },
   {
     "id": "session-expired-refresh-reuse",
@@ -1711,17 +1837,17 @@
     "from": "ACCESS_EXPIRED",
     "action": "POST /api/v1/auth/refresh",
     "actor": "you",
-    "when": "no Authorization header is sent, and you send a refresh token of this session that was already exchanged for a newer one",
+    "when": "no Authorization header is sent, and you send a refresh token of this session that was already exchanged for a newer one, more than 30 seconds after that exchange, or after the newer one was itself used; or you send a newer token that a retry of the older one replaced before it was used",
     "guards": [],
     "outcome": "refused",
     "to": "ACCESS_EXPIRED",
     "status": 401,
     "code": "TOKEN_REUSE_DETECTED",
-    "reason": "An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. There is no grace period: two refreshes of one token at the same moment let one through and treat the other as this.",
-    "rule": "ADR-0021 §2, §3",
-    "evidence": "never-run",
-    "evidenceRef": "",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#previous.rotatedAt != null -> reuse(previous, now)"
+    "reason": "An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. The one exception is the grace retry (its own row): within 30 seconds of the exchange, while the newer token is still unused. A newer token that such a retry replaced is never retried in its turn: coming back, it is this, so a thief who replayed inside the window is still caught when the owner next refreshes.",
+    "rule": "ADR-0021 §2, §3 (amended 2026-11-08)",
+    "evidence": "test",
+    "evidenceRef": "RefreshGraceWindowTest#a thief who replays inside the window is caught when the voided successor comes back",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#if (!previous.admitsRetry(unused, now, properties.graceWindow)) return reuse(previous, now)"
   },
   {
     "id": "session-ended-refresh-revoked",
@@ -1775,7 +1901,7 @@
     "rule": "ADR-0021 §2",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#previous.rotatedAt != null -> reuse(previous, now)"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#if (!previous.admitsRetry(unused, now, properties.graceWindow)) return reuse(previous, now)"
   },
   {
     "id": "session-none-logout",
@@ -3125,7 +3251,7 @@
     "from": "NONE",
     "action": "POST /api/v1/auth/reset-password",
     "actor": "you",
-    "when": "",
+    "when": "a token is sent",
     "guards": [],
     "outcome": "refused",
     "to": "NONE",
@@ -3138,22 +3264,58 @@
     "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#val existing = tokens.findByHash(hash, VerificationPurpose.PASSWORD_RESET) ?: throw PasswordResetTokenInvalidException()"
   },
   {
+    "id": "reset-none-reset-code",
+    "region": "account.reset",
+    "from": "NONE",
+    "action": "POST /api/v1/auth/reset-password",
+    "actor": "you",
+    "when": "an email and a code are sent",
+    "guards": [],
+    "outcome": "refused",
+    "to": "NONE",
+    "status": 422,
+    "code": "PASSWORD_RESET_TOKEN_INVALID",
+    "reason": "No reset code is held for the address (no account, or none asked for). The same bytes as a wrong code for an account that holds one.",
+    "rule": "#135, ADR-0022 (amended 2026-11-08)",
+    "evidence": "smoke",
+    "evidenceRef": "reset by code for an unknown address",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#?: throw PasswordResetCodeRejectedException()"
+  },
+  {
     "id": "reset-requested-reset",
     "region": "account.reset",
     "from": "REQUESTED",
     "action": "POST /api/v1/auth/reset-password",
     "actor": "you",
-    "when": "",
+    "when": "a token is sent",
     "guards": [],
     "outcome": "ok",
     "to": "USED",
     "status": 200,
     "code": null,
-    "reason": "The link is spent and the password replaced. In the same transaction any lockout is cleared, every session of the account is ended and every access token stops being accepted; afterwards the address is emailed that the password changed. The account's other live reset links are not cancelled and stay usable until their own hour ends. The new password is checked before the link is looked at, so a refused password does not spend it.",
+    "reason": "The link is spent and the password replaced. In the same transaction any lockout is cleared, every session of the account is ended and every access token stops being accepted; afterwards the address is emailed that the password changed. The account's other live reset links are not cancelled and stay usable until their own hour ends; the code in the newest reset email is taken back. The new password is checked before the link is looked at, so a refused password does not spend it.",
     "rule": "FR-004, T-17, ADR-0022 §4",
     "evidence": "test",
     "evidenceRef": "LoginEndpointTest#forgot and reset, through the emailed link, change the password and sign every device out",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#if (!tokens.consume(tokenHash, now)) throw PasswordResetTokenExpiredException()"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#if (!tokens.consume(token.id, now)) return false"
+  },
+  {
+    "id": "reset-requested-reset-code",
+    "region": "account.reset",
+    "from": "REQUESTED",
+    "action": "POST /api/v1/auth/reset-password",
+    "actor": "you",
+    "when": "an email and a code are sent, and the code is the one in the newest reset email: under 15 minutes old, fewer than 5 wrong codes tried, and neither it nor its link used",
+    "guards": [],
+    "outcome": "ok",
+    "to": "USED",
+    "status": 200,
+    "code": null,
+    "reason": "As by the link: the row is spent (the link beside the code with it), the password replaced, every session ended and the address emailed. A wrong, older, expired, burned or used code is the one 422 PASSWORD_RESET_TOKEN_INVALID, never 410.",
+    "rule": "#135, ADR-0022 (amended 2026-11-08)",
+    "evidence": "smoke",
+    "evidenceRef": "reset by address and code is 200",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#if (!apply.apply(accepted.token, passwordHash, clock.instant())) throw PasswordResetCodeRejectedException()"
   },
   {
     "id": "reset-used-reset",
@@ -3171,7 +3333,7 @@
     "rule": "FR-004, ADR-0022 §1",
     "evidence": "smoke",
     "evidenceRef": "the same link again is 410 PASSWORD_RESET_TOKEN_EXPIRED",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#if (!existing.isLive(clock.instant())) throw PasswordResetTokenExpiredException()"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#if (!applied) throw PasswordResetTokenExpiredException()"
   },
   {
     "id": "reset-expired-reset",
@@ -3189,7 +3351,7 @@
     "rule": "FR-004, ADR-0022 §1",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#if (!existing.isLive(clock.instant())) throw PasswordResetTokenExpiredException()"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#if (!applied) throw PasswordResetTokenExpiredException()"
   },
   {
     "id": "reset-requested-expires",

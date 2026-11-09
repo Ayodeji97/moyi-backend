@@ -61,39 +61,45 @@ curl -X POST "$API/auth/register" -H 'Content-Type: application/json' -d "{\"ema
 
 ### POST /auth/verify-email
 
-verify your email
+verify your email, by the link or by the code
 
 **Needs:** no access token.
 
 - Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)
-- Content-Type (application/json. The token travels in the body of a POST, never in a GET: a GET on this path without a bearer is the everywhere 401, so a mail scanner that fetches the link cannot spend it. No rate limit of its own)
+- Content-Type (application/json. The token, or the email address and the six-digit code from the same email, travel in the body of a POST, never in a GET: a GET on this path without a bearer is the everywhere 401, so a mail scanner that fetches the link cannot spend it)
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Twenty an hour per client address, verify-email and reset-password together, links and codes alike, spent before the body is checked. Beside it, for an email and a code only: ten a day per email address as typed, both routes together, one back every 2.4 hours, counted for every address whether or not it has an account: the eleventh is 429 with Retry-After)
 
 **Try it:**
 
 ```sh
-curl -X POST "$API/auth/verify-email" -H 'Content-Type: application/json' -d "{\"token\": \"$VERIFY_TOKEN\"}"
+curl -X POST "$API/auth/verify-email" -H 'Content-Type: application/json' -d "{\"token\": \"$VERIFY_TOKEN\"}"   # or -d "{\"email\": \"$EMAIL\", \"code\": \"$CODE\"}"
 ```
 
 #### Every answer
 
 | Region | In | When | Answer | Why | Rule | Evidence |
 |---|---|---|---|---|---|---|
-| `account` | `ANONYMOUS` |  | 422 `VERIFICATION_TOKEN_INVALID` | With no account there is no link, so whatever is presented matches nothing. The token is looked up by its hash and is never echoed back. | FR-002, ADR-0018 §4 | test |
+| `account` | `ANONYMOUS` | a token is sent | 422 `VERIFICATION_TOKEN_INVALID` | With no account there is no link, so whatever is presented matches nothing. The token is looked up by its hash and is never echoed back. | FR-002, ADR-0018 §4 | test |
+| `account` | `ANONYMOUS` | an email and a code are sent | 422 `VERIFICATION_TOKEN_INVALID` | The address has no account, so no code is held for it. The answer is the same status, code and bytes (but the traceId) as a wrong code for an address that has one, and does the same work: one lookup of the address, one locking read, one keyed hash, one comparison, one update that touches nothing. Neither the address nor the code is echoed back. | #135, ADR-0018 (amended 2026-11-08), ADR-0015 | smoke |
 | `account` | `PENDING_VERIFICATION` | the token is one of this account's verification links, under 24 hours old and not yet used | 200 → `ACTIVE_SIGNED_OUT` | The link is spent, the address is marked verified and the account becomes ACTIVE. Any other live link of this account is deleted in the same transaction. The answer is 200 with an empty body; verifying does not sign you in. | FR-002, ADR-0018 §3 | test |
 | `account` | `PENDING_VERIFICATION` | the token is one of this account's verification links, more than 24 hours old | 410 `VERIFICATION_TOKEN_EXPIRED` | The link was real and its 24 hours have passed. Nothing changes; ask for a new one with resend-verification. (a test asserts the 410 and that nothing changed, not the code) | FR-002, ADR-0018 §4 | never-run |
 | `account` | `PENDING_VERIFICATION` | the token matches no verification link on record: mistyped, cut short, never issued, or a password-reset token | 422 `VERIFICATION_TOKEN_INVALID` | The lookup is by hash and by purpose, so a token that was never a verification link is not recognised, a reset token included. Nothing changes. | FR-002, ADR-0018 §4 | smoke |
+| `account` | `PENDING_VERIFICATION` | an email and a code are sent, and the code is the one in this account's newest verification email: under 15 minutes old, fewer than 5 wrong codes tried against it, and neither it nor its link used | 200 → `ACTIVE_SIGNED_OUT` | The code and the link beside it are one credential on one row, so both are spent; the address is marked verified and the account becomes ACTIVE, and every other live link is deleted, as by the link. 200 with an empty body; verifying does not sign you in. | #135, ADR-0018 (amended 2026-11-08) | smoke |
+| `account` | `PENDING_VERIFICATION` | an email and a code are sent, and the code is anything else: wrong, from an older email, past its 15 minutes, burned by 5 wrong ones, or a password-reset code | 422 `VERIFICATION_TOKEN_INVALID` | One answer for every reason, and never 410, because the person typed an address and a 410 would say it has an account. A wrong code is counted against the code held, under a row lock; the fifth burns it, and then even the right code is refused. Ask for a new email: it carries a new code and retires this one. The link in the email is not burned with its code and still works. | #135, ADR-0018 (amended 2026-11-08) | smoke |
 | `account` | `ACTIVE_SIGNED_OUT` | the token is the link that verified this account, or one of its links that had already passed its 24 hours by then | 410 `VERIFICATION_TOKEN_EXPIRED` | A used link and an expired one get the same answer, because what to do next is the same. An account that is verified is issued no new links, so no live one can exist here. The probe cited presents the used link; that an already expired one still answers 410 afterwards is read from the code, which deletes only the links that were live. | FR-002, ADR-0018 §4 | smoke |
 | `account` | `ACTIVE_SIGNED_OUT` | the token is anything else: a link that was still live when another one verified the account, or a token that matches no verification link | 422 `VERIFICATION_TOKEN_INVALID` | The other links that were live at the moment of verifying were deleted, so one of them is now simply not recognised. Nothing changes. (a test asserts the 422 for a retired link, not the code) | FR-002, ADR-0018 §6 | never-run |
+| `account` | `ACTIVE_SIGNED_OUT` | an email and a code are sent | 422 `VERIFICATION_TOKEN_INVALID` | A verified account holds no live verification code: the one used is spent, and verifying deleted the rest. The same one answer as for an address with no account. | #135, ADR-0018 (amended 2026-11-08) | smoke |
 | `account` | `SIGNED_IN` | no Authorization header is sent, or the access token it carries is accepted, and the token is one of this account's verification links, under 24 hours old and not yet used (so your email is not yet verified) | 200 stays | The address is marked verified and the account becomes ACTIVE while you stay signed in. Your tokens keep working unchanged: nothing about the account's status is inside them, so the next GET /me says emailVerified true and creating a bond is no longer refused. | FR-002, ADR-0018 §3 | never-run |
 | `account` | `SIGNED_IN` | no Authorization header is sent, or the access token it carries is accepted, and the token is one of this account's verification links that is more than 24 hours old or was already used | 410 `VERIFICATION_TOKEN_EXPIRED` | The same answer as when signed out: verifying needs no access token. Nothing changes. | FR-002, ADR-0018 §4 | never-run |
 | `account` | `SIGNED_IN` | no Authorization header is sent, or the access token it carries is accepted, and the token is anything else: a link deleted when another one verified the account, or a token that matches no verification link | 422 `VERIFICATION_TOKEN_INVALID` | The same answer as when signed out: verifying needs no access token. Nothing changes. | FR-002, ADR-0018 §4 | never-run |
+| `account` | `SIGNED_IN` | no Authorization header is sent, or the access token it carries is accepted, and an email and a code are sent | 200 stays | As signed out: a live code for this account's address verifies it while you stay signed in (200), and any other code is the one 422 VERIFICATION_TOKEN_INVALID. Verifying needs no access token. | #135, ADR-0018 (amended 2026-11-08) | never-run |
 | `account` | `SIGNED_IN` | an Authorization header carries an access token that is no longer accepted | 401 `UNAUTHENTICATED` | This route needs no access token, but a token that is sent is still checked before the controller runs, and one that is expired, cancelled or unreadable is refused there: nothing else happens. Send no Authorization header to this route. Signed in is where this bites: a client that adds its access token to every request sends an expired one here. (read from Spring Security's BearerTokenAuthenticationFilter and SecurityConfiguration; nothing runs it) | ADR-0019 | never-run |
 
 #### Whatever the state
 
 | Status | Code | Why | Evidence |
 |---|---|---|---|
-| 422 | `VALIDATION_FAILED` | token is blank or longer than 256 characters. It is not otherwise shape-checked: a mangled token is the state answer, 422 VERIFICATION_TOKEN_INVALID. | smoke |
+| 422 | `VALIDATION_FAILED` | The body is not exactly one of a token, or an email and a code: neither, both, a blank token, or an address without a code (one violation on tokenOrEmailAndCode). Or the token is over 256 characters, the email is not shaped like an address, or the code is not six ASCII digits (errors code VALID_VERIFICATION_CODE). A token is not otherwise shape-checked: a mangled token is the state answer, 422 VERIFICATION_TOKEN_INVALID. Nothing here looks an address up or counts against a code. | smoke |
 
 ### POST /auth/resend-verification
 
@@ -198,9 +204,11 @@ curl -X POST "$API/auth/refresh" -H 'Content-Type: application/json' -d "{\"refr
 |---|---|---|---|---|---|---|
 | `account.session` | `NO_SESSION` |  | 401 `REFRESH_TOKEN_INVALID` | The refresh token matches none on record. Refresh needs no access token: the refresh token is the credential. Sign in again. | ADR-0021 §2 | smoke |
 | `account.session` | `ACCESS_VALID` | you send the session's current refresh token | 200 stays | The token is exchanged: a new access token good for 15 minutes and a new refresh token good for 30 days, in the same session. The old refresh token is marked as used and must not be sent again. Nothing requires the access token to have expired first, and the one you held before is accepted until its own 15 minutes end. | FR-003, ADR-0021 §1 | smoke |
-| `account.session` | `ACCESS_VALID` | you send a refresh token of this session that was already exchanged for a newer one | 401 `TOKEN_REUSE_DETECTED` | An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. There is no grace period: two refreshes of one token at the same moment let one through and treat the other as this. | ADR-0021 §2, §3 | smoke |
+| `account.session` | `ACCESS_VALID` | you send a refresh token of this session that was exchanged less than 30 seconds ago, for a newer one not yet used | 200 stays | A refresh whose answer was lost: the token was already exchanged less than 30 seconds ago (counted from that first exchange; a retry does not extend it), and the newer token it was exchanged for has not been used. It is exchanged again: the normal 200 with a new pair in the same session, and the newer token nobody received is cancelled. Nothing is ended and nobody is emailed. The cancelled token, if it does come back, is a reuse (see that row). | ADR-0021 §3 (amended 2026-11-08), issue #136 | smoke |
+| `account.session` | `ACCESS_VALID` | you send a refresh token of this session that was already exchanged for a newer one, more than 30 seconds after that exchange, or after the newer one was itself used; or you send a newer token that a retry of the older one replaced before it was used | 401 `TOKEN_REUSE_DETECTED` | An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. The one exception is the grace retry (its own row): within 30 seconds of the exchange, while the newer token is still unused. A newer token that such a retry replaced is never retried in its turn: coming back, it is this, so a thief who replayed inside the window is still caught when the owner next refreshes. | ADR-0021 §2, §3 (amended 2026-11-08) | smoke |
 | `account.session` | `ACCESS_EXPIRED` | no Authorization header is sent, and you send the session's current refresh token | 200 → `ACCESS_VALID` | This is the way back from an expired access token, provided the expired token is not sent along: the refresh token is exchanged for a new pair in the same session, and the sessions list shows the session as seen just now. The old refresh token is marked as used and must not be sent again. | FR-003, ADR-0021 §1 | test |
-| `account.session` | `ACCESS_EXPIRED` | no Authorization header is sent, and you send a refresh token of this session that was already exchanged for a newer one | 401 `TOKEN_REUSE_DETECTED` | An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. There is no grace period: two refreshes of one token at the same moment let one through and treat the other as this. | ADR-0021 §2, §3 | never-run |
+| `account.session` | `ACCESS_EXPIRED` | no Authorization header is sent, and you send a refresh token of this session that was exchanged less than 30 seconds ago, for a newer one not yet used | 200 → `ACCESS_VALID` | A refresh whose answer was lost: the token was already exchanged less than 30 seconds ago (counted from that first exchange; a retry does not extend it), and the newer token it was exchanged for has not been used. It is exchanged again: the normal 200 with a new pair in the same session, and the newer token nobody received is cancelled. Nothing is ended and nobody is emailed. The cancelled token, if it does come back, is a reuse (see that row). | ADR-0021 §3 (amended 2026-11-08), issue #136 | test |
+| `account.session` | `ACCESS_EXPIRED` | no Authorization header is sent, and you send a refresh token of this session that was already exchanged for a newer one, more than 30 seconds after that exchange, or after the newer one was itself used; or you send a newer token that a retry of the older one replaced before it was used | 401 `TOKEN_REUSE_DETECTED` | An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. The one exception is the grace retry (its own row): within 30 seconds of the exchange, while the newer token is still unused. A newer token that such a retry replaced is never retried in its turn: coming back, it is this, so a thief who replayed inside the window is still caught when the owner next refreshes. | ADR-0021 §2, §3 (amended 2026-11-08) | test |
 | `account.session` | `ACCESS_EXPIRED` | an Authorization header carries the expired access token | 401 `UNAUTHENTICATED` | This route needs no access token, but a token that is sent is still checked before the controller runs, and one that is expired, cancelled or unreadable is refused there: nothing else happens. Send no Authorization header to this route. For refresh this is a trap: a client that attaches its access token to every request cannot refresh once that token has expired, which is exactly when it needs to. (read from Spring Security's BearerTokenAuthenticationFilter and SecurityConfiguration; nothing runs it) | ADR-0019 | never-run |
 | `account.session` | `ENDED` | no Authorization header is sent, or one whose token is still accepted, and the session was revoked: by logout, by being removed from the sessions list, by logout-all, by a password reset, or by an earlier reuse | 401 `REFRESH_TOKEN_INVALID` | Any refresh token of a revoked session, the newest or an older one, gets this answer. Revocation is checked before reuse, so presenting a stale token a second time is not a second reuse and sends no second email. Sign in again. | ADR-0021 §2 | smoke |
 | `account.session` | `ENDED` | no Authorization header is sent, or one whose token is still accepted, the session ran out, and you send its last refresh token, now more than 30 days old | 401 `REFRESH_TOKEN_INVALID` | An expired refresh token is not a reuse: nothing is revoked and nobody is emailed. Sign in again. | ADR-0021 §2 | test |
@@ -545,17 +553,18 @@ curl -X POST "$API/auth/forgot-password" -H 'Content-Type: application/json' -d 
 
 ### POST /auth/reset-password
 
-set a new password with a reset link
+set a new password with a reset link or code
 
 **Needs:** no access token.
 
 - Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)
-- Content-Type (application/json. The reset token in the body is the credential. No rate limit of its own)
+- Content-Type (application/json. The reset token, or the email address and the six-digit code from the same email, in the body are the credential)
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Twenty an hour per client address, verify-email and reset-password together, links and codes alike, spent before the body is checked. Beside it, for an email and a code only: ten a day per email address as typed, both routes together, one back every 2.4 hours, counted for every address whether or not it has an account: the eleventh is 429 with Retry-After)
 
 **Try it:**
 
 ```sh
-curl -X POST "$API/auth/reset-password" -H 'Content-Type: application/json' -d "{\"token\": \"$RESET_TOKEN\", \"password\": \"$PASSWORD\"}"
+curl -X POST "$API/auth/reset-password" -H 'Content-Type: application/json' -d "{\"token\": \"$RESET_TOKEN\", \"password\": \"$PASSWORD\"}"   # or -d "{\"email\": \"$EMAIL\", \"code\": \"$CODE\", \"password\": \"$PASSWORD\"}"
 ```
 
 #### Every answer
@@ -575,8 +584,10 @@ curl -X POST "$API/auth/reset-password" -H 'Content-Type: application/json' -d "
 | `account.session` | `ACCESS_EXPIRED` | an Authorization header carries the expired access token | 401 `UNAUTHENTICATED` | This route needs no access token, but a token that is sent is still checked before the controller runs, and one that is expired, cancelled or unreadable is refused there: nothing else happens. Send no Authorization header to this route. (read from Spring Security's BearerTokenAuthenticationFilter and SecurityConfiguration; nothing runs it) | ADR-0019 | never-run |
 | `account.session` | `ENDED` | no Authorization header is sent, or one whose token is still accepted, and the reset link is live (see the password reset) | 200 stays | The session was already over. If its access token was still being accepted, it stops being accepted now: a reset cancels every access token issued before it. | FR-004, ADR-0022 §4 | never-run |
 | `account.session` | `ENDED` | an Authorization header carries an access token that is no longer accepted | 401 `UNAUTHENTICATED` | This route needs no access token, but a token that is sent is still checked before the controller runs, and one that is expired, cancelled or unreadable is refused there: nothing else happens. Send no Authorization header to this route. (read from Spring Security's BearerTokenAuthenticationFilter and SecurityConfiguration; nothing runs it) | ADR-0019 | never-run |
-| `account.reset` | `NONE` |  | 422 `PASSWORD_RESET_TOKEN_INVALID` | The token matches no reset link: mistyped, cut short, never issued, or a verification link, which is looked up separately. (a test asserts the 422 for a verification link sent here, not the code) | FR-004, ADR-0022 §1 | never-run |
-| `account.reset` | `REQUESTED` |  | 200 → `USED` | The link is spent and the password replaced. In the same transaction any lockout is cleared, every session of the account is ended and every access token stops being accepted; afterwards the address is emailed that the password changed. The account's other live reset links are not cancelled and stay usable until their own hour ends. The new password is checked before the link is looked at, so a refused password does not spend it. | FR-004, T-17, ADR-0022 §4 | test |
+| `account.reset` | `NONE` | a token is sent | 422 `PASSWORD_RESET_TOKEN_INVALID` | The token matches no reset link: mistyped, cut short, never issued, or a verification link, which is looked up separately. (a test asserts the 422 for a verification link sent here, not the code) | FR-004, ADR-0022 §1 | never-run |
+| `account.reset` | `NONE` | an email and a code are sent | 422 `PASSWORD_RESET_TOKEN_INVALID` | No reset code is held for the address (no account, or none asked for). The same bytes as a wrong code for an account that holds one. | #135, ADR-0022 (amended 2026-11-08) | smoke |
+| `account.reset` | `REQUESTED` | a token is sent | 200 → `USED` | The link is spent and the password replaced. In the same transaction any lockout is cleared, every session of the account is ended and every access token stops being accepted; afterwards the address is emailed that the password changed. The account's other live reset links are not cancelled and stay usable until their own hour ends; the code in the newest reset email is taken back. The new password is checked before the link is looked at, so a refused password does not spend it. | FR-004, T-17, ADR-0022 §4 | test |
+| `account.reset` | `REQUESTED` | an email and a code are sent, and the code is the one in the newest reset email: under 15 minutes old, fewer than 5 wrong codes tried, and neither it nor its link used | 200 → `USED` | As by the link: the row is spent (the link beside the code with it), the password replaced, every session ended and the address emailed. A wrong, older, expired, burned or used code is the one 422 PASSWORD_RESET_TOKEN_INVALID, never 410. | #135, ADR-0022 (amended 2026-11-08) | smoke |
 | `account.reset` | `USED` |  | 410 `PASSWORD_RESET_TOKEN_EXPIRED` | A reset link works once. Used and expired get the same answer; ask for a new link. | FR-004, ADR-0022 §1 | smoke |
 | `account.reset` | `EXPIRED` |  | 410 `PASSWORD_RESET_TOKEN_EXPIRED` | The link's hour has passed. Nothing changes; ask for a new link. | FR-004, ADR-0022 §1 | never-run |
 
@@ -584,8 +595,8 @@ curl -X POST "$API/auth/reset-password" -H 'Content-Type: application/json' -d "
 
 | Status | Code | Why | Evidence |
 |---|---|---|---|
-| 422 | `VALIDATION_FAILED` | token is blank or over 256 characters; or password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED). This is checked before the link is looked at, so a refused password does not spend the link. (the tests and the smoke script assert the status and the field's code, NOT_BREACHED, not VALIDATION_FAILED) | never-run |
-| 503 | `HASHING_CAPACITY_EXCEEDED` | Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. The link is not spent. (the test of this answer drives register, not a reset) | never-run |
+| 422 | `VALIDATION_FAILED` | The body is not exactly one of a token, or an email and a code (one violation on tokenOrEmailAndCode); or the token is over 256 characters, the email is not shaped like an address, or the code is not six ASCII digits (VALID_VERIFICATION_CODE); or password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED). This is checked before the link or code is looked at, so a refused password spends neither and counts against no code. (the tests and the smoke script assert the status and the field's code, NOT_BREACHED, not VALIDATION_FAILED) | never-run |
+| 503 | `HASHING_CAPACITY_EXCEEDED` | Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. The link or the code is not spent. (the test of this answer drives register, not a reset) | never-run |
 
 ## Bond
 
@@ -1406,6 +1417,49 @@ curl "$API/bonds/$BOND/milestones" -H "Authorization: Bearer $TOKEN"
 | Status | Code | Why | Evidence |
 |---|---|---|---|
 | 404 | `NOT_FOUND` | The bond does not exist, the id is not a UUID, or you are not a member. These cases share one answer. | smoke |
+
+### POST /bonds/{bondId}/members/other/report
+
+report the other member of your bond to a person
+
+**Needs:** an access token.
+
+- Idempotency-Key (required. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the same report, and nothing filed twice)
+- Content-Type (application/json, the entry report's body: {"reason": "NON_CONSENSUAL", "MINOR_SEXUAL_CONTENT", "VIOLENCE_OR_SELF_HARM", "HARASSMENT" or "OTHER", "detail": optional, at most 500 characters}. The body is checked before the bond is looked at)
+
+**Try it:**
+
+```sh
+curl -X POST "$API/bonds/$BOND/members/other/report" -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: $(uuidgen)" -H 'Content-Type: application/json' -d '{"reason": "HARASSMENT"}'
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
+| `bond` | `PENDING_MEMBER` |  | 404 `NOT_FOUND` | Nobody has joined, so there is nobody to report. The same answer, byte for byte, as a bond you are not in. | FR-100, ADR-0053 (amended for #127), doc 26 §2.2 | smoke |
+| `bond` | `ACTIVE` |  | 201 stays | Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. | FR-100, ADR-0053 (amended for #127), doc 26 §2.2 | smoke |
+| `bond` | `PENDING_DELETION` |  | 201 stays | Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. A countdown to deletion does not refuse it: a report is never contact. | FR-100, ADR-0053 (amended for #127), doc 26 §2.2 | never-run |
+| `bond` | `ARCHIVED` |  | 201 stays | Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. Ended by a leave or a block, by either of you: a report is never contact, and the member who has just blocked may need it most. | FR-100, ADR-0053 (amended for #127), doc 26 §2.2 | smoke |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 422 | `VALIDATION_FAILED` | reason is missing, null, or not one of the five names exactly as written; or detail is blank, longer than 500 characters, or holds a NUL or an unpaired surrogate. Nothing is filed. | smoke |
+| 422 | `VALIDATION_FAILED` | The Idempotency-Key header is missing or blank, is longer than 255 characters, or holds something other than visible ASCII. Nothing is filed. | test |
+| 422 | `IDEMPOTENCY_KEY_REUSED` | This Idempotency-Key was already used by you for a different request: another body, or another bond or route. | test |
+| 409 | `IDEMPOTENCY_KEY_IN_FLIGHT` | A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued. | never-run |
+| 413 | `MALFORMED_REQUEST` | The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is filed. | never-run |
+| 429 | `RATE_LIMITED` | reports:create:user, ten a day, shared with the entry report route: one queue, one person reading it. Refused attempts count. | test |
+
+#### The contract is silent on
+
+| Status | What the code does |
+|---|---|
+| 409 | IDEMPOTENCY_KEY_IN_FLIGHT, when a request with the same Idempotency-Key is still being processed: the shared idempotency interceptor's answer, which springdoc does not read off this route. |
+| 413 | MALFORMED_REQUEST, for a body over one mebibyte: the shared idempotency interceptor refuses it before it is read, which springdoc does not read off this route. |
 
 ## Day
 

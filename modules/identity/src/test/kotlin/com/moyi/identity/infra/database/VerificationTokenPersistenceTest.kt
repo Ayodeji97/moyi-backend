@@ -2,6 +2,7 @@ package com.moyi.identity.infra.database
 
 import com.moyi.common.testing.DeterministicIdGenerator
 import com.moyi.common.testing.IntegrationTest
+import com.moyi.identity.domain.CodeHash
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.User
 import com.moyi.identity.domain.UserId
@@ -144,13 +145,16 @@ internal class VerificationTokenPersistenceTest(
         issuedAt: Instant,
     ) = inTransaction {
         tokens.insert(
-            VerificationToken.issue(
-                id = ids.timeOrdered(),
-                userId = userId,
-                purpose = VerificationPurpose.EMAIL_VERIFICATION,
-                secret = secret,
-                now = issuedAt,
-            ),
+            VerificationToken
+                .issue(
+                    id = ids.timeOrdered(),
+                    userId = userId,
+                    purpose = VerificationPurpose.EMAIL_VERIFICATION,
+                    secret = secret,
+                    codeHash = CodeHash("unused"),
+                    codeTtl = Duration.ofMinutes(15),
+                    now = issuedAt,
+                ).copy(codeHash = null, codeExpiresAt = null),
         )
     }
 

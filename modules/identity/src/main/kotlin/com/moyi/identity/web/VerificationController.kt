@@ -3,10 +3,10 @@ package com.moyi.identity.web
 import com.moyi.common.security.ratelimit.RateLimitBucket
 import com.moyi.common.security.ratelimit.RateLimited
 import com.moyi.identity.domain.Email
-import com.moyi.identity.domain.VerificationSecret
 import com.moyi.identity.service.ResendVerification
 import com.moyi.identity.service.VerifyEmail
 import jakarta.validation.Valid
+import jakarta.validation.constraints.AssertTrue
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
 import org.springframework.http.HttpStatus
@@ -38,12 +38,21 @@ internal class VerificationController(
     private val verifyEmail: VerifyEmail,
     private val resendVerification: ResendVerification,
 ) {
+    /**
+     * The token from the link, or `{email, code}` from the same email (#135). Twenty an hour
+     * per client address, both forms and `reset-password` together (ADR-0023, amended
+     * 2026-11-08); the code form is also ten a day per address, in the service.
+     */
     @PostMapping("/verify-email")
     @ResponseStatus(HttpStatus.OK)
+    @RateLimited(RateLimitBucket.AUTH_CODE_IP)
     fun verify(
         @Valid @RequestBody request: VerifyEmailRequest,
     ) {
-        verifyEmail.verify(VerificationSecret(request.token.trim()))
+        when (val presented = request.presented()) {
+            is PresentedCredential.Link -> verifyEmail.verify(presented.secret)
+            is PresentedCredential.Code -> verifyEmail.verify(presented.email, presented.code)
+        }
     }
 
     /**
@@ -63,18 +72,31 @@ internal class VerificationController(
 }
 
 /**
+ * The token, or the address and the code: exactly one of the two ([PresentedCredential.formOf]).
+ *
  * The token is bounded, not shape-checked: what a person presents is
  * whatever their mail client handed them, and the right answer to a mangled
  * one is 422 "not recognised" from the service, not a validation error that
  * describes the format we expect. The bound exists so that a megabyte cannot
- * be hashed on request.
+ * be hashed on request. The code *is* shape-checked, by the domain: six digits
+ * are typed, not pasted, and a wrong shape refused here costs no attempt.
  */
 internal data class VerifyEmailRequest(
-    @field:NotBlank
     @field:Size(max = MAX_TOKEN_LENGTH)
-    val token: String,
+    val token: String? = null,
+    @field:ValidEmail
+    val email: String? = null,
+    @field:ValidVerificationCode
+    val code: String? = null,
 ) {
-    override fun toString(): String = "VerifyEmailRequest(token=redacted)"
+    @Suppress("unused") // Read by Bean Validation.
+    @get:AssertTrue(message = PresentedCredential.FORM_MESSAGE)
+    private val tokenOrEmailAndCode: Boolean
+        get() = PresentedCredential.formOf(token, email, code) != null
+
+    fun presented(): PresentedCredential = PresentedCredential.of(token, email, code)
+
+    override fun toString(): String = "VerifyEmailRequest(token=redacted, code=redacted)"
 }
 
 internal data class ResendVerificationRequest(

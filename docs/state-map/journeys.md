@@ -7,7 +7,7 @@ Describes `main @ 5839d47`. Each journey is a path through the three machines, t
 ## J1: First run and pairing
 
 1. **you**: register. The account is created PENDING_VERIFICATION, with its password hash and three consent rows, and a verification link good for 24 hours is emailed after the commit. The answer is 201 with an empty body and says nothing about the account. You are not signed in by registering.
-2. **you**: verify your email. The link is spent, the address is marked verified and the account becomes ACTIVE. Any other live link of this account is deleted in the same transaction. The answer is 200 with an empty body; verifying does not sign you in.
+2. **you**: verify your email, by the link or by the code. The link is spent, the address is marked verified and the account becomes ACTIVE. Any other live link of this account is deleted in the same transaction. The answer is 200 with an empty body; verifying does not sign you in.
 3. **you**: sign in. One refusal covers a wrong password, an unknown address and a locked account, with a byte-identical body and no WWW-Authenticate, so that the answer does not say which it was. The failure is counted: the fifth in a row locks the account for one minute, and each failure after a lock has run out doubles the next lock, up to one hour. A first try, with the password mistyped.
 4. **you**: sign in. You are signed in: a new session begins, and the answer carries an access token good for 15 minutes (expiresIn 900), a refresh token good for 30 days, and the profile. The count of failed attempts is cleared.
 5. **you**: create a bond. A new bond is created with you as its owner, waiting for its second member, and with its first invite. It starts PENDING_MEMBER, not ACTIVE: nothing counts toward a streak until somebody joins. The request carries the bond's name, its kind and its anchor time zone, and here a reveal time as well, which is optional.
@@ -28,7 +28,7 @@ sequenceDiagram
     participant Job as The service, on its own schedule
     You->>API: register
     API-->>You: 201, account is PENDING_VERIFICATION
-    You->>API: verify your email
+    You->>API: verify your email, by the link or by the code
     API-->>You: 200, account is ACTIVE_SIGNED_OUT
     You->>API: sign in
     API-->>You: 401 INVALID_CREDENTIALS

@@ -209,6 +209,7 @@ internal class PushTokenEndpointTest(
         val phone = login(ADA, device = PIXEL)
         put(phone, "token-phone").status shouldBe 204
         post("/api/v1/auth/refresh", """{"refreshToken":"${phone.refreshToken}"}""").status shouldBe 200
+        clock.advance(Duration.ofMinutes(1)) // past the grace window (ADR-0021, amended 2026-11-08)
 
         val reused = post("/api/v1/auth/refresh", """{"refreshToken":"${phone.refreshToken}"}""")
 

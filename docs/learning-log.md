@@ -3010,10 +3010,6 @@ Wrong about: naming `/me`'s new body `MeResponse`. The name was already the bond
          `/me` reports the current version's row before the newest, or a rolled-back version would
          prompt for ever, re-consent writing nothing.)
 
-
-
-
-
 ## 2026-11-08 · Contract · a legal document is not a decodable one
 
 Expected: the contract was precise because it validated and the client was generated from it.
@@ -3048,6 +3044,52 @@ Reality: the idempotency record's `result_kind` CHECK is common:web's table, so 
 Wrong about: the brief's "follow how entries count length". Graphemes cannot be backed by a
          database CHECK; the report's detail already chose code points for that reason, and so
          does support.
+## 2026-11-08 · Feature · Reporting the other member, and the 404 that had to come from bond (issue #127)
+
+Expected: a second report route would need a second table, a second queue and new reasons.
+Reality: none of them. The report table takes a `target` column and the operator's commands work
+         unchanged; "How they're treating me" was already `HARASSMENT`. The one real choice was where
+         the "nobody has joined yet" 404 is made: in `gratitude` it would have restated the bond's
+         message, so `BondAccess.partnerMemberIdOf` throws the bond's own exception, and a test
+         compares its bytes with a stranger's. The review of #151 found the route's own two 404s
+         (an unreadable id, a replay of someone else's report) still hand-copying that sentence;
+         it is now one constant in `bond.api` that the guard's exception is built from too.
+Wrong about: nothing yet. Nothing the reported member reads may change, so the test reads their
+         bond and their today, bytes and ETag, before and after; the smoke does the same over HTTP.
+
+
+## 2026-11-08 · Feature · A 30-second grace window for a lost refresh answer (issue #136, ADR-0021 amended)
+
+Expected: a time check in front of the reuse branch, and a column to mark the successor that a retry
+         makes worthless.
+Reality: the column was the easy part. The voided successor had to be a reuse when it came back —
+         that is the only way a thief who replays inside the window is caught — and must never be
+         retried in its turn, or two holders could void each other's tokens for as long as they
+         kept inside the window. Both follow from marking it rotated at the instant it was voided,
+         with nothing after it.
+Wrong about: the re-read after the sessions lock. `RotateRefreshToken` looked the token up by hash,
+         took the lock, and "re-read" it by id, but the first read had made it a managed entity, so
+         the second was answered from the persistence context: the state from before the wait. A
+         refresh that waited on a revocation saw a live token, lost the compare-and-set, and called
+         it a reuse, emailing the person about a theft that never happened. The row-lock test found
+         it on its first run against the old code; the lookup now returns a projection, and the
+         read after the lock is `SELECT … FOR UPDATE`.
+
+
+## 2026-11-08 · Feature · A typed code is a guessable credential, so every refusal is one (issue #135)
+
+Expected: a six-digit code is a shorter token; reuse the token's two answers, 422 "not
+         recognised" and 410 "expired or used".
+Reality: a code is typed beside an address, so a 410 says "this was real", which says the
+         address has an account; and anyone can make one real by burning a stranger's code
+         with five wrong guesses, then ask. Every refusal of a code is one 422, with the same
+         bytes and the same work (counted, not timed). Two smaller ones: the wrong attempt
+         has to commit before the refusal is thrown, so `@Transactional` (which rolls back on
+         the exception and un-counts the guess) is the wrong tool; and the first draft of the
+         resend test expected no code left after a verification, when the spent row still
+         holds its own (dead) code. The count is right only under a row lock, which a test
+         proves by blocking on it, and removing the lock makes the test wait forever.
+
 
 ## 2026-11-08 · Feature · A Bond-day stays open twelve hours past its end (issue #132, ADR-0033 decision 15)
 

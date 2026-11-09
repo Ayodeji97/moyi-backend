@@ -3,7 +3,9 @@
 **Status:** Accepted · **Date:** 2026-10-30 · **Deciders:** Daniel, for the rulings it builds on
 (Q16 of 2026-10-29); decision 4 was made without him and is his to revisit. · **Amended:**
 2026-10-30, by the independent review of #118 (the coordinating agent's rulings P1, P2-a to P2-d,
-P3): decisions 8a, 8b, 8c and 13 added, 7, 8, 10 and 11 qualified.
+P3): decisions 8a, 8b, 8c and 13 added, 7, 8, 10 and 11 qualified. **Amended** 2026-11-08, for #127
+(FR-100's member half, question 6): decision 14 added; decisions 1, 3 and 9 qualified; question 6
+answered.
 
 ## Context
 
@@ -36,8 +38,8 @@ This is the entry half of FR-100. Reporting the **member** (doc 26's other targe
 `{id, entryId, reason}`.** Entry-scoped, the shape of the reaction and favourite routes beside it
 (ADR-0037 decision 1), not doc 06's `POST /reports {targetType, targetId}`: the one target built is
 an entry, its gate is the entry's, and an entry path keeps the one `404` for everything the caller
-was never shown without a second dispatch on a type. A member report will be a route of its own
-(question 6). Doc 06's shape is the divergence this records.
+was never shown without a second dispatch on a type. A member report is a route of its own
+(decision 14). Doc 06's shape is the divergence this records.
 
 **2. Who may report what is the read gate's answer** (`Entry.canBeReportedBy`, beside
 `canBeReactedToBy` and with its order):
@@ -187,6 +189,48 @@ a closed connection and failed open for the rest of the process, loud only in it
 the connection before each use and rebuilds it when it is closed or the factory's client has changed
 (`RedisRateLimiterTest`). ADR-0023's fail-open policy is unchanged.
 
+**14. The member report (#127, question 6): `POST /api/v1/bonds/{bondId}/members/other/report`, the
+same `ReportRequest`, `201` with `{id, reason}`.** Bond-scoped, with no member id in the path, as
+`/members/me/settings` has none: a bond has two members, and the caller can only mean the other.
+
+- **Who may: any member of the bond, about the other member row, in every state.** The bond's
+  guard first; then the other row (`BondAccess.partnerMemberIdOf`, the row `partnerDisplayNameOf`
+  reads), whether that member has left or blocked or been blocked. Not refused on an ended bond,
+  after a block, after either has left, or during a deletion countdown, for decision 2's reason: a
+  report is never contact. A bond the caller is not in, an unknown id, a value that is not a UUID,
+  **and a bond that has never had a second member** are the one `404`, the same bytes: the last is
+  thrown by `bond` itself (`BondNotFoundException`), where the others are made. The route's two
+  404s of its own (an id that is not a UUID, and a replay of a key that names a report the caller
+  did not make) use `bond.api.BOND_NOT_FOUND_DETAIL`, the constant `BondNotFoundException` is
+  built from (review of #151), so no copy of the wording can drift. The body is judged
+  before the bond is looked at (`422` to a stranger as to a member).
+- **The reasons are the same five** (decision 3; OQ-26b). Doc 26 §6's "How they're treating me",
+  T-09's reason, is `HARASSMENT`, as decision 3 already said; it is the reason this route exists.
+  The others still mean something of a person: `NON_CONSENSUAL` (they are sharing intimate imagery
+  of the reporter elsewhere), `VIOLENCE_OR_SELF_HARM` (threats, or a fear for them), and
+  `MINOR_SEXUAL_CONTENT` (a report about a child's safety, kept priority and first in the queue).
+  A second set was considered and refused: it would be a second enum for a client to map, a breaking
+  change to add, and a reason a person could not choose from the day view. The copy for each, as
+  the client shows it for a person rather than an entry, is still question 4's.
+- **It holds nothing.** Decision 4's hold is of an entry's media; a person has no photo. Nothing in
+  `media_report_holds`, nothing `QUARANTINED`, and so **nothing the reported member can read
+  changes**: no push, no event, no field, no `ETag` (doc 26 §2.2; `MemberReportsTest` and the smoke
+  compare the reported member's `GET /bonds/{id}` and `GET /today` bytes and `ETag` before and
+  after). Decision 5's accepted cost does not arise here: there is no `NOT_SHARED` to infer from.
+- **Stored in the same table, as a second target** (V48): `entry_reports.target` is `ENTRY` or
+  `MEMBER`; a member report names `reported_member_id` (a `bond_members` id, never a user id) and no
+  entry, a `CHECK` holds one or the other. One queue, one log, one priority order, the same alarm
+  (decision 11 counts every open row) and the same commands (`moyi reports list|show|dismiss|uphold`,
+  whose list and show now carry the target and the member). The table keeps its name: renaming it
+  would mean recreating every function that reads it, for a word. A member report is decided as a
+  report of words is (decision 8): dismissed, or upheld with nothing to take down; the remedy is
+  the reporter's block, and whatever the operator does outside the API.
+- **Idempotent, and the same bucket** (decision 9): `Idempotency-Key` required (`ResultKind.REPORT`,
+  a replay re-reads the report and is authorised as its reporter's); `reports:create:user`, ten a
+  day **across both routes**. One allowance because one person reads both: two buckets would let one
+  account put twenty a day in front of them. Doc 06 §4 names no bucket for either.
+- `detail` is decision 7's: written, never read back by the application, emptied by the decision.
+
 ## Consequences
 
 **Positive.** A member can report what was shared with them, and it leaves their screen at once.
@@ -202,7 +246,9 @@ Phase 5 console. `ErrorCode` gains `REPORT_ON_OWN_ENTRY`: a breaking change for 
 
 **Neutral.** V37 (`ResultKind.REPORT`), V38 (`media_report_holds`, `heldFrom` in V36's hold, three
 functions), V39 (`entry_reports`, `entry_report_log`, four functions). One route, one bucket, one
-error code. No event: nothing outside the report's transaction needs to know.
+error code. No event: nothing outside the report's transaction needs to know. Decision 14 adds V48 (`target`, `reported_member_id`, and
+`entry_report_list`/`_read` made again with them), a second route on the same bucket, and
+`BondAccess.partnerMemberIdOf`; no error code, no event. Additive to the contract.
 
 ## Alternatives considered
 
@@ -233,7 +279,10 @@ error code. No event: nothing outside the report's transaction needs to know.
    `strings-proposed.md` §10). And whether ten a day is right (OQ-26c).
 5. **[legal: confirm]** whether a member's report of sexual content involving a minor is ground
    enough to block and report without anyone viewing it (the runbook's §3 step 1).
-6. **Reporting the member** (FR-100's other half, doc 26 §1): not built.
+6. **Reporting the member** (FR-100's other half, doc 26 §1): **answered 2026-11-08, decision 14**
+   (#127). Still the owner's: whether a member report should ever hold or hide anything (today it
+   cannot: there is nothing of a person to hold), and whether the operator needs an action on an
+   account (none exists in v1; upholding records the decision only).
 
 ## Owed
 
@@ -253,5 +302,5 @@ error code. No event: nothing outside the report's transaction needs to know.
 ## Revisit when
 
 The owner answers questions 1 or 2. Moderation is switched on in production (decision 5's cost
-changes: a `NOT_SHARED` is then no longer only a report). The member report is built. The console
-replaces the script.
+changes: a `NOT_SHARED` is then no longer only a report). The console replaces the script. An
+account-level action exists for an operator to take on an upheld member report.

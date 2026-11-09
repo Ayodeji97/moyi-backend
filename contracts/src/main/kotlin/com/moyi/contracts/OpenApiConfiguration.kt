@@ -167,6 +167,7 @@ class OpenApiConfiguration {
             documentEndingDefaults(api)
             documentBondNamePattern(api)
             documentDisplayName(api)
+            documentEmailCodes(api)
             documentDaysQuery(api)
             documentRevalidation(api)
             documentFavourites(api)

@@ -6403,6 +6403,131 @@
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
   },
   {
+    "id": "bond-none-member-report",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/bonds/{bondId}/members/other/report",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "a stranger reporting a member of the bond is 404",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-member-report",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "POST /api/v1/bonds/{bondId}/members/other/report",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_MEMBER",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Nobody has joined, so there is nobody to report. The same answer, byte for byte, as a bond you are not in.",
+    "rule": "FR-100, ADR-0053 (amended for #127), doc 26 §2.2",
+    "evidence": "smoke",
+    "evidenceRef": "reporting the member of a bond with no partner yet is 404",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessAdapter.kt#val partner = bond.members.firstOrNull { it.id.value != membership.memberId } ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-active-member-report",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/members/other/report",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 201,
+    "code": null,
+    "reason": "Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag.",
+    "rule": "FR-100, ADR-0053 (amended for #127), doc 26 §2.2",
+    "evidence": "smoke",
+    "evidenceRef": "the reporter reports the other member: 201",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReportMember.kt#reports.insert(report, detail, now)"
+  },
+  {
+    "id": "bond-pending-deletion-member-report",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "POST /api/v1/bonds/{bondId}/members/other/report",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 201,
+    "code": null,
+    "reason": "Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. A countdown to deletion does not refuse it: a report is never contact.",
+    "rule": "FR-100, ADR-0053 (amended for #127), doc 26 §2.2",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReportMember.kt#reports.insert(report, detail, now)"
+  },
+  {
+    "id": "bond-archived-member-report",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "POST /api/v1/bonds/{bondId}/members/other/report",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 201,
+    "code": null,
+    "reason": "Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. Ended by a leave or a block, by either of you: a report is never contact, and the member who has just blocked may need it most.",
+    "rule": "FR-100, ADR-0053 (amended for #127), doc 26 §2.2",
+    "evidence": "smoke",
+    "evidenceRef": "a member report after a block is 201",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReportMember.kt#reports.insert(report, detail, now)"
+  },
+  {
     "id": "proposal-confirmed-timezone-confirm",
     "region": "bond.proposal",
     "from": "CONFIRMED",
