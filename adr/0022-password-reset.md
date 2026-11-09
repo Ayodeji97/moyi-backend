@@ -1,6 +1,6 @@
 # ADR-0022 — Password reset: a verification token with a different purpose, and a different page
 
-**Status:** Accepted · **Date:** 2026-09-23 · **Amended:** 2026-11-08 (reset by a six-digit code, #135)
+**Status:** Accepted · **Date:** 2026-09-23 · **Amended:** 2026-11-08 (reset by a six-digit code, #135); 2026-11-09 (a code is refused while Redis is down)
 
 ## Context
 
@@ -48,5 +48,5 @@ The reset email carries the same six-digit code as the verification email, on th
 
 **3. A reset takes back the code of any later reset email**, since the password it would reset has just changed. Earlier reset *links* still stay live until their hour, as decision 3's consequence said; that is unchanged.
 
-**4. A forgot-password email is a new code.** It retires the previous reset code; three an hour per address (FR-012) bounds how often, and ADR-0023's `auth:code:email` bounds how many codes may be tried.
+**4. A forgot-password email is a new code.** It retires the previous reset code; three an hour per address (FR-012) bounds how often, and ADR-0023's `auth:code:email` bounds how many codes may be tried. *(Amended 2026-11-09: that bucket fails closed, so with Redis unreachable `{email, code, password}` is `503 CODE_CHECK_UNAVAILABLE` before anything is read or hashed, and `{token, password}` still resets; ADR-0023.)*
 

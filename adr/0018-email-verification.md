@@ -1,6 +1,6 @@
 # ADR-0018 — Email verification: hashed tokens, a landing page, and a listener that is not the outbox
 
-**Status:** Accepted · **Date:** 2026-09-23 · **Amended:** 2026-10-22 (no link base URL in `application.yml`; decision 2 unchanged); 2026-10-24 (the JWT issuer and problem URIs name getmoyi.app); 2026-11-08 (a six-digit code beside the link, #135; decision 6 narrowed for codes)
+**Status:** Accepted · **Date:** 2026-09-23 · **Amended:** 2026-10-22 (no link base URL in `application.yml`; decision 2 unchanged); 2026-10-24 (the JWT issuer and problem URIs name getmoyi.app); 2026-11-08 (a six-digit code beside the link, #135; decision 6 narrowed for codes); 2026-11-09 (a code is refused while Redis is down)
 
 ## Context
 
@@ -84,4 +84,6 @@ The owner's request, from the iPhone smoke test: a person should type a short co
 **Tests.** `EmailCodeEndpointTest` (registration's code verifies; a code once used, and the link beside it; the link once used and the code beside it; five wrong then the right one; four wrong then the right one; unknown, wrong, expired and burned as one body; a new email retires the old code; nine malformed bodies; reset by code ends every session and spends the link; a refused password spends nothing; the codes are purpose-scoped). `VerificationCodeCheckTest` (the lock, the count, the equal work). `VerificationTest` (shape, liveness, the burn at five, `acceptsCode`). `VerificationEmailComposerTest` (both emails carry the code on its own line). Mutation-tested: the `@Lock`, the dummy path for an unknown address, the attempt count, the retirement on issue, the burn threshold, and both buckets, each turned red its test.
 
 **Revisit when** a code is ever found guessed (shorten its life or lower the burn), the rate limiter's fail-open is reconsidered for these two routes (ADR-0023, amended), or the app's links open it directly and nobody types codes any more.
+
+*Amended 2026-11-09:* with Redis unreachable, `{email, code}` is answered `503 CODE_CHECK_UNAVAILABLE` (`Retry-After: 60`) before any lookup, the same bytes for every address, and the code is neither counted nor spent; `{token}` is unaffected (ADR-0023, amendment of 2026-11-09).
 

@@ -13,6 +13,7 @@ import com.moyi.identity.domain.VerificationCodeRejectedException
 import com.moyi.identity.domain.VerificationTokenExpiredException
 import com.moyi.identity.domain.VerificationTokenInvalidException
 import com.moyi.identity.service.AuthenticatedUserMissingException
+import com.moyi.identity.service.CodeCheckUnavailableException
 import com.moyi.identity.service.InvalidCredentialsException
 import org.slf4j.LoggerFactory
 import org.springframework.core.annotation.Order
@@ -161,31 +162,42 @@ internal class IdentityExceptionHandler(
         )
 
     /**
-     * NFR-005a: saturation is a 503 with a `Retry-After`, not a 500.
+     * The two 503s, each with a `Retry-After`. One handler, because they differ only in what
+     * they say and how long they ask a client to wait.
      *
-     * The distinction is the whole value of the response. A 500 tells a client
-     * that something is broken and retrying is probably pointless; a 503 with
-     * one second tells it the truth — the server is briefly full, the request
-     * was fine, try again shortly. Without `Retry-After` the client picks its
-     * own interval, and every client picking the same one is how a brief
-     * saturation becomes a sustained one.
+     * **NFR-005a: saturation is a 503 with a `Retry-After`, not a 500.** The distinction is the
+     * whole value of the response. A 500 tells a client that something is broken and retrying
+     * is probably pointless; a 503 with one second tells it the truth — the server is briefly
+     * full, the request was fine, try again shortly. Without `Retry-After` the client picks its
+     * own interval, and every client picking the same one is how a brief saturation becomes a
+     * sustained one. Not logged: under saturation a line per refusal adds to the load.
      *
-     * Takes no exception parameter: this one carries nothing the response
-     * needs, and an unused parameter is a promise that something reads it.
+     * **A typed code while Redis is unreachable** (owner's ruling 2026-11-09, ADR-0023
+     * amended): the ten-a-day bound on typed codes is gone, so a code is refused until it is
+     * back. 503 rather than 429: the caller did nothing too often, the server cannot do its
+     * part. Thrown before any read, so these bytes are the same for every address. The detail
+     * points at the link, which works. WARN, as [problem] logs: a rate of these is a graph.
      */
-    @ExceptionHandler(HashingCapacityExceededException::class)
-    fun handleHashingCapacity(request: WebRequest): ResponseEntity<Any> =
-        ResponseEntity
+    @ExceptionHandler(HashingCapacityExceededException::class, CodeCheckUnavailableException::class)
+    fun handleUnavailable(
+        unavailable: RuntimeException,
+        request: WebRequest,
+    ): ResponseEntity<Any> {
+        val codeCheck = unavailable is CodeCheckUnavailableException
+        val errorCode = if (codeCheck) ErrorCode.CODE_CHECK_UNAVAILABLE else ErrorCode.HASHING_CAPACITY_EXCEEDED
+        if (codeCheck) log.warn("{} -> {}", errorCode, HttpStatus.SERVICE_UNAVAILABLE.value())
+        return ResponseEntity
             .status(HttpStatus.SERVICE_UNAVAILABLE)
-            .header(HttpHeaders.RETRY_AFTER, RETRY_AFTER_SECONDS)
+            .header(HttpHeaders.RETRY_AFTER, if (codeCheck) CODE_CHECK_RETRY_AFTER_SECONDS else RETRY_AFTER_SECONDS)
             .body(
                 problems.of(
                     status = HttpStatus.SERVICE_UNAVAILABLE,
-                    errorCode = ErrorCode.HASHING_CAPACITY_EXCEEDED,
-                    detail = "We are briefly at capacity. Please try again in a moment.",
+                    errorCode = errorCode,
+                    detail = if (codeCheck) CODE_CHECK_UNAVAILABLE else AT_CAPACITY,
                     instance = (request as? ServletWebRequest)?.request?.requestURI?.let(URI::create),
                 ),
             )
+    }
 
     private fun problem(
         status: HttpStatus,
@@ -216,5 +228,18 @@ internal class IdentityExceptionHandler(
 
         /** A hash takes ~150 ms, so a second is long enough for the queue to drain and short enough to feel instant. */
         const val RETRY_AFTER_SECONDS = "1"
+
+        const val AT_CAPACITY = "We are briefly at capacity. Please try again in a moment."
+
+        /** No dash, per `copy.md`. Names the way that works now, the link, before the wait. */
+        const val CODE_CHECK_UNAVAILABLE =
+            "We cannot check codes right now. Use the link in the same email, or try the code again in a minute."
+
+        /**
+         * The detail's "in a minute", in seconds. The limiter asks Redis again every few seconds
+         * (`retry-interval`, 5 s), so the server notices recovery long before this; the minute is
+         * for the person, who has the link meanwhile, not for the store.
+         */
+        const val CODE_CHECK_RETRY_AFTER_SECONDS = "60"
     }
 }

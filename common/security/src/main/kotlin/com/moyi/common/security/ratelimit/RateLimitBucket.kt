@@ -27,6 +27,18 @@ enum class RateLimitBucket(
     val subject: Subject,
     val capacity: Long,
     val period: Duration,
+    /**
+     * What this bucket's consumer does when Redis cannot be reached
+     * ([RateLimitDecision.Unavailable]). `false`, the default and every bucket
+     * but one: the request goes through (ADR-0023, fail-open). `true`: the
+     * request is refused until Redis answers again, because this bucket is the
+     * only bound on something that can be guessed, and nothing else holds that
+     * bound while it is gone (ADR-0023, amended 2026-11-09). Read by the bucket's
+     * one consumer, which knows what the refusal is called; the interceptor never
+     * sees such a bucket, because only an `EMAIL` bucket fails closed and those
+     * are consumed in services.
+     */
+    val failsClosed: Boolean = false,
 ) {
     /** FR-012: 5 attempts / 15 min / account. Counts unknown addresses too, so it is not an oracle (T-18). */
     AUTH_LOGIN_EMAIL("auth:login:email", Subject.EMAIL, 5, Duration.ofMinutes(15)),
@@ -55,8 +67,13 @@ enum class RateLimitBucket(
      * codes can be asked for again; this is what bounds the guesses at one account to ten a
      * day whatever is re-requested: at most 10 / 10^6 = 1 in 100,000 a day. Counted for every
      * address alike, so the 429 is no oracle.
+     *
+     * **Fails closed** (owner's ruling, 2026-11-09, ADR-0023 amended): with Redis down the
+     * ten a day is gone and only the five wrong tries per code remain, which a re-request
+     * resets; so a typed code is refused, `503 CODE_CHECK_UNAVAILABLE`, until Redis is back.
+     * The link beside it is 256 bits, needs no such bound, and keeps working.
      */
-    AUTH_CODE_EMAIL("auth:code:email", Subject.EMAIL, 10, Duration.ofDays(1)),
+    AUTH_CODE_EMAIL("auth:code:email", Subject.EMAIL, 10, Duration.ofDays(1), failsClosed = true),
 
     /**
      * #135, ADR-0023 amended 2026-11-08: twenty presentations an hour per client address,
