@@ -6,11 +6,12 @@
 # the day past its grace and not yesterday, an entry with an intendedAt before midnight counting for
 # yesterday, one older than twelve hours landing on today, settlesAt on today and on the streak's
 # OPEN squares, and yesterday still open after more runs. Last run on 2026-11-09, on
-# feat/late-entry-grace (main c6428c1 merged in), from a jar of that tree, on a fresh database,
-# against compose project moyi-41f (Postgres 55446, Valkey 56346, MinIO 59251), the jar booted by
-# hand (local profile) and --attach: 1383 passed, 1 failed, 0 skipped. The one failure is the
-# sign-in limit's Retry-After, 179 for 180: a second boundary in a probe this change does not
-# touch; it passed in the run before on the same tree.
+# feat/late-entry-grace after the review fixes (e131b048, main f906903 merged in), from a jar of
+# that tree, on a fresh database, against compose project moyi-41f (Postgres 55461, Valkey 56361,
+# MinIO 59261), the jar booted by hand (local profile) and --attach: 1408 passed, 0 failed,
+# 0 skipped. The run before, from 8f1cdc7's parent tree, had one failure: the sign-in limit's
+# Retry-After, 179 for 180, a second boundary in a probe this change does not touch; it did not
+# recur.
 #
 # The contract-precision PR (#137 to #140, #142) adds five probes: an error body's traceId (32 hex
 # digits, a new one per request) and a TIMEZONE_CHANGE_TOO_SOON refusal's typed allowedFrom, equal to
