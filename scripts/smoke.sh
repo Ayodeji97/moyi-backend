@@ -3598,11 +3598,11 @@ else
 fi
 flush_buckets
 
-echo; echo "data export — asked for, built by the job, downloaded, limited (FR-009, FR-094, ADR-0059)"
+echo; echo "data export — asked for, built by the job, downloaded, expired by a withdrawal, limited (FR-009, FR-094, ADR-0059)"
 # The job runs on a five-second schedule here (the boot above; with --attach, start the server with
-# --moyi.scheduling.data-export.cron='*/5 * * * * *'). The bond is ended by a block that withdraws the
-# blocker's words first, so the archive shows what T-20 asks: the person's own words, and the
-# partner's withdrawn entry as a blank placeholder.
+# --moyi.scheduling.data-export.cron='*/5 * * * * *'). The first archive is built while the bond is
+# whole; then the partner blocks and withdraws, and that archive, which holds the partner's words, must
+# stop being downloadable (ADR-0059 decision 12); the next one shows them as a blank placeholder.
 verified_account "exporter" "203.0.113.210"; EX_A="$ACCOUNT_ACCESS"
 verified_account "exporters-partner" "203.0.113.211"; EX_B="$ACCOUNT_ACCESS"
 flush_buckets
@@ -3610,7 +3610,6 @@ EX_WORDS="Exporter~words~$RANDOM$RANDOM"
 EX_PARTNER_WORDS="Withdrawn~words~$RANDOM$RANDOM"
 revealed_bond "data export" "$EX_A" "$EX_B" "$EX_WORDS" "$EX_PARTNER_WORDS"
 EX_BOND="$RB_BOND"; EX_B_ENTRY="$RB_B_ENTRY"
-expect "data export: the partner blocks and withdraws their words" 204 "" -- -X POST "$API/bonds/$EX_BOND/block" -H "Authorization: Bearer $EX_B" -d '{"withdrawEntries": true}'
 expect "data export without a token is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHENTICATED"' -- -X POST "$API/me/export"
 expect "the latest export with none asked for is 404" 404 '"code":"NOT_FOUND"' -- "$API/me/export" -H "Authorization: Bearer $EX_A"
 expect "data export request is 202 PREPARING" 202 '"status":"PREPARING"' -- -X POST "$API/me/export" -H "Authorization: Bearer $EX_A"
@@ -3624,11 +3623,21 @@ expect "…and one that does not exist is 404" 404 '"code":"NOT_FOUND"' -- "$API
 is "…the same bytes but for the path" "$(printf '%s' "$LAST_BODY" | sed "s#$EX_NOBODY_ID#ID#")" "$EX_THEIRS"
 expect "the export answers its state while the job builds it" 200 "\"id\":\"$EX_ID\"" -- "$API/me/export/$EX_ID" -H "Authorization: Bearer $EX_A"
 EX_MAILS="$(grep -c "Your Moyi archive is ready" "$MOYI_LOG" || true)"
-# Up to 60 seconds: the job runs every five here, and a build takes a moment.
-for _ in $(seq 1 60); do
-  EX_NOW="$(curl -s "$API/me/export/$EX_ID" -H "Authorization: Bearer $EX_A")"
-  [[ "$EX_NOW" == *'"status":"READY"'* ]] && break; sleep 1
-done
+# await_export <id> <status>: up to 60 seconds, the job running every five here.
+await_export() {
+  for _ in $(seq 1 60); do
+    [[ "$(curl -s "$API/me/export/$1" -H "Authorization: Bearer $EX_A")" == *"\"status\":\"$2\""* ]] && break; sleep 1
+  done
+}
+# fetch_archive <READY body> <dir>: the zip at its downloadUrl, unzipped into <dir>/x; the HTTP status.
+fetch_archive() {
+  local url; url="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['downloadUrl'])" "$1" 2>/dev/null || echo none)"
+  EX_URL="$url"
+  local code; code="$(curl -s -o "$2/archive.zip" -w '%{http_code}' "$url" || true)"
+  [ "$code" = 200 ] && unzip -qo "$2/archive.zip" -d "$2/x" 2>/dev/null
+  printf '%s' "$code"
+}
+await_export "$EX_ID" READY
 expect "the job makes the export READY" 200 '"status":"READY"' -- "$API/me/export/$EX_ID" -H "Authorization: Bearer $EX_A"
 EX_NOW="$LAST_BODY"
 is "…its URL good for exactly 24 hours" "$(python3 -c "
@@ -3637,10 +3646,24 @@ from datetime import datetime
 b = json.loads(sys.argv[1]); p = lambda k: datetime.fromisoformat(b[k].replace('Z', '+00:00'))
 print(int((p('expiresAt') - p('readyAt')).total_seconds()), 'X-Amz-Expires=86400' in b['downloadUrl'])" "$EX_NOW" 2>&1)" "86400 True"
 EX_DIR="$(mktemp -d)"
-EX_URL="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['downloadUrl'])" "$EX_NOW" 2>/dev/null || echo none)"
-EX_CODE="$(curl -s -o "$EX_DIR/archive.zip" -w '%{http_code}' "$EX_URL" || true)"
-if [ "$EX_CODE" = 200 ] && unzip -qo "$EX_DIR/archive.zip" -d "$EX_DIR/x" 2>/dev/null; then pass "the READY export's URL downloads a zip"; else fail "the READY export's URL downloads a zip" "HTTP $EX_CODE"; fi
+is "the READY export's URL downloads a zip" "$(fetch_archive "$EX_NOW" "$EX_DIR")" "200"
+EX_FIRST_URL="$EX_URL"
 is "…of the JSON and the README" "$(cd "$EX_DIR/x" 2>/dev/null && ls | sort | tr '\n' ' ')" "README.txt moyi-export.json "
+if grep -q "$EX_WORDS" "$EX_DIR/x/moyi-export.json" && grep -q "$EX_PARTNER_WORDS" "$EX_DIR/x/moyi-export.json"; then pass "…holding both people's revealed words, the bond being whole"; else fail "…holding both people's revealed words, the bond being whole" "not both in the archive"; fi
+rm -rf "$EX_DIR"
+for _ in $(seq 1 20); do [ "$(grep -c "Your Moyi archive is ready" "$MOYI_LOG" || true)" -gt "$EX_MAILS" ] && break; sleep 0.25; done
+is "the person is emailed that it is ready" "$(( $(grep -c "Your Moyi archive is ready" "$MOYI_LOG" || true) - EX_MAILS ))" "1"
+expect "data export: the partner blocks and withdraws their words" 204 "" -- -X POST "$API/bonds/$EX_BOND/block" -H "Authorization: Bearer $EX_B" -d '{"withdrawEntries": true}'
+await_export "$EX_ID" EXPIRED
+expect "the withdrawal expires the READY export that holds the words" 200 '"status":"EXPIRED"' -- "$API/me/export/$EX_ID" -H "Authorization: Bearer $EX_A"
+is "…and its URL no longer downloads it" "$(curl -s -o /dev/null -w '%{http_code}' "$EX_FIRST_URL")" "404"
+expect "asking after it expired is a new export, on the blocked bond (BR-9)" 202 '"status":"PREPARING"' -- -X POST "$API/me/export" -H "Authorization: Bearer $EX_A"
+EX_ID2="$(printf '%s' "$LAST_BODY" | jget id)"
+[ "$EX_ID2" != "$EX_ID" ] && pass "…with a new id" || fail "…with a new id" "${LAST_BODY:0:200}"
+await_export "$EX_ID2" READY
+expect "the new export is READY" 200 '"status":"READY"' -- "$API/me/export/$EX_ID2" -H "Authorization: Bearer $EX_A"
+EX_DIR="$(mktemp -d)"
+is "…its URL downloads a zip" "$(fetch_archive "$LAST_BODY" "$EX_DIR")" "200"
 is "…holding the person's own words, and the partner's withdrawn entry as a blank placeholder" "$(python3 -c "
 import json, sys
 a = json.load(open(sys.argv[1]))
@@ -3650,12 +3673,17 @@ theirs = [(e['id'], e['status'], e['text']) for e in entries if e['author'] == '
 print(mine == [sys.argv[2]], theirs == [(sys.argv[3], 'DELETED', None)], a['bonds'][0]['bond']['status'], a['adminAccess']['logKept'])" "$EX_DIR/x/moyi-export.json" "$EX_WORDS" "$EX_B_ENTRY" 2>&1)" "True True ARCHIVED False"
 if grep -q "$EX_PARTNER_WORDS" "$EX_DIR/x/moyi-export.json"; then fail "…and not a word the partner withdrew" "found in the archive"; else pass "…and not a word the partner withdrew"; fi
 rm -rf "$EX_DIR"
-for _ in $(seq 1 20); do [ "$(grep -c "Your Moyi archive is ready" "$MOYI_LOG" || true)" -gt "$EX_MAILS" ] && break; sleep 0.25; done
-is "the person is emailed that it is ready" "$(( $(grep -c "Your Moyi archive is ready" "$MOYI_LOG" || true) - EX_MAILS ))" "1"
-if grep -q "X-Amz-Signature" "$MOYI_LOG"; then fail "…and no signed URL reaches a log, the email's included" "one is in $MOYI_LOG"; else pass "…and no signed URL reaches a log, the email's included"; fi
-expect "asking after it is READY is a new export" 202 '"status":"PREPARING"' -- -X POST "$API/me/export" -H "Authorization: Bearer $EX_A"
-[[ "$LAST_BODY" != *"\"id\":\"$EX_ID\""* ]] && pass "…with a new id" || fail "…with a new id" "${LAST_BODY:0:200}"
-expect "the fourth request in a day is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/me/export" -H "Authorization: Bearer $EX_A"
+if grep -q "X-Amz-Signature" "$MOYI_LOG"; then fail "no signed URL reaches a log, the email's included" "one is in $MOYI_LOG"; else pass "no signed URL reaches a log, the email's included"; fi
+expect "asking after it is READY is a new export, the third of the day" 202 '"status":"PREPARING"' -- -X POST "$API/me/export" -H "Authorization: Bearer $EX_A"
+EX_ID3="$(printf '%s' "$LAST_BODY" | jget id)"
+expect "a repeat while it is prepared spends none of the three" 202 "\"id\":\"$EX_ID3\"" -- -X POST "$API/me/export" -H "Authorization: Bearer $EX_A"
+if [ "$PSQL_OK" = 1 ]; then
+  db_is "…the third set aside by hand, so a fourth would be new" \
+    "$(sql "WITH f AS (UPDATE data_exports SET status = 'FAILED', ended_at = now(), claimed_until = NULL WHERE id = '$EX_ID3' AND status = 'PREPARING' RETURNING 1) SELECT count(*) FROM f")" "1"
+  expect "the fourth new export in a day is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/me/export" -H "Authorization: Bearer $EX_A"
+else
+  skip "data export: the fourth new export in a day (psql not reachable through docker compose)"
+fi
 if grep -q "$EX_WORDS" "$MOYI_LOG"; then fail "the exported words are in no log line" "they are in $MOYI_LOG"; else pass "the exported words are in no log line"; fi
 flush_buckets
 

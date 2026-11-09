@@ -21,6 +21,8 @@ internal class ExportAccountBonds(
     private val users: UserDirectory,
     private val facts: AccountBondFacts,
 ) : BondExports {
+    override fun accountsInBond(bondId: UUID): Set<UUID> = facts.accountsIn(bondId)
+
     @Transactional(readOnly = true)
     override fun bondsOf(userId: UUID): List<ExportedBond> {
         val all = bonds.findAllByMember(UserId(userId))

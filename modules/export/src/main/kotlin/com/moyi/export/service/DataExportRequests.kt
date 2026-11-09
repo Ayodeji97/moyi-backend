@@ -1,6 +1,10 @@
 package com.moyi.export.service
 
 import com.moyi.common.core.IdGenerator
+import com.moyi.common.security.ratelimit.RateLimitBucket
+import com.moyi.common.security.ratelimit.RateLimitDecision
+import com.moyi.common.security.ratelimit.RateLimitExceededException
+import com.moyi.common.security.ratelimit.RateLimiter
 import com.moyi.common.web.NotFoundException
 import com.moyi.export.domain.DataExport
 import com.moyi.export.infra.database.DataExports
@@ -38,11 +42,22 @@ internal class ExportView(
 internal class DataExportRequests(
     private val exports: DataExports,
     private val storage: ExportStorage,
+    private val limiter: RateLimiter,
     private val ids: IdGenerator,
     private val clock: Clock,
 ) {
-    @Transactional
+    /**
+     * The export being prepared, or a new one. **Only a new one spends `account:export:user`**: a
+     * repeat while one is being prepared is the same export and costs nothing, so a client that
+     * retries a lost answer is not pushed towards its 429. Two first requests at once may both spend
+     * one; one export comes of them.
+     *
+     * @throws RateLimitExceededException the day's new exports are spent
+     */
     fun request(userId: UUID): ExportView {
+        exports.preparingOf(userId)?.let { return view(it, clock.instant()) }
+        val decision = limiter.tryConsume(RateLimitBucket.ACCOUNT_EXPORT_USER, userId.toString())
+        if (decision is RateLimitDecision.Rejected) throw RateLimitExceededException(decision)
         val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
         exports.insertIfNonePreparing(ids.timeOrdered(), userId, now)
         // Ours, or the one a concurrent request inserted first: either way the one being prepared.

@@ -1,7 +1,7 @@
 # ADR-0059 — The data export: asked for, built by a job from five modules' own answers, downloadable for 24 hours
 
 **Status:** Accepted · **Date:** 2026-11-09 · **Deciders:** Daniel, for FR-009, FR-094, FR-085, T-10,
-T-20 and doc 06 §3.2; decisions 4, 5, 7 (the archive's shape), 8, 10 and 11 were made without him, as
+T-20 and doc 06 §3.2; decisions 4, 5, 7 (the archive's shape), 8, 10, 11 and 12 were made without him, as
 defaults issue #126 left to the backend, and are **his to overrule** (Open questions, below).
 
 ## Context
@@ -71,8 +71,12 @@ id that names nothing are one `404 NOT_FOUND` (the query is scoped to the caller
 after a restart without keeping the id (issue #126's optional route). Allowed whatever the person's
 bonds are, ended, left or none (BR-9). One response shape, `DataExportResponse`, for all three. **No
 `Idempotency-Key`**: the dedupe of decision 2 already makes a retried `POST` the same export while it
-is being prepared, which is the case a retry is for. Rate limit: `account:export:user`, **three a day
-per user**, greedy, repeats included (doc 06 §4 names no bucket). *Owner may overrule the number.*
+is being prepared, which is the case a retry is for. Rate limit: `account:export:user`, **three new exports a
+day per user**, greedy (doc 06 §4 names no bucket). **Only a request that starts a new export spends
+one**: the service spends it after finding none being prepared, so a repeat (a client retrying a lost
+answer) is free and never pushed towards a `429` (review of #162). It is spent by
+`DataExportRequests`, not by `@RateLimited` on the route, which would spend it on every request; the
+`429` and its `Retry-After` are the same. *Owner may overrule the number.*
 Additive to the contract: oasdiff reports no breaking change.
 
 **5. The archive is an object in the media storage, not a `media_assets` row.** Doc 04 lists a
@@ -115,17 +119,29 @@ may rule that they should be listed too.*
 `scheduling.DataExportJob` runs two ShedLocked timers: every minute it asks `export` to build up to
 five waiting exports (`prepareDue`), and hourly at fifty-three past it expires the ones whose 24 hours
 are over (`expireDue`). A build holds **no transaction**: each export is claimed by a conditional
-update (`attempts + 1`, `claimed_until = now + 15 min`), the archive is read through the five modules
-in their own short reads, written, stored, and then one statement makes it `READY` **only if it is
-still `PREPARING`**; if it is not (an account deletion removed the row meanwhile), the stored archive
-is deleted again and nothing is sent. A failed build gives its claim back and is tried on a later run;
-the third failure makes it `FAILED` (the person may ask again). The expiry deletes the object **before**
+update (`attempts + 1`, `claimed_until = now + 15 min`, and only while `attempts < 3`), the archive is
+read through the five modules in their own short reads, written, stored, and then one statement makes
+it `READY` **only if the row still holds this build's claim** (`claimed_until` is the claim's token);
+if it does not (an account deletion removed the row, or a withdrawal restarted it, decision 12), the
+stored archive is deleted again and nothing is sent. **Every failure of a build is caught**, a checked
+`IOException` (a full disk, a storage stream cut off part-way) as much as a runtime one, and the
+temporary file is made inside that catch: a failed build gives back its own claim (and only its own:
+`release` and `fail` ask for the token too) and is tried on a later run, the third failure makes it
+`FAILED` (the person may ask again), and one export's failure never stops the rest of the batch. An
+export whose attempts are spent but whose last build died before it could say so is made `FAILED` at
+the start of the next run, once its claim has lapsed, and is never claimed again; without that it
+would stay `PREPARING` for ever, and every new request would be answered with it (review of #162). The expiry deletes the object **before**
 it marks the row `EXPIRED`, so an archive is never forgotten while stored; one it cannot delete stays
 `READY` (the route already answers `EXPIRED`) and is tried again next hour. The media worker turns both
 timers off (`application-media-worker.yml`). **Account deletion** (ADR-0058): a consumer
-`export.account-deletion` of `AccountDeleted` deletes every stored archive of the person and then
-every export row of theirs, inside the delivery's transaction, so a storage outage makes the delivery
-retry. Idempotent: a second delivery finds nothing.
+`export.account-deletion` of `AccountDeleted` deletes every export row of the person **in one
+statement, `DELETE … RETURNING storage_key`**, and then each archive those rows held, inside the
+delivery's transaction, so a storage outage makes the delivery retry. One statement, because a read of
+the keys followed by a delete let a build that made an export READY in between leave its archive
+stored with nothing naming it (review of #162): now the delete waits on that row and returns its key,
+or the build finds its row gone and deletes its own archive. The ready email cannot reach a deleted
+account: identity answers `NO_ACCOUNT` for one deleted or being deleted, and a build for an account
+already gone fails at its first read. Idempotent: a second delivery finds nothing.
 
 **10. FR-085's email, with no link; no push.** When an export becomes `READY` the job writes once, by
 `identity.api.AccountMail` (a confirmed address only, ADR-0057 decision 6), keyed `export-ready-{id}`:
@@ -143,6 +159,21 @@ class.
 reason for withdrawal is that the blocked party could otherwise bulk-export the blocker's words, which
 says they are in it). Entries still locked to the person are **not**. *Owner may overrule either.*
 
+**12. A withdrawal makes the bond's exports stale (review of #162).** FR-029a and BR-10a erase the
+withdrawn words for both people from the commit of the leave or block that withdrew them, and the
+archive route shows them as tombstones from that commit (decision 3). An archive is a copy: one built
+before that commit, or by a build that read its pages before it, would keep the words downloadable for
+up to 24 hours, which T-20 forbids. So a consumer `export.withdrawal` of bond's `EntriesWithdrawn`
+asks `bond.api.BondExports.accountsInBond` (an unguarded read, held by `ArchitectureTest`, for work
+that has no caller) for every account in the bond, the withdrawer's and the partner's, and for each:
+every `READY` export becomes `EXPIRED` and **its archive is deleted**; every `PREPARING` one loses its
+claim and its attempts, so it is built again from what may be read now, and a build in flight cannot
+make it `READY` (decision 9's claim token), and deletes what it stored. The person asks again for a
+`READY` one that went (the app shows `EXPIRED`). Delivered at least once, idempotent. **The gap that
+remains** is the outbox's own: between the withdrawal's commit and the consumer's delivery (the poller
+runs every two seconds) a `READY` export's URL still works. *Owner may ask for the route to check the
+bond's withdrawals itself, at the cost of a read across modules on every `GET`.*
+
 ## Consequences
 
 **Positive:** FR-009, FR-094 and FR-085's export email exist end to end, and M5's condition (ADR-0035
@@ -155,6 +186,9 @@ Account deletion erases exports too.
 - No push when it is ready (decision 10); the app learns it by asking.
 - The archive is a copy as of its build; an entry revealed a minute later is in the next one.
 - A `READY` export costs storage for 24 hours; three a day per person bounds it.
+- A withdrawal in a bond expires both members' `READY` exports (decision 12), so a person who had
+  just made one may have to ask again; a URL handed out before stays usable for the seconds until the
+  consumer runs.
 - The admin disclosure is a statement until the admin console keeps a log (decision 8).
 - In production the build needs the media storage: with it unavailable every build fails three times
   and the export is `FAILED` (`config/deploy.yml` configures R2 for the API).
@@ -183,6 +217,7 @@ operations and one schema; oasdiff reports no breaking change.
 3. No push, email only, and no link in the email (decision 10)?
 4. List the operator's reads of support tickets under `adminAccess` (decision 8)?
 5. The archive's shape (decision 7), and the best kept copy as "original media" (decision 6)?
+6. A withdrawal expiring both members' ready exports, with the outbox's seconds of gap (decision 12)?
 
 ## Revisit when
 

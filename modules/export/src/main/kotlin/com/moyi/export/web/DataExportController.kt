@@ -1,8 +1,6 @@
 package com.moyi.export.web
 
 import com.moyi.common.security.CurrentUser
-import com.moyi.common.security.ratelimit.RateLimitBucket
-import com.moyi.common.security.ratelimit.RateLimited
 import com.moyi.export.domain.DataExportStatus
 import com.moyi.export.service.DataExportRequests
 import com.moyi.export.service.ExportView
@@ -27,10 +25,9 @@ import java.util.UUID
 internal class DataExportController(
     private val requests: DataExportRequests,
 ) {
-    /** `account:export:user`, three a day. */
+    /** `account:export:user`, three new exports a day, spent by the service only when it starts one (ADR-0059 decision 4). */
     @PostMapping
     @ResponseStatus(HttpStatus.ACCEPTED)
-    @RateLimited(RateLimitBucket.ACCOUNT_EXPORT_USER)
     fun requestDataExport(caller: CurrentUser): DataExportResponse = DataExportResponse.from(requests.request(caller.id))
 
     @GetMapping

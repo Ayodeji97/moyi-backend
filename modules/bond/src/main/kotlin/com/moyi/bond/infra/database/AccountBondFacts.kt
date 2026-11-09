@@ -23,6 +23,10 @@ internal class AccountBondFacts(
                 userId,
             ).toMap()
 
+    /** Every account with a membership row in [bondId], left or not. */
+    fun accountsIn(bondId: UUID): Set<UUID> =
+        jdbc.queryForList("SELECT user_id FROM bond_members WHERE bond_id = ?", UUID::class.java, bondId).filterNotNull().toSet()
+
     /** When each of [memberIds] withdrew their entries, by member id. */
     fun withdrawalsOf(memberIds: Collection<UUID>): Map<UUID, Instant> {
         if (memberIds.isEmpty()) return emptyMap()

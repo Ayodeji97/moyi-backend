@@ -72,6 +72,7 @@ internal class People :
     val bonds = ConcurrentHashMap<UUID, List<ExportedBond>>()
     val days = ConcurrentHashMap<Pair<UUID, UUID>, List<ExportedDay>>()
     val tickets = ConcurrentHashMap<UUID, List<ExportedTicket>>()
+    val members = ConcurrentHashMap<UUID, Set<UUID>>()
 
     /** Run during a build, as the support messages are read, before the archive is stored: what a concurrent change does. */
     @Volatile
@@ -80,6 +81,8 @@ internal class People :
     override fun accountOf(userId: UUID): ExportedAccount? = accounts[userId]
 
     override fun bondsOf(userId: UUID): List<ExportedBond> = bonds[userId].orEmpty()
+
+    override fun accountsInBond(bondId: UUID): Set<UUID> = members[bondId].orEmpty()
 
     override fun page(
         userId: UUID,
@@ -102,6 +105,7 @@ internal class People :
         bonds.clear()
         days.clear()
         tickets.clear()
+        members.clear()
         duringBuild = {}
     }
 }
@@ -115,13 +119,22 @@ internal class FakeStorage : ExportStorage {
     @Volatile
     var failing = false
 
+    /** Thrown by [storeArchive] when set: a checked exception, as a full disk or a cut-off stream is. */
+    @Volatile
+    var failingWith: Exception? = null
+
+    /** Media whose bytes cannot be read: the stream throws an `IOException` part-way, as a storage cut off does. */
+    val unreadable: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
+
     override fun copyOf(
         viewer: UUID,
         mediaId: UUID,
     ): ExportedMediaFile? {
         val owner = media[mediaId]?.first
         return if (owner == viewer || owner == SHARED) {
-            ExportedMediaFile(mediaId, "IMAGE", "webp", "image/webp") { media[mediaId]?.second?.inputStream() }
+            ExportedMediaFile(mediaId, "IMAGE", "webp", "image/webp") {
+                if (mediaId in unreadable) BrokenStream() else media[mediaId]?.second?.inputStream()
+            }
         } else {
             null
         }
@@ -129,6 +142,7 @@ internal class FakeStorage : ExportStorage {
 
     override fun storeArchive(file: Path): String {
         check(!failing) { "the storage is down (made to by the test)" }
+        failingWith?.let { throw it }
         val key = "x/${UUID.randomUUID()}.zip"
         archives[key] = Files.readAllBytes(file)
         return key
@@ -150,12 +164,19 @@ internal class FakeStorage : ExportStorage {
         archives.clear()
         deleted.clear()
         failing = false
+        failingWith = null
+        unreadable.clear()
     }
 
     companion object {
         /** An owner id that marks a photo any viewer may have: a partner's, passed. */
         val SHARED: UUID = UUID(0, 1)
     }
+}
+
+/** A stream that fails on its first read, as a storage connection cut off does. */
+internal class BrokenStream : java.io.InputStream() {
+    override fun read(): Int = throw java.io.IOException("the connection was reset (made to by the test)")
 }
 
 /** identity's port, recording what it was asked to send and to whom. */

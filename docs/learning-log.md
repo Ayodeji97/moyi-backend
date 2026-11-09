@@ -3205,3 +3205,13 @@ Wrong about: Jackson 3's `JsonNode.map`. It is a member function that applies th
          `.toList().map` is what was meant.
 Also: the partner's leave and block must look the same in the export as in the app (ADR-0028):
          the bond export carries the person's own block and withdrawal, and never the partner's.
+Then (review of #162): three things a copy does that a reading does not. An archive built before a
+         withdrawal kept the withdrawn words for a day, so a withdrawal now expires every export in
+         the bond and a build in flight loses its claim (`claimed_until` became the claim's token,
+         which also stopped a failed build from giving back someone else's claim). A build caught
+         only `RuntimeException`, so a checked `IOException` from a cut-off storage stream escaped
+         both its release and its failure: the row stayed PREPARING for ever, past its attempts,
+         and every new request was answered with it. And reading the keys, then deleting the rows,
+         let a build commit READY in between and leave an object nothing named:
+         `DELETE … RETURNING` waits on that row instead. The race was proved by holding the build's
+         UPDATE open and waiting for the delete to block on it in `pg_stat_activity`, not by a sleep.

@@ -3707,7 +3707,7 @@
     "to": "PREPARING",
     "status": 202,
     "code": null,
-    "reason": "The same export: 202 with the same id. Still spends one of the three a day.",
+    "reason": "The same export: 202 with the same id. A repeat spends none of the three a day.",
     "rule": "FR-009, FR-094, ADR-0059",
     "evidence": "smoke",
     "evidenceRef": "asking again while it is prepared is the same export",
@@ -3963,7 +3963,7 @@
     "rule": "FR-009, FR-094, ADR-0059",
     "evidence": "smoke",
     "evidenceRef": "the job makes the export READY",
-    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/PrepareExports.kt#if (!exports.ready(export.id, key, Files.size(zip), readyAt, expiresAt)) {"
+    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/PrepareExports.kt#val made = exports.ready(export.id, claim, key, Files.size(zip), readyAt, expiresAt)"
   },
   {
     "id": "export-preparing-fails",
@@ -3981,7 +3981,7 @@
     "rule": "FR-009, FR-094, ADR-0059",
     "evidence": "test",
     "evidenceRef": "DataExportEndpointTest#a build that fails is tried again, given up as FAILED on the third, and a new one can then be asked for",
-    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/PrepareExports.kt#if (attempt >= DataExport.MAX_ATTEMPTS) exports.fail(export.id, now()) else exports.release(export.id)"
+    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/PrepareExports.kt#if (attempt >= DataExport.MAX_ATTEMPTS) exports.fail(export.id, claim, now()) else exports.release(export.id, claim)"
   },
   {
     "id": "export-ready-expires",
@@ -4002,6 +4002,42 @@
     "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/PrepareExports.kt#storage.deleteArchive(checkNotNull(export.storageKey))"
   },
   {
+    "id": "export-ready-withdrawn",
+    "region": "account.export",
+    "from": "READY",
+    "action": "event:entries-withdrawn",
+    "actor": "system",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "EXPIRED",
+    "status": null,
+    "code": null,
+    "reason": "The withdrawn words are gone for both of you, so an archive that may hold them is not honoured: the export is EXPIRED and its archive deleted, yours and your partner's. Ask again for one without them.",
+    "rule": "FR-029a, BR-10a, T-20, ADR-0059 decision 12",
+    "evidence": "smoke",
+    "evidenceRef": "the withdrawal expires the READY export that holds the words",
+    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/ExpireWithdrawnExports.kt#exports.invalidateFor(accounts, clock.instant().truncatedTo(ChronoUnit.MICROS)).forEach(storage::deleteArchive)"
+  },
+  {
+    "id": "export-preparing-withdrawn",
+    "region": "account.export",
+    "from": "PREPARING",
+    "action": "event:entries-withdrawn",
+    "actor": "system",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "PREPARING",
+    "status": null,
+    "code": null,
+    "reason": "Built again from what may be read now: a build that read the words before the withdrawal cannot make it READY, and deletes what it stored.",
+    "rule": "FR-029a, BR-10a, T-20, ADR-0059 decision 12",
+    "evidence": "test",
+    "evidenceRef": "ExportErasuresTest#a build that read the words before the withdrawal cannot make them READY, and the export is built again",
+    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/ExpireWithdrawnExports.kt#exports.invalidateFor(accounts, clock.instant().truncatedTo(ChronoUnit.MICROS)).forEach(storage::deleteArchive)"
+  },
+  {
     "id": "export-any-account-deleted",
     "region": "account.export",
     "from": "READY",
@@ -4017,6 +4053,6 @@
     "rule": "FR-009, FR-094, ADR-0059",
     "evidence": "test",
     "evidenceRef": "ArchiveContentsTest#an account deletion deletes every archive of the person and every export row, and a second delivery changes nothing",
-    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/EraseDeletedAccountExports.kt#exports.keysOf(userId).forEach(storage::deleteArchive)"
+    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/EraseDeletedAccountExports.kt#exports.deleteAllOf(userId).forEach(storage::deleteArchive)"
   }
 ]

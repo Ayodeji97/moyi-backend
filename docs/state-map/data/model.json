@@ -563,6 +563,11 @@
       "id": "event:export-24h-pass",
       "label": "24 hours pass after the export became ready",
       "actor": "system"
+    },
+    {
+      "id": "event:entries-withdrawn",
+      "label": "you or your partner withdraw your entries on a leave or a block",
+      "actor": "system"
     }
   ],
   "everywhere": [

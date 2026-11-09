@@ -45,41 +45,73 @@ internal class DataExports(
     fun latestOf(userId: UUID): DataExport? =
         jdbc.query("$SELECT WHERE user_id = ? ORDER BY requested_at DESC, id DESC LIMIT 1", ROW, userId).firstOrNull()
 
-    /** PREPARING exports no build holds at [now], oldest first. */
+    /** PREPARING exports no build holds at [now] and with attempts left, oldest first. */
     fun claimable(
         now: Instant,
+        maxAttempts: Int,
         limit: Int,
     ): List<DataExport> =
         jdbc.query(
-            "$SELECT WHERE status = 'PREPARING' AND (claimed_until IS NULL OR claimed_until <= ?) ORDER BY requested_at, id LIMIT ?",
+            "$SELECT WHERE status = 'PREPARING' AND (claimed_until IS NULL OR claimed_until <= ?) AND attempts < ? " +
+                "ORDER BY requested_at, id LIMIT ?",
             ROW,
             Timestamp.from(now),
+            maxAttempts,
             limit,
         )
 
-    /** Takes [id] for a build until [until], counting the attempt. The attempt's number, or null if it was not free. */
+    /**
+     * Every PREPARING export no build holds that has used its [maxAttempts], made FAILED: the last
+     * attempt's process died before it could say so (a crash, or an error nothing caught). How many.
+     */
+    fun failExhausted(
+        now: Instant,
+        maxAttempts: Int,
+    ): Int =
+        jdbc.update(
+            """
+            UPDATE data_exports SET status = 'FAILED', ended_at = ?, claimed_until = NULL
+            WHERE status = 'PREPARING' AND attempts >= ? AND (claimed_until IS NULL OR claimed_until <= ?)
+            """.trimIndent(),
+            Timestamp.from(now),
+            maxAttempts,
+            Timestamp.from(now),
+        )
+
+    /**
+     * Takes [id] for a build until [until], counting the attempt, if it is free and has attempts
+     * left. The attempt's number, or null. **[until] is the claim's token**: [ready], [release] and
+     * [fail] act only while the row still holds it, so a build whose claim was taken from it (a
+     * withdrawal, [restartFor]) can change nothing.
+     */
     fun claim(
         id: UUID,
         now: Instant,
         until: Instant,
+        maxAttempts: Int,
     ): Int? =
         jdbc
             .queryForList(
                 """
                 UPDATE data_exports SET attempts = attempts + 1, claimed_until = ?
-                WHERE id = ? AND status = 'PREPARING' AND (claimed_until IS NULL OR claimed_until <= ?)
+                WHERE id = ? AND status = 'PREPARING' AND (claimed_until IS NULL OR claimed_until <= ?) AND attempts < ?
                 RETURNING attempts
                 """.trimIndent(),
                 Int::class.java,
                 Timestamp.from(until),
                 id,
                 Timestamp.from(now),
+                maxAttempts,
             ).firstOrNull()
 
-    /** PREPARING to READY with its archive. False if it is no longer being prepared (an account deletion took it). */
-    @Suppress("LongParameterList") // The archive's four facts.
+    /**
+     * PREPARING to READY with its archive, by the build holding [claim]. False if it no longer holds
+     * it: an account deletion removed the row, or a withdrawal restarted it.
+     */
+    @Suppress("LongParameterList") // The claim and the archive's four facts.
     fun ready(
         id: UUID,
+        claim: Instant,
         key: String,
         sizeBytes: Long,
         readyAt: Instant,
@@ -88,28 +120,77 @@ internal class DataExports(
         jdbc.update(
             """
             UPDATE data_exports SET status = 'READY', storage_key = ?, size_bytes = ?, ready_at = ?, expires_at = ?, claimed_until = NULL
-            WHERE id = ? AND status = 'PREPARING'
+            WHERE id = ? AND status = 'PREPARING' AND claimed_until = ?
             """.trimIndent(),
             key,
             sizeBytes,
             Timestamp.from(readyAt),
             Timestamp.from(expiresAt),
             id,
+            Timestamp.from(claim),
         ) == 1
 
-    /** A failed attempt gives its claim back, so the next run may try again. */
-    fun release(id: UUID) {
-        jdbc.update("UPDATE data_exports SET claimed_until = NULL WHERE id = ? AND status = 'PREPARING'", id)
+    /** A failed attempt gives its claim back, so the next run may try again; only its own claim. */
+    fun release(
+        id: UUID,
+        claim: Instant,
+    ) {
+        jdbc.update(
+            "UPDATE data_exports SET claimed_until = NULL WHERE id = ? AND status = 'PREPARING' AND claimed_until = ?",
+            id,
+            Timestamp.from(claim),
+        )
     }
 
+    /** The last attempt failed: FAILED, if the build still holds [claim]. */
     fun fail(
         id: UUID,
+        claim: Instant,
         at: Instant,
     ) {
         jdbc.update(
-            "UPDATE data_exports SET status = 'FAILED', ended_at = ?, claimed_until = NULL WHERE id = ? AND status = 'PREPARING'",
+            "UPDATE data_exports SET status = 'FAILED', ended_at = ?, claimed_until = NULL " +
+                "WHERE id = ? AND status = 'PREPARING' AND claimed_until = ?",
             Timestamp.from(at),
             id,
+            Timestamp.from(claim),
+        )
+    }
+
+    /**
+     * A withdrawal in a bond [userIds] are in (ADR-0059 decision 12): every READY export of theirs
+     * becomes EXPIRED, its key forgotten, and the keys are returned for their objects to be deleted;
+     * every PREPARING one loses its claim and its attempts, so it is built again from what may be
+     * read now, and a build in flight (which may have read the words before they were withdrawn)
+     * can no longer make it READY.
+     */
+    fun invalidateFor(
+        userIds: Collection<UUID>,
+        at: Instant,
+    ): List<String> {
+        if (userIds.isEmpty()) return emptyList()
+        val users = userIds.toTypedArray()
+        restartFor(users)
+        return jdbc
+            .queryForList(
+                """
+                WITH stale AS (
+                    SELECT id, storage_key FROM data_exports WHERE user_id = ANY (?) AND status = 'READY' FOR UPDATE
+                )
+                UPDATE data_exports d SET status = 'EXPIRED', storage_key = NULL, ended_at = ?
+                FROM stale WHERE d.id = stale.id
+                RETURNING stale.storage_key
+                """.trimIndent(),
+                String::class.java,
+                users,
+                Timestamp.from(at),
+            ).filterNotNull()
+    }
+
+    private fun restartFor(users: Array<UUID>) {
+        jdbc.update(
+            "UPDATE data_exports SET claimed_until = NULL, attempts = 0 WHERE user_id = ANY (?) AND status = 'PREPARING'",
+            users,
         )
     }
 
@@ -131,14 +212,15 @@ internal class DataExports(
             id,
         ) == 1
 
-    /** Every archive key [userId]'s exports still hold. */
-    fun keysOf(userId: UUID): List<String> =
+    /**
+     * Every export of [userId], gone in one statement, and the archive keys the deleted rows held.
+     * One statement, so that an export made READY by a build that committed while this waited on
+     * its row is deleted with its key in hand, never left as an object nothing names.
+     */
+    fun deleteAllOf(userId: UUID): List<String> =
         jdbc
-            .queryForList("SELECT storage_key FROM data_exports WHERE user_id = ? AND storage_key IS NOT NULL", String::class.java, userId)
+            .queryForList("DELETE FROM data_exports WHERE user_id = ? RETURNING storage_key", String::class.java, userId)
             .filterNotNull()
-
-    /** Every export of [userId], gone; how many. */
-    fun deleteAllOf(userId: UUID): Int = jdbc.update("DELETE FROM data_exports WHERE user_id = ?", userId)
 
     private companion object {
         const val SELECT =

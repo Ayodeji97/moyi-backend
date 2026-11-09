@@ -1318,7 +1318,7 @@
     "machine": "account",
     "auth": "bearer",
     "headers": [
-      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After). This route also spends account:export:user, three a day, repeats included: the fourth is 429 with Retry-After"
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After). A request that starts a new export also spends account:export:user, three a day (a repeat while one is being prepared spends none): the fourth new one is 429 with Retry-After"
     ],
     "requestErrors": [],
     "curl": "curl -X POST \"$API/me/export\" -H \"Authorization: Bearer $TOKEN\""

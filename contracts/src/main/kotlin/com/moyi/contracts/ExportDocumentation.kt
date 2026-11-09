@@ -47,12 +47,14 @@ private const val REQUEST_DESCRIPTION =
         "confirmed address is emailed when it is `READY` (the email carries no link: the person downloads it in the " +
         "app). Asking again while one is `PREPARING` is the same export, `202` with the same `id`; asking after it is " +
         "`READY`, `EXPIRED` or `FAILED` starts a new one. Allowed whatever state the person's bonds are in, ended or " +
-        "left included (BR-9). " + CONTENTS + " Three a day per account, repeats included: the fourth is `429` with " +
-        "`Retry-After`."
+        "left included (BR-9). " + CONTENTS + " Three new exports a day per account; a repeat while one is `PREPARING` spends none: the " +
+        "fourth new one is `429` with `Retry-After`."
 
 private const val GET_DESCRIPTION =
     "One of the caller's exports, as it is now. `downloadUrl`, `expiresAt` and `sizeBytes` are present only while " +
-        "it is `READY`. An export past its 24 hours is `EXPIRED` from that moment. An `exportId` that is someone " +
+        "it is `READY`. An export past its 24 hours is `EXPIRED` from that moment, and so is a `READY` one when " +
+        "entries are withdrawn in one of the person's bonds (a block or a leave that withdraws): its archive held " +
+        "words that are gone for both people, so it is deleted, and the person asks again. An `exportId` that is someone " +
         "else's and one that does not exist are the same `404 NOT_FOUND`."
 
 private const val LATEST_DESCRIPTION =

@@ -388,7 +388,7 @@ stateDiagram-v2
     account_export__FAILED --> account_export__PREPARING: you - ask for a copy of your data
     account_export__PREPARING --> account_export__READY: system - data export job builds the archive (every minute)
     account_export__PREPARING --> account_export__FAILED: system - data export job fails to build it a third time
-    account_export__READY --> account_export__EXPIRED: system - 24 hours pass after the export became ready
+    account_export__READY --> account_export__EXPIRED: system - 2 actions
     account_export__READY --> account_export__NONE: system - hourly account deletion job runs
 ```
 
@@ -405,7 +405,7 @@ stateDiagram-v2
 | In | Action | When | Leads to | Why | Evidence |
 |---|---|---|---|---|---|
 | `NONE` | ask for a copy of your data |  | `PREPARING` | 202 PREPARING with the export's id and requestedAt. Nothing is built yet; the job builds it, usually within the minute. Allowed whatever your bonds' state, ended or left included (BR-9). | smoke |
-| `PREPARING` | ask for a copy of your data |  | stays | The same export: 202 with the same id. Still spends one of the three a day. | smoke |
+| `PREPARING` | ask for a copy of your data |  | stays | The same export: 202 with the same id. A repeat spends none of the three a day. | smoke |
 | `READY` | ask for a copy of your data |  | `PREPARING` | A new export, with a new id: the archive is a copy as of when it is built. The READY one stays downloadable until its expiresAt. | test |
 | `EXPIRED` | ask for a copy of your data |  | `PREPARING` | A new export, with a new id. | never-run |
 | `FAILED` | ask for a copy of your data |  | `PREPARING` | A new export, with a new id. | test |
@@ -432,4 +432,6 @@ stateDiagram-v2
 | `PREPARING` | the data export job builds the archive (every minute) | system |  | `READY` | The archive is built from what each module says you may have: your profile and consents, every bond you are or were in with every day as the app shows it to you (your partner's entries only once revealed to you; a withdrawn entry as a blank placeholder), your bookmarks and the reactions, your support messages, and the administrator-access disclosure; and your photos and voice notes. A confirmed address is emailed, without the link. | smoke |
 | `PREPARING` | the data export job fails to build it a third time | system |  | `FAILED` | Three builds failed (the storage could not be reached, for one): it is given up, and nobody is emailed. | test |
 | `READY` | 24 hours pass after the export became ready | system |  | `EXPIRED` | At expiresAt the route answers EXPIRED; within the hour the job deletes the archive. | test |
+| `READY` | you or your partner withdraw your entries on a leave or a block | system |  | `EXPIRED` | The withdrawn words are gone for both of you, so an archive that may hold them is not honoured: the export is EXPIRED and its archive deleted, yours and your partner's. Ask again for one without them. | smoke |
+| `PREPARING` | you or your partner withdraw your entries on a leave or a block | system |  | `PREPARING` | Built again from what may be read now: a build that read the words before the withdrawal cannot make it READY, and deletes what it stored. | test |
 | `READY` | the hourly account deletion job runs | system |  | `NONE` | Your account's deletion deletes every archive of yours still stored, and every export of yours, whatever its state. | test |

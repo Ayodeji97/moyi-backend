@@ -17,6 +17,23 @@ import java.util.UUID
 interface BondExports {
     /** Every bond [userId] holds or held a membership row in, newest first; empty for nobody. */
     fun bondsOf(userId: UUID): List<ExportedBond>
+
+    /**
+     * Every account that holds or held a membership row in [bondId]: whose exports a withdrawal in
+     * that bond makes stale (ADR-0059 decision 12). **Runs no guard**, so it is one of
+     * `ArchitectureTest`'s unguarded reads, for the work that has no caller, and must never be
+     * reachable from a request. Empty for no such bond.
+     */
+    fun accountsInBond(bondId: UUID): Set<UUID>
+
+    companion object {
+        /**
+         * The event a withdrawal publishes (FR-029a, ADR-0035), from the commit of the leave or block
+         * that withdrew. Its references are [BOND_ID] and the withdrawing member's `memberId`.
+         */
+        const val ENTRIES_WITHDRAWN = "EntriesWithdrawn"
+        const val BOND_ID = "bondId"
+    }
 }
 
 /** One bond, as its member's export carries it. [toString] prints the id only: the name is the couple's words. */

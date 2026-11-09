@@ -109,6 +109,18 @@ internal class BondExportsTest(
         exports.bondsOf(UUID.randomUUID()).shouldBeEmpty()
     }
 
+    @Test
+    fun `the accounts in a bond are both members, the one who left included, and nobody for no bond`() {
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+        val bond = pair(ada, bea)
+        pair(ada, users.verified("Cleo"))
+        end("leave", bea, bond, withdraw = false)
+
+        exports.accountsInBond(UUID.fromString(bond)) shouldBe setOf(ada, bea)
+        exports.accountsInBond(UUID.randomUUID()) shouldBe emptySet()
+    }
+
     private fun end(
         how: String,
         user: UUID,

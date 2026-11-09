@@ -518,7 +518,7 @@ ask for a copy of your data
 
 **Needs:** an access token.
 
-- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After). This route also spends account:export:user, three a day, repeats included: the fourth is 429 with Retry-After
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After). A request that starts a new export also spends account:export:user, three a day (a repeat while one is being prepared spends none): the fourth new one is 429 with Retry-After
 
 **Try it:**
 
@@ -531,7 +531,7 @@ curl -X POST "$API/me/export" -H "Authorization: Bearer $TOKEN"
 | Region | In | When | Answer | Why | Rule | Evidence |
 |---|---|---|---|---|---|---|
 | `account.export` | `NONE` |  | 202 → `PREPARING` | 202 PREPARING with the export's id and requestedAt. Nothing is built yet; the job builds it, usually within the minute. Allowed whatever your bonds' state, ended or left included (BR-9). | FR-009, FR-094, ADR-0059 | smoke |
-| `account.export` | `PREPARING` |  | 202 stays | The same export: 202 with the same id. Still spends one of the three a day. | FR-009, FR-094, ADR-0059 | smoke |
+| `account.export` | `PREPARING` |  | 202 stays | The same export: 202 with the same id. A repeat spends none of the three a day. | FR-009, FR-094, ADR-0059 | smoke |
 | `account.export` | `READY` |  | 202 → `PREPARING` | A new export, with a new id: the archive is a copy as of when it is built. The READY one stays downloadable until its expiresAt. | FR-009, FR-094, ADR-0059 | test |
 | `account.export` | `EXPIRED` |  | 202 → `PREPARING` | A new export, with a new id. | FR-009, FR-094, ADR-0059 | never-run |
 | `account.export` | `FAILED` |  | 202 → `PREPARING` | A new export, with a new id. | FR-009, FR-094, ADR-0059 | test |

@@ -332,7 +332,8 @@ abstract class SecretsNeverLoggedTest(
         get("/bonds/$bond/days", ada).body.contains(BEA_TEXT) shouldBe false
         get("/bonds/$bond/days?favourites=true", ada).status shouldBe 200
         jdbc.queryForObject("SELECT text IS NOT NULL FROM entries WHERE id = ?::uuid", Boolean::class.java, beaEntry) shouldBe true
-        dispatcher.dispatchDue(Instant.now(), DISPATCH_BUDGET).delivered shouldBe 1
+        // Two consumers of the withdrawal: gratitude's erasure and the export's expiry (ADR-0059 decision 12).
+        dispatcher.dispatchDue(Instant.now(), DISPATCH_BUDGET).delivered shouldBe 2
         jdbc.queryForObject("SELECT text IS NULL FROM entries WHERE id = ?::uuid", Boolean::class.java, beaEntry) shouldBe true
         get("/bonds/$bond/today", bea).status shouldBe 200
 
