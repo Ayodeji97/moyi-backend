@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.getmoyi.moyi",
+      "sha256_cert_fingerprints": [
+        "E6:D3:18:D4:53:70:36:CD:01:F6:13:50:B9:0C:B9:2F:FC:14:3D:4A:76:A9:53:59:13:BF:63:BB:7C:17:61:66"
+      ]
+    }
+  }
+]
