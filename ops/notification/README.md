@@ -18,7 +18,8 @@ fails and **every** deploy stops. If it deploys with the fields empty, the API r
 1. In the Firebase console, create a project, for example `moyi-prod`. Leave Analytics off: the
    app does not use it, and it is one more processor to disclose.
 2. Register the same two apps as in `moyi-65b68`:
-   - Android `com.moyi.app`
+   - Android `app.getmoyi.moyi` (one ID on both platforms since moyi-app #51; `moyi-65b68`
+     still also holds the older `com.moyi.app`)
    - iOS `app.getmoyi.moyi`
 3. Project settings → Cloud Messaging → Apple app configuration. Upload the **same APNs auth
    key** (`.p8`) used for `moyi-65b68`. One key serves every project of the Apple team. Fill

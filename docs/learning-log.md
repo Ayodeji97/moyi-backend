@@ -3190,6 +3190,19 @@ Wrong about: a short commit being a version. CI tags images with the full SHA, a
          A step handed to someone else is done when its own output says so, not when a
          reading taken somewhere near it looks right.
 
+## 2026-11-09 · Ops · Real pushes from production, through moyi-prod (issue #133 step 4)
+
+Expected: switching the API to FCM is two lines in `config/deploy.yml`.
+Reality: it is three files and one guard. The fields must be in the `kamal secrets fetch`
+         list as well as extracted, or every deploy stops; the web role alone gets `fcm`, and
+         the shared `log` stays, because the media worker builds a push sender with no
+         secrets. `ProductionStartsWithoutMediaSecretsTest` caught the API's three new
+         secrets on the first run, and now also holds that the API names `moyi-prod` and the
+         worker logs (red with the web role set back to `log`). The runbook still named the
+         Android app `com.moyi.app`; it has been `app.getmoyi.moyi` since moyi-app #51.
+Wrong about: nothing yet; the proof is the deploy's `Push provider: FCM (project: moyi-prod)`
+         line and one real push on a phone (runbook steps 5 and 6).
+
 ## 2026-11-09 · Feature · The data export: the app's own reading, five modules' answers (FR-009, FR-094, #126, ADR-0059)
 
 Expected: a query per table, joined into one JSON file by a job.
