@@ -3116,3 +3116,23 @@ Wrong about: the walk's first version stopped at a square the job had already ev
          window ends, so no reader keeps a copy of the job's schedule. Also from that review:
          the index test raced two plans on the shared test database; the competing index is now
          dropped inside a rolled-back transaction, so only one plan is left to choose.
+
+
+## 2026-11-09 · Feature · A typed code fails closed while Redis is down (owner's ruling, ADR-0023 amended)
+
+Expected: one line where the limiter fails open, and a branch in it for one bucket.
+Reality: there is no such line. The limiter never throws, by design: it answers `Unavailable`,
+         and every consumer fails open by checking only for `Rejected`. So the policy went on
+         the bucket (`failsClosed`, in the closed table, pinned by a test to exactly one entry)
+         and the refusal in the bucket's one consumer, `VerificationCodeCheck.limit`, which
+         already ran before any read. That placement is what makes the 503 cheap to get right:
+         no lookup, no count, no spend, and the same bytes for every address, for free.
+Wrong about: the switched-off limiter. `enabled=false` answered `Unavailable` too, so the first
+         version refused every code in every module test context, which runs with the limiter
+         off. Found before running by reading `RateLimitConfiguration`; proved by folding the
+         new `Disabled` decision back into `Unavailable`, which fails 12 of
+         `EmailCodeEndpointTest`'s 13. "Off" and "unreachable" had been one answer because, until
+         a bucket treated them differently, they meant the same thing.
+         The new problem code is a new enum value in every error response, so oasdiff calls
+         the contract change breaking (response-property-enum-value-added, 390 places) though
+         no route changed shape: the PR carries `breaking-api-change`.

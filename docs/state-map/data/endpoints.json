@@ -1075,7 +1075,7 @@
         "reason": "Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again.",
         "evidence": "test",
         "evidenceRef": "HashingCapacityResponseTest#saturation is 503 with a Retry-After, not 500",
-        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#errorCode = ErrorCode.HASHING_CAPACITY_EXCEEDED,"
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#else ErrorCode.HASHING_CAPACITY_EXCEEDED"
       }
     ],
     "curl": "curl -X POST \"$API/auth/register\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"password\\\": \\\"$PASSWORD\\\", \\\"displayName\\\": \\\"Ada\\\", \\\"over18\\\": true}\""
@@ -1098,6 +1098,14 @@
         "evidence": "smoke",
         "evidenceRef": "blank token is 422 VALIDATION_FAILED",
         "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/VerificationController.kt#internal data class VerifyEmailRequest("
+      },
+      {
+        "status": 503,
+        "code": "CODE_CHECK_UNAVAILABLE",
+        "reason": "An email and a code only, while the store that counts typed codes (Redis) cannot be reached: no code is checked until it is back (owner's ruling 2026-11-09, ADR-0023 amended). Retry-After: 60. Answered before the address is looked up, so it is the same bytes for an address with no account, and the code is neither counted nor spent. A token is never answered this: the link still works, and is what to offer.",
+        "evidence": "test",
+        "evidenceRef": "TypedCodeRedisOutageTest#a typed verification code is 503 with Retry-After, and is neither spent nor counted",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerificationCodeCheck.kt#RateLimitDecision.Unavailable -> if (bucket.failsClosed) throw CodeCheckUnavailableException()"
       }
     ],
     "curl": "curl -X POST \"$API/auth/verify-email\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$VERIFY_TOKEN\\\"}\"   # or -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"code\\\": \\\"$CODE\\\"}\""
@@ -1149,7 +1157,7 @@
         "reason": "Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. (the test of this answer drives register, not sign-in)",
         "evidence": "never-run",
         "evidenceRef": "",
-        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#errorCode = ErrorCode.HASHING_CAPACITY_EXCEEDED,"
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#else ErrorCode.HASHING_CAPACITY_EXCEEDED"
       }
     ],
     "curl": "curl -X POST \"$API/auth/login\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"password\\\": \\\"$PASSWORD\\\", \\\"device\\\": {\\\"platform\\\": \\\"ANDROID\\\", \\\"appVersion\\\": \\\"1.0\\\", \\\"osVersion\\\": \\\"16\\\"}}\""
@@ -1395,7 +1403,15 @@
         "reason": "Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. The link or the code is not spent. (the test of this answer drives register, not a reset)",
         "evidence": "never-run",
         "evidenceRef": "",
-        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#errorCode = ErrorCode.HASHING_CAPACITY_EXCEEDED,"
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#else ErrorCode.HASHING_CAPACITY_EXCEEDED"
+      },
+      {
+        "status": 503,
+        "code": "CODE_CHECK_UNAVAILABLE",
+        "reason": "An email, a code and a password only, while the store that counts typed codes (Redis) cannot be reached: no code is checked until it is back (owner's ruling 2026-11-09, ADR-0023 amended). Retry-After: 60. Answered before the address is looked up or the password hashed, the same bytes for every address; the code is neither counted nor spent. A token is never answered this: the reset link still works.",
+        "evidence": "test",
+        "evidenceRef": "TypedCodeRedisOutageTest#a typed reset code is 503 and spends nothing, while the reset link still works",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerificationCodeCheck.kt#RateLimitDecision.Unavailable -> if (bucket.failsClosed) throw CodeCheckUnavailableException()"
       }
     ],
     "curl": "curl -X POST \"$API/auth/reset-password\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$RESET_TOKEN\\\", \\\"password\\\": \\\"$PASSWORD\\\"}\"   # or -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"code\\\": \\\"$CODE\\\", \\\"password\\\": \\\"$PASSWORD\\\"}\""

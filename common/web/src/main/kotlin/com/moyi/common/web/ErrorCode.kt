@@ -90,6 +90,16 @@ enum class ErrorCode {
     PASSWORD_RESET_TOKEN_EXPIRED,
 
     /**
+     * `verify-email` or `reset-password` with an `email` and a `code` while the store that
+     * counts typed codes (ten a day per address, ADR-0023) cannot be reached. 503 with
+     * `Retry-After`. The code was not looked at, spent or counted, and the answer is the same
+     * whether the address has an account or not. The link in the same email still works; a
+     * client's move is to offer it, or to try the code again after the wait (owner's ruling,
+     * 2026-11-09: typed codes fail closed, links fail open).
+     */
+    CODE_CHECK_UNAVAILABLE,
+
+    /**
      * FR-002: "unverified accounts may sign in but MUST NOT create or join a
      * Bond." 403 rather than 401 — the token is perfectly valid, the account
      * simply lacks the authority — and rather than 422, because nothing about

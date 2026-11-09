@@ -100,6 +100,7 @@ curl -X POST "$API/auth/verify-email" -H 'Content-Type: application/json' -d "{\
 | Status | Code | Why | Evidence |
 |---|---|---|---|
 | 422 | `VALIDATION_FAILED` | The body is not exactly one of a token, or an email and a code: neither, both, a blank token, or an address without a code (one violation on tokenOrEmailAndCode). Or the token is over 256 characters, the email is not shaped like an address, or the code is not six ASCII digits (errors code VALID_VERIFICATION_CODE). A token is not otherwise shape-checked: a mangled token is the state answer, 422 VERIFICATION_TOKEN_INVALID. Nothing here looks an address up or counts against a code. | smoke |
+| 503 | `CODE_CHECK_UNAVAILABLE` | An email and a code only, while the store that counts typed codes (Redis) cannot be reached: no code is checked until it is back (owner's ruling 2026-11-09, ADR-0023 amended). Retry-After: 60. Answered before the address is looked up, so it is the same bytes for an address with no account, and the code is neither counted nor spent. A token is never answered this: the link still works, and is what to offer. | test |
 
 ### POST /auth/resend-verification
 
@@ -597,6 +598,7 @@ curl -X POST "$API/auth/reset-password" -H 'Content-Type: application/json' -d "
 |---|---|---|---|
 | 422 | `VALIDATION_FAILED` | The body is not exactly one of a token, or an email and a code (one violation on tokenOrEmailAndCode); or the token is over 256 characters, the email is not shaped like an address, or the code is not six ASCII digits (VALID_VERIFICATION_CODE); or password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED). This is checked before the link or code is looked at, so a refused password spends neither and counts against no code. (the tests and the smoke script assert the status and the field's code, NOT_BREACHED, not VALIDATION_FAILED) | never-run |
 | 503 | `HASHING_CAPACITY_EXCEEDED` | Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. The link or the code is not spent. (the test of this answer drives register, not a reset) | never-run |
+| 503 | `CODE_CHECK_UNAVAILABLE` | An email, a code and a password only, while the store that counts typed codes (Redis) cannot be reached: no code is checked until it is back (owner's ruling 2026-11-09, ADR-0023 amended). Retry-After: 60. Answered before the address is looked up or the password hashed, the same bytes for every address; the code is neither counted nor spent. A token is never answered this: the reset link still works. | test |
 
 ## Bond
 

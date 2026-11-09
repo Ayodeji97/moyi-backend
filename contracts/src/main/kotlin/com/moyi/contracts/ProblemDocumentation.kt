@@ -35,6 +35,8 @@ internal val SERVERS: List<Server> =
  * - **410**, a link that was real but is spent or past its time (doc 06 §3.1): `VERIFICATION_TOKEN_EXPIRED` and
  *   `PASSWORD_RESET_TOKEN_EXPIRED`.
  * - **503 `HASHING_CAPACITY_EXCEEDED`**, with `Retry-After: 1` (NFR-005a): every operation that hashes a password.
+ * - **503 `CODE_CHECK_UNAVAILABLE`**, with `Retry-After: 60` (owner's ruling 2026-11-09, ADR-0023 amended): `verify`
+ *   and `reset` given an `email` and a `code` while the typed-code limit cannot be read. Never for a `token`.
  * - ADR-0047's media statuses: an upload declared too large (413 `MEDIA_QUOTA_EXCEEDED`) or of a type its kind does
  *   not take (415 `MEDIA_TYPE_UNSUPPORTED`); and no storage configured, or none reachable (503
  *   `MEDIA_STORAGE_UNAVAILABLE`).
@@ -45,7 +47,7 @@ internal fun statusesOf(operationId: String?): List<HttpStatus> = OPERATION_STAT
 
 private val OPERATION_STATUSES: Map<String, List<HttpStatus>> =
     mapOf(
-        "verify" to listOf(HttpStatus.GONE),
+        "verify" to listOf(HttpStatus.GONE, HttpStatus.SERVICE_UNAVAILABLE),
         "reset" to listOf(HttpStatus.GONE, HttpStatus.SERVICE_UNAVAILABLE),
         "register" to listOf(HttpStatus.SERVICE_UNAVAILABLE),
         "login" to listOf(HttpStatus.SERVICE_UNAVAILABLE),
@@ -74,6 +76,12 @@ private const val PUBLIC_UNAUTHORIZED =
 private const val HASHING_BUSY =
     "Service Unavailable: `HASHING_CAPACITY_EXCEEDED`, with `Retry-After: 1`. Password hashing is momentarily full; " +
         "retry the same request."
+
+private const val CODE_CHECK_DOWN =
+    "`CODE_CHECK_UNAVAILABLE`, with `Retry-After: 60`, for an `email` and `code` only: the " +
+        "limit on typed codes cannot be read just now, so no code is checked. The code is not spent or counted, and " +
+        "the answer is the same whether the address has an account. The link in the same email still works; offer " +
+        "it, or try the code again after the wait."
 
 private val STATUS_DESCRIPTIONS: Map<Pair<String, HttpStatus>, String> =
     mapOf(
@@ -105,7 +113,8 @@ private val STATUS_DESCRIPTIONS: Map<Pair<String, HttpStatus>, String> =
             "for all of them, on purpose; ask for a new email.",
         ("register" to HttpStatus.SERVICE_UNAVAILABLE) to HASHING_BUSY,
         ("login" to HttpStatus.SERVICE_UNAVAILABLE) to HASHING_BUSY,
-        ("reset" to HttpStatus.SERVICE_UNAVAILABLE) to "$HASHING_BUSY The link or the code is not spent.",
+        ("verify" to HttpStatus.SERVICE_UNAVAILABLE) to "Service Unavailable: $CODE_CHECK_DOWN",
+        ("reset" to HttpStatus.SERVICE_UNAVAILABLE) to "$HASHING_BUSY The link or the code is not spent. Or $CODE_CHECK_DOWN",
     )
 
 /** `ProblemDetail`'s trace extension member: see [traceIdSchema]. */

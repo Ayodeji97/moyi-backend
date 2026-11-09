@@ -33,7 +33,10 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * **Fail-open, and loudly.** Redis is a coordinator, never a source of truth
  * (doc 07 §5): if it cannot be reached, the answer is [RateLimitDecision.Unavailable]
- * and the request goes through. The alternative — refusing every login while
+ * and the request goes through — except where the consumer of a bucket that
+ * [RateLimitBucket.failsClosed] turns that answer into a refusal (only
+ * `auth:code:email`: a typed code is refused while Redis is down, ADR-0023
+ * amended 2026-11-09). The alternative — refusing every login while
  * the cache is down — turns a cache outage into an authentication outage,
  * and the controls that remain (Argon2id's cost, the silent exponential
  * lockout in Postgres) still stand. It is loud in two ways: a WARN, at most
@@ -186,7 +189,8 @@ class RedisRateLimiter(
         }
         log.warn(
             "Rate limiting is unavailable: Redis did not answer ({}: {}). Requests are being allowed through " +
-                "without limits for the next {}; see the moyi.rate_limit.backend_unavailable counter.",
+                "without limits for the next {}, except typed email codes, which are refused (503 " +
+                "CODE_CHECK_UNAVAILABLE); see the moyi.rate_limit.backend_unavailable counter.",
             failure.javaClass.simpleName,
             failure.message,
             properties.retryInterval,

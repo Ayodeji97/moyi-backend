@@ -51,10 +51,22 @@ internal class VerificationCodeCheck(
      * keyed on the address as typed and counted for every address alike, so the 429 says
      * nothing about whether one is registered. First, before any read: a refused attempt
      * costs nothing and is not counted against the code.
+     *
+     * **Fails closed** ([RateLimitBucket.failsClosed], owner's ruling 2026-11-09): when the
+     * limiter cannot reach Redis, the code is refused rather than checked without the daily
+     * bound. Still before any read, so the refusal is the same for every address and the code
+     * is neither spent nor counted. Only this path: the link is never limited here.
+     *
+     * @throws RateLimitExceededException ten codes today already
+     * @throws CodeCheckUnavailableException the daily count cannot be read
      */
     fun limit(email: Email) {
-        val decision = rateLimiter.tryConsume(RateLimitBucket.AUTH_CODE_EMAIL, email.value.lowercase())
-        if (decision is RateLimitDecision.Rejected) throw RateLimitExceededException(decision)
+        val bucket = RateLimitBucket.AUTH_CODE_EMAIL
+        when (val decision = rateLimiter.tryConsume(bucket, email.value.lowercase())) {
+            is RateLimitDecision.Rejected -> throw RateLimitExceededException(decision)
+            RateLimitDecision.Unavailable -> if (bucket.failsClosed) throw CodeCheckUnavailableException()
+            is RateLimitDecision.Allowed, RateLimitDecision.Disabled -> Unit
+        }
     }
 
     /**
@@ -92,6 +104,12 @@ internal class VerificationCodeCheck(
         val NO_TOKEN = UUID(0L, 0L)
     }
 }
+
+/**
+ * The typed-code limit could not be read, so the code was not checked (ADR-0023, amended
+ * 2026-11-09). Carries nothing about the address or the code: the answer is the same for all.
+ */
+internal class CodeCheckUnavailableException : RuntimeException("The typed-code limit cannot be read; codes are refused until it can")
 
 /** A code [VerificationCodeCheck] accepted: whose, and the row it was on. */
 internal data class AcceptedCode(
