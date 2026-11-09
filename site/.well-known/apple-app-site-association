@@ -3,22 +3,7 @@
     "details": [
       {
         "appIDs": ["7DUJFVWF7W.app.getmoyi.moyi"],
-        "components": [
-          {
-            "/": "/verify",
-            "?": { "token": "?*" },
-            "comment": "The confirmation email: /verify?token=<token>"
-          },
-          {
-            "/": "/reset-password",
-            "?": { "token": "?*" },
-            "comment": "The reset email: /reset-password?token=<token>"
-          },
-          {
-            "/": "/i/?*",
-            "comment": "An invite link: /i/<code> (InviteLinks.kt)"
-          }
-        ]
+        "components": []
       }
     ]
   }

@@ -37,10 +37,26 @@ file from `https://getmoyi.app/.well-known/…` and checks it names the app.
 | File | For | Says |
 |---|---|---|
 | `assetlinks.json` | Android App Links | package `app.getmoyi.moyi`, and the SHA-256 of the certificate the app is signed with |
-| `apple-app-site-association` (no extension) | iOS Universal Links | app `7DUJFVWF7W.app.getmoyi.moyi`, and the three addresses above: `/verify` and `/reset-password` with a `token` query value, and `/i/<code>` |
+| `apple-app-site-association` (no extension) | iOS Universal Links | app `7DUJFVWF7W.app.getmoyi.moyi`, and **no addresses yet** (`"components": []`) |
 
-Any other address, this page and `/invite` included, stays in the browser: an
-address the Apple file does not list is not the app's.
+**The Apple file lists no addresses, on purpose.** The app declares
+`applinks:getmoyi.app` (moyi-app #54) but does not route a universal link yet.
+Were `/verify` listed, iOS would open the app on the confirmation link, the app
+would do nothing with it, and nobody could confirm their email. So every address
+stays in the browser until the moyi-app link-routing PR lands. That PR replaces
+`"components": []` with exactly these three, and nothing else (`/`, `/invite`
+and the rest stay in the browser):
+
+```json
+"components": [
+  { "/": "/verify", "?": { "token": "?*" }, "comment": "The confirmation email: /verify?token=<token>" },
+  { "/": "/reset-password", "?": { "token": "?*" }, "comment": "The reset email: /reset-password?token=<token>" },
+  { "/": "/i/?*", "comment": "An invite link: /i/<code> (InviteLinks.kt)" }
+]
+```
+
+`assetlinks.json` ships as it is: it is harmless while the Android manifest
+has no `autoVerify` intent filter, since nothing asks Android to check it.
 
 Where the values come from:
 
