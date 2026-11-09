@@ -1,5 +1,6 @@
 package com.moyi.bond.service
 
+import com.moyi.bond.api.AccountMembership
 import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondAnchorTimeline
 import com.moyi.bond.api.BondClosingView
@@ -17,6 +18,7 @@ import com.moyi.bond.infra.database.AnchorIntervalStore
 import com.moyi.bond.infra.database.BondClosingStore
 import com.moyi.bond.infra.database.BondStore
 import com.moyi.bond.infra.database.EntryWithdrawals
+import com.moyi.bond.infra.database.MembershipRows
 import com.moyi.identity.api.UserDirectory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
@@ -44,7 +46,10 @@ import com.moyi.bond.domain.BondType as DomainBondType
  * also taking the `Membership` that proves it was checked.
  */
 @Service
-@Suppress("LongParameterList") // Seven collaborators, each one store or port the facts above are read from; nothing to bundle them into.
+@Suppress(
+    "LongParameterList", // Seven collaborators, each one store or port the facts above are read from; nothing to bundle them into.
+    "TooManyFunctions", // One override per BondAccess method; the member report (ADR-0053 decision 14) added the twelfth.
+)
 internal class BondAccessAdapter(
     private val guard: BondAccessGuard,
     private val bonds: BondStore,
@@ -52,6 +57,7 @@ internal class BondAccessAdapter(
     private val closing: BondClosingStore,
     private val pasts: BondPasts,
     private val withdrawals: EntryWithdrawals,
+    private val memberships: MembershipRows,
     private val users: UserDirectory,
 ) : BondAccess {
     @Transactional(readOnly = true)
@@ -92,6 +98,10 @@ internal class BondAccessAdapter(
 
     @Transactional(readOnly = true)
     override fun closingViewOf(bondId: UUID): BondClosingView? = closingView(bondId)
+
+    @Transactional(readOnly = true)
+    override fun membershipsOfAccount(userId: UUID): List<AccountMembership> =
+        memberships.of(UserId(userId)).map { AccountMembership(it.bondId.value, it.memberId.value) }
 
     @Transactional(propagation = Propagation.MANDATORY)
     override fun lockClosingViewOf(bondId: UUID): BondClosingView? {
@@ -150,6 +160,15 @@ internal class BondAccessAdapter(
         check(bond.members.size <= 2) { "a bond has more than two member rows; the partner is no longer one row" }
         val partner = bond.members.firstOrNull { it.id.value != membership.memberId } ?: return null
         return displayNameOf(users.find(partner.userId.value))
+    }
+
+    /** [partnerDisplayNameOf]'s read of the other row; none is the guard's own `404` (ADR-0053, amended for #127). */
+    @Transactional(readOnly = true)
+    override fun partnerMemberIdOf(membership: BondMembership): UUID {
+        val bond = bonds.findByMember(BondId(membership.bondId), UserId(membership.userId)) ?: throw BondNotFoundException()
+        check(bond.members.size <= 2) { "a bond has more than two member rows; the partner is no longer one row" }
+        val partner = bond.members.firstOrNull { it.id.value != membership.memberId } ?: throw BondNotFoundException()
+        return partner.id.value
     }
 
     private fun assemble(

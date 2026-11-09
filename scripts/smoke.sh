@@ -1,6 +1,52 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# Issue #125 adds the account-deletion section: the password asked for again (422 absent or blank,
+# 401 INVALID_CREDENTIALS wrong, without WWW-Authenticate), the 202 with its two windows, the
+# idempotent repeat, the pending request on GET /me, one email, sign-in kept, a cancel and the one
+# 404, then the window moved back by SQL and the job (on a five-second cron, held 30 s by ShedLock)
+# carrying it out: the account anonymised and shut, the partner's bond archived, the person's entry a
+# flagged tombstone, the day's status kept. Last run on 2026-11-09, on feat/account-deletion, from a
+# jar of the branch's tree on 30f5873, against its own compose project (moyi-41i: Postgres 55471,
+# Valkey 56391, MinIO 59471), the jar booted by hand (local profile, the account-deletion cron at
+# */5) and --attach: 1560 passed, 0 failed, 0 skipped, on a fresh database, after the review fixes of
+# #158. An earlier run (1555, 4 failed, 1 skipped: the tag across the erasure) waited 20 s for the
+# job, which ShedLock's 30 s hold outlasts, and read psql's command tag with an UPDATE's RETURNING.
+#
+# Issue #135 adds the typed-codes section: the six digits in the verification and reset emails,
+# read from the log; {email, code} verifies and resets; an unknown address is the same bytes as a
+# wrong code; five wrong burn the code while its link still works; a new email retires the old
+# code; a used code is refused with its link spent; ten typed codes a day per address and twenty
+# presentations an hour per client address, each to its 429. Last run on 2026-11-09, on
+# feat/typed-email-codes, from a jar of 303a1df (main at f906903, #150, merged in), on a fresh
+# database that applied 44 migrations to V51, against its own compose project (moyi-41h:
+# Postgres 55458, Valkey 56348, MinIO 59275; 55448 and 59266 were held by a forward docker did
+# not list), the jar booted by hand (local profile) and --attach: 1454 passed, 0 failed,
+# 1 skipped (the tag across the erasure, the poller having won the race).
+#
+# Issue #132 (the late-entry grace, ADR-0033 decision 15) adds a late-entries section: a fresh bond
+# moved back three days into a region zone where it is between 01:00 and 05:59, the job writing
+# the day past its grace and not yesterday, an entry with an intendedAt before midnight counting for
+# yesterday, one older than twelve hours landing on today, settlesAt on today and on the streak's
+# OPEN squares, and yesterday still open after more runs. Last run on 2026-11-09, on
+# feat/late-entry-grace after the review fixes (e131b048, main f906903 merged in), from a jar of
+# that tree, on a fresh database, against compose project moyi-41f (Postgres 55461, Valkey 56361,
+# MinIO 59261), the jar booted by hand (local profile) and --attach: 1408 passed, 0 failed,
+# 0 skipped. The run before (main c6428c1 merged in) had one failure: the sign-in limit's
+# Retry-After, 179 for 180, a second boundary in a probe this change does not touch; it did not
+# recur.
+#
+# The contract-precision PR (#137 to #140, #142) adds five probes: an error body's traceId (32 hex
+# digits, a new one per request) and a TIMEZONE_CHANGE_TOO_SOON refusal's typed allowedFrom, equal to
+# the date its detail names, with its traceId on the log line for that refusal. Every "identical
+# body" probe now compares bodies without the traceId, which differs per request by design. Last
+# run on 2026-11-08, on fix/contract-precision, from a jar of 03df6263 (main at f9bef43, #148, merged
+# in), on a fresh database, against its own compose project (moyi-41a: Postgres 55441, Valkey
+# 56341, MinIO 59241), the jar booted by hand (local profile) and --attach: 1365 passed, 0 failed,
+# 0 skipped. An earlier run on the branch failed 27 identical-body probes on the traceId, before
+# they compared without it; one run with a media worker booted beside the API (to measure
+# metaspace) failed 3 media probes, because the worker took those events and its log is not read.
+#
 # What it is written to check (a run is the proof, not this header): the
 # packaged application boots against the compose Postgres,
 # and every identity endpoint that exists so far — registration, verification,
@@ -23,7 +69,7 @@
 # it, ENTRY_IMMUTABLE, the tombstone a delete leaves, a replay of a deleted
 # entry, and a timed bond waiting in PENDING_REVEAL. Since slice C3 it runs
 # the close job for real, on a five-second schedule, and checks it took its
-# lock, failed on nothing and left no ended day unclosed. Since slice C4 it
+# lock, failed on nothing and left no day past its grace unclosed. Since slice C4 it
 # reads the streak: one on the first day both have written, and on today's
 # payload, and zero while a day waits on its reveal time. Since slice C5a it
 # ends bonds with the outbox poller running: a block and a leave that ask for
@@ -70,6 +116,14 @@
 # Since slice C6c it reads milestones: nothing reached and 7 next on a new bond; the seventh
 # complete day today, six earlier ones put in by hand, reached the moment both wrote and the
 # same for both; and after a leave, what was reached kept and nothing next, for both alike.
+# Since issue #141 it reads the run that ended and why a day is a rest day: 21 past days put in
+# by hand unevaluated, the bond's pairing moved back to the first, evaluated by the real close
+# job into a rest day a freeze paid for, a date a zone change stepped over, and a run of sixteen
+# that an empty day ended; the same bytes for both members.
+# Last run on 2026-11-08, on feat/streak-ended-run-and-freeze-reason (main d8315f5), from a jar of
+# that tree, on a fresh database that applied 41 migrations to V43, against its own compose project
+# (moyi-41b: Postgres 55442, Valkey 56342, MinIO 59243), the jar booted by hand (local profile) and
+# --attach: 1347 passed, 0 failed, 1 skipped (the tag across the erasure, the poller having won the race).
 # Since the favourites rulings (ADR-0036 questions 5 and 7) every day of the archive names the
 # partner and today does not, and a favourite's row holds no time (V26).
 # Since the entry-text rulings (ADR-0031, the owner's rulings 1 and 2) an entry of only
@@ -133,6 +187,37 @@
 # 2c0e3bf, on a fresh database that applied 38 migrations to V39, against its own compose project
 # (moyi-report: Postgres 55454, Valkey 63814, MinIO 59028), the jar booted by hand (local profile)
 # and --attach: 1273 passed, 0 failed, 0 skipped, 33 sections. Before it, from 3e8a78a: 1254, 0, 0.
+# Since issue #128 (ADR-0056) it reads the legal documents with no token, its ETag and a 304 on
+# it; sees registration record the server's versions and not the one the request sent, GET /me
+# report them, re-consent answer 204 twice and add no row, and 401 without a token. Last run on
+# 2026-11-08, on feat/meta-legal-and-consent-versions, from a jar of the tree this header was
+# committed with (only this paragraph added after), on a fresh database that applied 40
+# migrations to V41, against its own compose project (moyi-41c: Postgres 55443, Valkey 56343,
+# MinIO 59245), the jar booted by hand (local profile) and --attach: 1339 passed, 0 failed,
+# 0 skipped, 35 sections.
+# Since in-app support (FR-102, ADR-0057) it writes to support: 401 without a token, 422 on subject
+# and on body (each repeating nothing sent), a 201 and its replay under the key (same body, one
+# ticket), the sixth in a day 429 with Retry-After, the acknowledgement logged once by the logging
+# provider with the ticket's id and without a word of the message, and the operator's `moyi support`
+# list, show and close (the words emptied, each look logged). Last run on 2026-11-08, on
+# feat/support-messages, from a jar of a470027 (main's #147 merged in), on a fresh database migrated
+# to V47, against its own compose project (moyi-41d), --attach: 1389 passed, 0 failed, 0 skipped.
+# Before it, from a jar of a6e5b08 (main's #145 and #148 merged in, the CHECK at V47),
+# on a fresh database that applied every migration to V47, against its own compose project
+# (moyi-41d: Postgres 55444, Valkey 56344, MinIO 59247), the jar booted by hand (local profile)
+# and --attach: 1384 passed, 0 failed, 0 skipped. Before it, from 14ce084 (before the merge, the
+# CHECK then a decimal V45.1): 1350, 0 and 1 skipped (the tag across the erasure).
+# Since the member report (#127, ADR-0053 decision 14) a section of its own: a bond with nobody to
+# report and a stranger the same 404, 422 on reason, 201 with {id, reason} and its replay, one MEMBER
+# row holding nothing, the reported member's GET /bonds/{id} and GET /today byte for byte and ETag for
+# ETag the same after it, 201 after a block, the operator's list and dismissals, the detail in no log.
+# Last run on 2026-11-09 on feat/report-member after main's #150 (f906903) was merged in, from a
+# jar of that merge (a1ce621), on a fresh database that applied 44 migrations to V48, against its
+# own compose project (moyi-41e: Postgres 55445, Valkey 56345, MinIO 59249), the jar booted by hand
+# (local profile) and --attach: 1424 passed, 0 failed, 1 skipped (the tag across the erasure, the
+# poller having won the race), 38 sections. Before the merge, at V46 (since renumbered V48): 1362,
+# 0, 1 skipped, 35 sections; the run before that failed one probe, the entry reports' list check
+# still expecting the list's old columns.
 # Since semantic search S1 (FR-204, ADR-0054) it runs with the embedding provider `none`, as the
 # local profile and production name it: search 200 by words alone; "Remember when" 200 from the
 # words' ranking alone (and a plain question whose words are not all in one entry answers no day),
@@ -431,7 +516,12 @@ expect() {
   else
     pass "$label ($status)"
   fi
-  LAST_BODY="$text"
+  # An error body's traceId is the id of its own request's trace (ADR-0024, amended 2026-11-08): different on
+  # every request by design, and so different between two refusals that are otherwise byte for byte the same.
+  # LAST_BODY is the body without it, which is what every "identical body" probe compares (the id is random per
+  # request, so it says nothing about the bond or the account); LAST_RAW_BODY is the body as sent.
+  LAST_RAW_BODY="$text"
+  LAST_BODY="$(printf '%s' "$text" | sed -E 's/,"traceId":"[0-9a-f]{32}"//')"
 }
 
 # header_is <label> <header-name> <expected-value> — checked against LAST_HEADERS.
@@ -442,6 +532,11 @@ header_is() {
   got="$(printf '%s\n' "$LAST_HEADERS" | grep -i "^$name:" | head -1 | cut -d' ' -f2- || true)"
   if [ "$got" = "$want" ]; then pass "$label ($name: $got)"; else fail "$label" "expected $name: $want, got '${got:-<absent>}'"; fi
 }
+
+# keep_body <name> — with SMOKE_BODIES=<dir>, writes LAST_BODY there as <name>.json: real bodies of each
+# shape a generated client must decode (a partner's entry LOCKED, REVEALED and DELETED; a problem with its
+# extension members), for testing a client's decoder against (#140). Nothing is written without the variable.
+keep_body() { [ -n "${SMOKE_BODIES:-}" ] || return 0; mkdir -p "$SMOKE_BODIES"; printf '%s' "$LAST_RAW_BODY" > "$SMOKE_BODIES/$1.json"; }
 
 # What has to be undone however the script ends: the app it booted, and the
 # prompts section's translations, which it puts into the shared library for one
@@ -478,7 +573,8 @@ if [ "$ATTACH" = 0 ]; then
   "$JAVA" -jar "$JAR" --spring.profiles.active=local --server.port="$PORT" --management.server.port="$MGMT_PORT" \
     --spring.datasource.url="jdbc:postgresql://localhost:5432/$MOYI_DB" \
     --moyi.scheduling.close.cron='*/5 * * * * *' \
-    --moyi.scheduling.reminders.cron='*/5 * * * * *' --moyi.scheduling.held-pushes.cron='*/5 * * * * *' >"$MOYI_LOG" 2>&1 &
+    --moyi.scheduling.reminders.cron='*/5 * * * * *' --moyi.scheduling.held-pushes.cron='*/5 * * * * *' \
+    --moyi.scheduling.account-deletion.cron='*/5 * * * * *' >"$MOYI_LOG" 2>&1 &
   APP_PID=$!
   for _ in $(seq 1 90); do
     grep -q "Started MoyiApplication" "$MOYI_LOG" && break
@@ -532,6 +628,11 @@ expect "unknown route under /api/v1 is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHE
 
 echo; echo "resource server (ADR-0019)"
 expect "GET /me without a token is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHENTICATED"' -- "$API/me"
+# Doc 06 §2, ADR-0024 (amended 2026-11-08): every error body carries the W3C id of its request's trace.
+[[ "$LAST_RAW_BODY" =~ \"traceId\":\"[0-9a-f]{32}\" ]] && pass "…and the error body carries a traceId, 32 hex digits" || fail "traceId on an error body" "${LAST_RAW_BODY:0:250}"
+FIRST_TRACE="$(python3 -c "import json,sys; print(json.load(sys.stdin).get('traceId',''))" <<<"$LAST_RAW_BODY" 2>/dev/null || true)"
+expect "…and a second request is answered under a trace of its own" 401 '"traceId":"' -- "$API/me"
+[[ -n "$FIRST_TRACE" && "$LAST_RAW_BODY" =~ \"traceId\":\"[0-9a-f]{32}\" && "$LAST_RAW_BODY" != *"$FIRST_TRACE"* ]] && pass "…a different traceId" || fail "traceId per request" "first '$FIRST_TRACE', then ${LAST_RAW_BODY:0:250}"
 if curl -s -o /dev/null -D - "$API/me" | grep -qi "^www-authenticate: bearer"; then pass "…with a WWW-Authenticate: Bearer challenge"; else fail "WWW-Authenticate" "header missing on the 401"; fi
 expect "GET /me with a garbage token is 401" 401 '"code":"UNAUTHENTICATED"' -- "$API/me" -H 'Authorization: Bearer not-a-jwt'
 
@@ -629,6 +730,30 @@ header_is "…and every authenticated request is counted against the per-user bu
 expect "a trailing slash is a 404 in the contract's shape" 404 '"type":"https://api.getmoyi.app/problems/not-found"' -- "$API/me/" -H "Authorization: Bearer $ACCESS"
 [[ "$LAST_BODY" == *'"detail":"No such resource."'* && "$LAST_BODY" != *"static resource"* ]] && pass "…that says only 'No such resource.'" || fail "404 detail" "${LAST_BODY:0:160}"
 expect "PUT /me is 405 METHOD_NOT_ALLOWED with a type" 405 '"type":"https://api.getmoyi.app/problems/method-not-allowed"' -- -X PUT "$API/me" -H "Authorization: Bearer $ACCESS"
+
+echo; echo "legal documents and recorded consent (FR-011, FR-103, ADR-0056)"
+# The versions are the local profile's (application-local.yml): local-1 for all three.
+# Registration above sent acceptedTermsVersion 2026-09-01, which must have been ignored.
+expect "GET /meta/legal without a token is 200 with the configured versions" 200 '"terms":{"version":"local-1","url":"http://localhost:3000/terms"}' -- "$API/meta/legal"
+[[ "$LAST_BODY" == *'"privacy":{"version":"local-1","url":"http://localhost:3000/privacy"}'* && "$LAST_BODY" == *'"dataProcessingSummary":{"version":"local-1","url":"http://localhost:3000/data-processing"}'* ]] \
+  && pass "…and the privacy policy and data-processing summary" || fail "legal body" "${LAST_BODY:0:240}"
+header_is "…which any cache may keep and must revalidate" Cache-Control "public, no-cache"
+LEGAL_TAG="$(printf '%s\n' "$LAST_HEADERS" | grep -i '^ETag:' | head -1 | cut -d' ' -f2- || true)"
+[ -n "$LEGAL_TAG" ] && pass "…with an ETag" || fail "legal ETag" "no ETag on GET /meta/legal"
+expect "GET /meta/legal with that ETag as If-None-Match is 304" 304 "" -- "$API/meta/legal" -H "If-None-Match: $LEGAL_TAG"
+[ -z "$LAST_BODY" ] && pass "…with no body" || fail "304 body" "got: ${LAST_BODY:0:100}"
+expect "GET /me says which versions were accepted at registration" 200 '"legalAccepted":{"terms":{"version":"local-1"' -- "$API/me" -H "Authorization: Bearer $ACCESS"
+[[ "$LAST_BODY" == *'"privacy":{"version":"local-1","acceptedAt":"'* && "$LAST_BODY" != *"2026-09-01"* ]] \
+  && pass "…the privacy policy too, and nowhere the version the client sent" || fail "legalAccepted" "${LAST_BODY:0:300}"
+expect "POST /me/legal-consent is 204 with no body" 204 "" -- -X POST "$API/me/legal-consent" -H "Authorization: Bearer $ACCESS"
+expect "…and again, idempotently, 204" 204 "" -- -X POST "$API/me/legal-consent" -H "Authorization: Bearer $ACCESS"
+expect "POST /me/legal-consent without a token is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHENTICATED"' -- -X POST "$API/me/legal-consent"
+CONSENTS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT string_agg(c.document || '=' || c.version, ',' ORDER BY c.document) FROM consent_records c JOIN users u ON u.id = c.user_id WHERE u.email = '$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
+case "$CONSENTS" in
+  "AGE_18=local-1,PRIVACY=local-1,TERMS=local-1") pass "the account holds three consent rows, all the server's version, none added by re-consent" ;;
+  psql-unavailable) skip "consent rows (psql unavailable)" ;;
+  *) fail "consent rows" "expected the three local-1 rows, got '$CONSENTS'" ;;
+esac
 expect "wrong password is 401 INVALID_CREDENTIALS" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "not the password")"
 WRONG="$LAST_BODY"
 expect "unknown address is 401 too" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "nobody-$RANDOM@example.com" "not the password")"
@@ -651,8 +776,32 @@ REFRESH="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
 expect "refresh rotates: 200 with a new pair" 200 '"refreshToken"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH\"}"
 REFRESH2="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
 [ "$REFRESH2" != "$REFRESH" ] && pass "…and the new refresh token differs from the old" || fail "rotation" "same refresh token returned"
-expect "presenting the rotated token again is 401 TOKEN_REUSE_DETECTED" 401 '"code":"TOKEN_REUSE_DETECTED"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH\"}"
-expect "…and the successor died with the family: REFRESH_TOKEN_INVALID" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH2\"}"
+# The grace window (ADR-0021, amended 2026-11-08, issue #136): a refresh whose
+# answer was lost may be retried for 30 s while the successor is unused. The
+# WARN "Refresh token REUSE detected" is written inside the revoking
+# transaction, before the response, so counting it is a synchronous check that
+# no reuse (and so no reuse email) happened.
+reuse_lines() { grep -c "Refresh token REUSE detected" "$MOYI_LOG" || true; }
+REUSES_BEFORE="$(reuse_lines)"
+expect "a second refresh of the same token within 30 s is 200 with a new pair" 200 '"refreshToken"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH\"}"
+REFRESH_RETRY="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+[ -n "$REFRESH_RETRY" ] && [ "$REFRESH_RETRY" != "$REFRESH2" ] && pass "…a different token from the one it voids" || fail "grace retry" "same or no refresh token returned"
+[ "$(reuse_lines)" = "$REUSES_BEFORE" ] && pass "…with no reuse detected, so no reuse email" || fail "grace retry" "a reuse was logged for the retry"
+grep -q "Refresh retried inside the grace window" "$MOYI_LOG" && pass "…logged as a grace retry" || fail "grace retry log" "no 'Refresh retried inside the grace window' line"
+expect "the voided successor presented afterwards is 401 TOKEN_REUSE_DETECTED" 401 '"code":"TOKEN_REUSE_DETECTED"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH2\"}"
+[ "$(reuse_lines)" -gt "$REUSES_BEFORE" ] && pass "…detected as a reuse (the person is emailed)" || fail "voided successor" "no reuse logged"
+expect "…and the family is dead: the retry's token is REFRESH_TOKEN_INVALID" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH_RETRY\"}"
+flush_buckets
+expect "login again (a family to use the successor of)" 200 '"refreshToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
+REFRESH_A="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+expect "refresh it" 200 '"refreshToken"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH_A\"}"
+REFRESH_B="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+expect "refresh the successor (now used)" 200 '"refreshToken"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH_B\"}"
+REFRESH_C="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+expect "presenting the rotated token after its successor was used is 401 TOKEN_REUSE_DETECTED" 401 '"code":"TOKEN_REUSE_DETECTED"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH_A\"}"
+expect "…and the successor died with the family: REFRESH_TOKEN_INVALID" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH_C\"}"
+# The window itself, 30 s, is not waited out here: RefreshGraceWindowTest moves
+# a clock past it. A token past the window answers as a used successor's does.
 expect "a never-issued refresh token is 401 REFRESH_TOKEN_INVALID" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d '{"refreshToken":"never-issued"}'
 expect "login again (fresh family)" 200 '"refreshToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
 REFRESH3="$(printf '%s' "$LAST_BODY" | jget refreshToken)"; ACCESS3="$(printf '%s' "$LAST_BODY" | jget accessToken)"
@@ -702,6 +851,96 @@ expect "the new one does" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$
 sleep 1
 for needle in "$PASSWORD" "$NEW_PASSWORD" "$REFRESH" "$REFRESH2" "$ACCESS"; do if grep -qF -- "$needle" "$MOYI_LOG"; then fail "secret in log" "a password or token appears in the log"; SECRET_LEAK=1; fi; done
 [ "${SECRET_LEAK:-0}" = 0 ] && pass "no password, refresh token or access token appears in the log"
+
+echo; echo "typed codes (#135, ADR-0018 and ADR-0022 amended 2026-11-08)"
+# The verification and reset emails carry six digits beside the link; verify-email and
+# reset-password take {email, code} in place of the token. Each probe comes from its own
+# X-Forwarded-For, so the twenty-an-hour per-IP bucket the two routes share is not what
+# this section ends up testing; the ten-a-day per-address bucket is driven at the end.
+flush_buckets
+# The last six-digit code in the log: the line after "It works for N minutes:" in the email
+# body, whether the log writes the body's newlines as they are or escaped.
+code_from_log() { python3 -c "import re,sys; m=re.findall(r'It works for \d+ minutes:(?:\\\\n|\s)*(\d{6})', open(sys.argv[1]).read()); print(m[-1] if m else '')" "$MOYI_LOG"; }
+await_email() { local before="$1"; for _ in $(seq 1 40); do [ "$(grep -c "Email NOT sent" "$MOYI_LOG" || true)" -gt "$before" ] && break; sleep 0.25; done; }
+other_code() { printf '%06d' $(( (10#$1 + 1) % 1000000 )); }
+CODE_EMAIL="code-$(date +%s)-$RANDOM@example.com"
+before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "register for the code probes" 201 "" -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.140' -d "$(register_body "$CODE_EMAIL")"
+await_email "$before"
+CODE1="$(code_from_log)"; LINK1="$(grep -oE 'token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
+[[ "$CODE1" =~ ^[0-9]{6}$ ]] && pass "the email carries a six-digit code beside the link" || fail "code in email" "got '$CODE1'"
+WRONG1="$(other_code "$CODE1")"
+expect "a wrong code is 422 VERIFICATION_TOKEN_INVALID" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.141' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$WRONG1\"}"
+WRONG_BODY="$LAST_BODY"
+expect "an unknown address is the same bytes as a wrong code" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.142' -d "{\"email\":\"nobody-$RANDOM@example.com\",\"code\":\"$CODE1\"}"
+[ "$LAST_BODY" = "$WRONG_BODY" ] && pass "…byte for byte, but the traceId" || fail "unknown address vs wrong code" "'${LAST_BODY:0:200}' vs '${WRONG_BODY:0:200}'"
+[[ "$LAST_RAW_BODY" != *"$CODE1"* ]] && pass "…and the code is not echoed" || fail "code echoed" "${LAST_RAW_BODY:0:200}"
+expect "a five-digit code is 422 VALIDATION_FAILED, before any lookup" 422 '"code":"VALID_VERIFICATION_CODE"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.143' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"12345\"}"
+expect "a token and a code together is 422 VALIDATION_FAILED" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.144' -d "{\"token\":\"$LINK1\",\"email\":\"$CODE_EMAIL\",\"code\":\"$CODE1\"}"
+
+# A new email retires the old code; its link stays live (ADR-0018 decision 6).
+before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "resend for the pending address is 202" 202 "" -- -X POST "$API/auth/resend-verification" -H 'X-Forwarded-For: 203.0.113.145' -d "{\"email\":\"$CODE_EMAIL\"}"
+await_email "$before"
+CODE2="$(code_from_log)"
+if [ "$CODE2" = "$CODE1" ]; then skip "a new email retires the old code (the two codes happen to be equal)"; else
+  expect "a new email retires the old code" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.146' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$CODE1\"}"
+fi
+expect "the code verifies by address: 200, empty body" 200 "" -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.147' -d "{\"email\":\"$(echo "$CODE_EMAIL" | tr a-z A-Z)\",\"code\":\"$CODE2\"}"
+expect "a used code is refused, and so is its link" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.148' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$CODE2\"}"
+# The first email's link was live when the code verified the account, so it was deleted: not recognised.
+expect "…the older link, retired by the verification, is 422" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.149' -d "{\"token\":\"$LINK1\"}"
+
+# Burning: five wrong codes, then the right one is refused; the link beside it still works.
+BURN_EMAIL="burn-$(date +%s)-$RANDOM@example.com"
+before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "register for the burn probes" 201 "" -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.150' -d "$(register_body "$BURN_EMAIL")"
+await_email "$before"
+BURN_CODE="$(code_from_log)"; BURN_LINK="$(grep -oE 'token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
+for i in 1 2 3 4 5; do
+  expect "wrong code $i of 5 is 422" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H "X-Forwarded-For: 203.0.113.15$i" -d "{\"email\":\"$BURN_EMAIL\",\"code\":\"$(other_code "$BURN_CODE")\"}"
+done
+expect "the right code after five wrong ones is refused: the code is burned" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.156' -d "{\"email\":\"$BURN_EMAIL\",\"code\":\"$BURN_CODE\"}"
+[ "$LAST_BODY" = "$WRONG_BODY" ] && pass "…the same bytes as a wrong code" || fail "burned vs wrong" "'${LAST_BODY:0:200}'"
+expect "…while the link beside it still verifies: 200" 200 "" -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.157' -d "{\"token\":\"$BURN_LINK\"}"
+
+# Reset by code.
+before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "forgot-password for the code account is 202" 202 "" -- -X POST "$API/auth/forgot-password" -H 'X-Forwarded-For: 203.0.113.160' -d "{\"email\":\"$CODE_EMAIL\"}"
+await_email "$before"
+RESET_CODE="$(code_from_log)"; RESET_LINK="$(grep -oE 'reset-password\?token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
+CODE_PASSWORD="a third good password"
+expect "reset by code for an unknown address" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.161' -d "{\"email\":\"nobody-$RANDOM@example.com\",\"code\":\"$RESET_CODE\",\"password\":\"$CODE_PASSWORD\"}"
+UNKNOWN_RESET_BODY="$LAST_BODY"
+expect "reset by a wrong code" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.162' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$(other_code "$RESET_CODE")\",\"password\":\"$CODE_PASSWORD\"}"
+[ "$LAST_BODY" = "$UNKNOWN_RESET_BODY" ] && pass "reset by code for an unknown address is the same bytes as a wrong code" || fail "reset unknown vs wrong" "'${LAST_BODY:0:200}' vs '${UNKNOWN_RESET_BODY:0:200}'"
+if [ "$RESET_CODE" != "$CODE2" ]; then
+  expect "the verification code is not a reset code" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.163' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$CODE2\",\"password\":\"$CODE_PASSWORD\"}"
+fi
+expect "a breached password by code is refused per field, code not spent" 422 '"code":"NOT_BREACHED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.164' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$RESET_CODE\",\"password\":\"password\"}"
+expect "reset by address and code is 200" 200 "" -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.165' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$RESET_CODE\",\"password\":\"$CODE_PASSWORD\"}"
+expect "…the same code again is 422, never 410" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.166' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$RESET_CODE\",\"password\":\"$CODE_PASSWORD\"}"
+expect "…and the link beside it is spent: 410" 410 '"code":"PASSWORD_RESET_TOKEN_EXPIRED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.167' -d "{\"token\":\"$RESET_LINK\",\"password\":\"$CODE_PASSWORD\"}"
+expect "the password set by code signs in" 200 '"accessToken"' -- -X POST "$API/auth/login" -H 'X-Forwarded-For: 203.0.113.168' -d "$(login_body "$CODE_EMAIL" "$CODE_PASSWORD")"
+# The code reaches the log only inside the logged email (provider=log, local only): no other line holds it.
+CODE_LEAK=0; for c in "$CODE1" "$CODE2" "$BURN_CODE" "$RESET_CODE"; do [ "$(grep -wF -- "$c" "$MOYI_LOG" | grep -vE "^\s*$c\s*\$" | grep -vc 'It works for' || true)" -gt 0 ] && CODE_LEAK=1; done
+[ "$CODE_LEAK" = 0 ] && pass "no code appears in the log outside the logged email" || fail "code in log" "a code appears on a log line that is not the email's"
+
+# Ten typed codes a day per address, both routes together, the same for an address with no account.
+flush_buckets
+LIMIT_CODE_EMAIL="nobody-codes-$RANDOM@example.com"
+for i in $(seq 1 10); do
+  expect "typed code $i of 10 for an unknown address is 422" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H "X-Forwarded-For: 203.0.113.$((170 + i))" -d "{\"email\":\"$LIMIT_CODE_EMAIL\",\"code\":\"000000\"}"
+done
+expect "the eleventh, on reset-password, is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.181' -d "{\"email\":\"$LIMIT_CODE_EMAIL\",\"code\":\"000000\",\"password\":\"$CODE_PASSWORD\"}"
+header_is "…waiting for one try back" "Retry-After" "8640"
+# Twenty an hour per client address on the two routes, links and codes alike.
+flush_buckets
+for i in $(seq 1 20); do
+  expect "presentation $i of 20 from one address" 422 "" -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.190' -d "{\"token\":\"not-a-token-$i\"}"
+done
+expect "the twenty-first from that address is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.190' -d "{\"token\":\"not-a-token\",\"password\":\"$CODE_PASSWORD\"}"
+flush_buckets
 
 etag_of() { printf '%s\n' "$LAST_HEADERS" | grep -i '^etag:' | head -1 | cut -d' ' -f2-; }
 
@@ -838,6 +1077,7 @@ verified_account() {
   expect "verify $label" 200 "" -- -X POST "$API/auth/verify-email" -d "{\"token\":\"$token\"}"
   expect "$label signs in" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$email" "$PASSWORD")"
   ACCOUNT_ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"
+  ACCOUNT_EMAIL="$email"
 }
 
 
@@ -1024,6 +1264,21 @@ expect "the other member confirms: 200 and the zone moves" 200 '"anchorTimezone"
 # FR-027's month, as a 409 with a date rather than a 429 with a retry (ADR-0030).
 expect "a change within thirty days is 409 TIMEZONE_CHANGE_TOO_SOON" 409 '"code":"TIMEZONE_CHANGE_TOO_SOON"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
 [[ "$LAST_BODY" == *"can change again from"* ]] && pass "…and the detail names the date it becomes allowed" || fail "no date" "${LAST_BODY:0:250}"
+keep_body problem-timezone-too-soon
+# #142: the same date, typed, for a client to put into its own words: an extension member, YYYY-MM-DD.
+TOO_SOON="$(python3 -c "
+import json, sys, datetime, re
+body = json.load(sys.stdin)
+named = datetime.datetime.strptime(re.search(r'from (\d{1,2} \w+ \d{4})', body['detail']).group(1), '%d %B %Y').date()
+print(body.get('allowedFrom') == named.isoformat(), body.get('allowedFrom'), body.get('traceId', ''))" <<<"$LAST_RAW_BODY" 2>/dev/null || echo "unreadable")"
+case "$TOO_SOON" in True\ ????-??-??\ *) pass "…and allowedFrom carries that date, typed (${TOO_SOON:5:10})" ;; *) fail "allowedFrom" "got '$TOO_SOON' from ${LAST_BODY:0:300}" ;; esac
+# The refusal is logged at WARN; the body's traceId is the one that log line carries.
+TOO_SOON_TRACE="${TOO_SOON##* }"
+if [ "${#TOO_SOON_TRACE}" = 32 ] && grep "TIMEZONE_CHANGE_TOO_SOON -> 409" "$MOYI_LOG" | grep -q "$TOO_SOON_TRACE"; then
+  pass "…and its traceId is on the log line for that refusal"
+else
+  fail "traceId in the log" "'$TOO_SOON_TRACE' not on a TIMEZONE_CHANGE_TOO_SOON line of $MOYI_LOG"
+fi
 expect "a fixed-offset zone is 422 on the field" 422 '"field":"anchorTimezone"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Etc/GMT+3"}'
 expect "a zone of one non-breaking space is 422, not 500" 422 '"field":"anchorTimezone"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"\u00a0"}'
 
@@ -1152,6 +1407,7 @@ expect "an entry naming a voice note nobody has is 422 on voiceMediaId" 422 '"fi
 # entry — the author and the status, nothing else, on the wire and in the log.
 expect "the partner's today is PARTIAL, with the entry locked" 200 '"status":"PARTIAL"' -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $PARTNER_ACCESS"
 [[ "$LAST_BODY" == *'"partnerEntry":{"authorMemberId"'*'"status":"LOCKED"'* ]] && pass "…partnerEntry is exactly an author and a status" || fail "locked shape" "${LAST_BODY:0:250}"
+keep_body today-partner-locked
 [[ "$LAST_BODY" != *"$ENTRY_TEXT"* ]] && pass "…and the text never appears in the response" || fail "text leaked in response" "${LAST_BODY:0:250}"
 if grep -qF "$ENTRY_TEXT" "$MOYI_LOG"; then fail "text in log" "the entry text appears in the log"; else pass "…nor anywhere in the log"; fi
 
@@ -1191,7 +1447,9 @@ expect "the partner reads the author's edited words" 200 "\"text\":\"$EDITED_TEX
 # Slice C4: the streak. A day is counted when the close job evaluates it, and
 # today is added as soon as both have written — so the first shared day reads one.
 expect "the streak counts today once both have written" 200 '"current":1' -- "$API/bonds/$GRAT_BOND/streak" -H "Authorization: Bearer $PARTNER_ACCESS"
-[[ "$LAST_BODY" == *'"days":[{"date":"'*'"status":"COMPLETE"}]'* ]] && pass "…and its calendar is that one day, COMPLETE" || fail "streak calendar" "${LAST_BODY:0:250}"
+keep_body streak
+[[ "$LAST_BODY" == *'"days":[{"date":"'*'"status":"COMPLETE","reason":null,"settlesAt":null}]'* ]] && pass "…and its calendar is that one day, COMPLETE" || fail "streak calendar" "${LAST_BODY:0:250}"
+[[ "$LAST_BODY" == *'"lastRunLength":null,"lastRunBrokenOn":null'* ]] && pass "…and no run has ended: both sent, both null" || fail "streak ended run" "${LAST_BODY:0:250}"
 expect "…and today carries the same streak" 200 '"streak":{"current":1,"longest":1,"freezesAvailable":0,"strictMode":false}' -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $AUTHOR_ACCESS"
 expect "PATCH after reveal is ENTRY_IMMUTABLE" 409 '"code":"ENTRY_IMMUTABLE"' -- -X PATCH "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $AUTHOR_ACCESS" -d '{"text":"too late"}'
 expect "the partner cannot delete the author's entry" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $PARTNER_ACCESS"
@@ -1242,7 +1500,7 @@ expect "both have written and the day is PENDING_REVEAL, not PARTIAL" 200 '"stat
 [[ "$LAST_BODY" == *'"status":"LOCKED"'* && "$LAST_BODY" != *"$TIMED_TEXT"* ]] && pass "…and the partner's entry is still locked, its words withheld" || fail "timed reveal" "${LAST_BODY:0:250}"
 expect "a day still waiting on its reveal time is not in the streak yet" 200 '"current":0' -- "$API/bonds/$TIMED_BOND/streak" -H "Authorization: Bearer $EARLY_ACCESS"
 # Today, until both have written, is OPEN on the calendar to both: who has written so far is GET /today's to say.
-[[ "$LAST_BODY" == *'"status":"OPEN"}]'* && "$LAST_BODY" != *PARTIAL* && "$LAST_BODY" != *PENDING_REVEAL* && "$LAST_BODY" != *SOLO* ]] && pass "…and its calendar says OPEN, not who has written" || fail "streak calendar vocabulary" "${LAST_BODY:0:250}"
+[[ "$LAST_BODY" == *'"status":"OPEN","reason":null,"settlesAt":"'*'Z"}]'* && "$LAST_BODY" != *PARTIAL* && "$LAST_BODY" != *PENDING_REVEAL* && "$LAST_BODY" != *SOLO* ]] && pass "…and its calendar says OPEN, not who has written" || fail "streak calendar vocabulary" "${LAST_BODY:0:250}"
 expect "a stranger asking for a bond's streak gets the one 404" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$TIMED_BOND/streak" -H "Authorization: Bearer $AUTHOR_ACCESS"
 
 echo; echo "gratitude — a confirmed zone change decides no date until tomorrow (BR-6, ADR-0031 §3)"
@@ -1301,7 +1559,7 @@ if [ "$LAGOS_DATE_AFTER" != "$LAGOS_DATE" ]; then
 else
   [[ "$HANDOFF_ENTRY_BODY" == *"\"date\":\"$LAGOS_DATE\""* ]] && pass "…and it lands on the old zone's date, $LAGOS_DATE" || fail "entry date" "expected date $LAGOS_DATE: ${HANDOFF_ENTRY_BODY:0:250}"
   [[ "$HANDOFF_ENTRY_BODY" != *"\"date\":\"$NEW_ZONE_DATE\""* ]] && pass "…not on $NEW_ZONE's, $NEW_ZONE_DATE" || fail "entry redated" "the entry was filed under the new zone: ${HANDOFF_ENTRY_BODY:0:250}"
-  expect "the partner's today is that same day, PARTIAL" 200 "\"bondDay\":{\"date\":\"$LAGOS_DATE\",\"status\":\"PARTIAL\"}" -- "$API/bonds/$HANDOFF_BOND/today" -H "Authorization: Bearer $STAYER_ACCESS"
+  expect "the partner's today is that same day, PARTIAL" 200 "\"bondDay\":{\"date\":\"$LAGOS_DATE\",\"status\":\"PARTIAL\",\"settlesAt\":\"" -- "$API/bonds/$HANDOFF_BOND/today" -H "Authorization: Bearer $STAYER_ACCESS"
   # The rows behind it: the day keeps the zone it began under, and the timeline
   # holds a closed Lagos interval followed by an open one that starts later.
   DAY_ZONE="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT anchor_timezone FROM bond_days WHERE bond_id='$HANDOFF_BOND' AND date='$LAGOS_DATE'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
@@ -1438,6 +1696,7 @@ await_erased "$TAKEN_ENTRY"
 erased_check "the poller erases the withdrawn entry"
 expect "the partner's today, once it is erased" 200 '"status":"REVEALED"' -- "$API/bonds/$TAKEN_BOND/today" -H "Authorization: Bearer $READER_ACCESS"
 [ "$(today_field partnerEntry text)|$(today_field partnerEntry status)" = "null|DELETED" ] && pass "…the withdrawn entry is a tombstone: text null, DELETED" || fail "tombstone" "${LAST_BODY:0:300}"
+keep_body today-partner-deleted
 [ "$(today_field myEntry text)" = "$READER_TEXT" ] && pass "…and the partner's own entry is whole" || fail "partner's own entry" "${LAST_BODY:0:300}"
 READER_ROW="$(sql "SELECT (text = '$READER_TEXT')::int || '|' || status FROM entries WHERE id='$READER_ENTRY'")"
 case "$READER_ROW" in psql-unavailable) skip "the partner's row check";; "1|REVEALED") pass "…in the database too: her row is untouched";; *) fail "partner's row" "expected 1|REVEALED, got '$READER_ROW'";; esac
@@ -1457,6 +1716,7 @@ expect "the one who stayed sees the tombstone" 200 '"status":"DELETED"' -- "$API
 while [ "$(( $(date +%s) - KEPT_SINCE ))" -lt 10 ]; do sleep 1; done
 expect "ten seconds on, the kept words are still read by the other member" 200 "\"text\":\"$KEPT_TEXT\"" -- "$API/bonds/$KEPT_BOND/today" -H "Authorization: Bearer $OTHER_ACCESS"
 [ "$(today_field partnerEntry text)|$(today_field partnerEntry status)" = "$KEPT_TEXT|REVEALED" ] && pass "…as the partner's entry, REVEALED" || fail "kept entry" "${LAST_BODY:0:300}"
+keep_body today-partner-revealed
 KEPT_ROW="$(sql "SELECT (text = '$KEPT_TEXT')::int || '|' || status FROM entries WHERE id='$KEPT_ENTRY'")"
 case "$KEPT_ROW" in psql-unavailable) skip "the kept row check";; "1|REVEALED") pass "…and the row still holds them";; *) fail "kept row" "expected 1|REVEALED, got '$KEPT_ROW'";; esac
 
@@ -2155,7 +2415,7 @@ for view in "days" "days/$PR_DATE"; do
 done
 
 # One 422 for every id that names no prompt, and the guard and the ending first.
-PR_ONE="$(curl -s -X POST "$API/bonds/$PR_BOND/entries" -H 'Content-Type: application/json' -H "Authorization: Bearer $PR_A" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"x\",\"promptId\":\"$(new_key)\"}" | sed 's/"instance":"[^"]*"//')"
+PR_ONE="$(curl -s -X POST "$API/bonds/$PR_BOND/entries" -H 'Content-Type: application/json' -H "Authorization: Bearer $PR_A" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"x\",\"promptId\":\"$(new_key)\"}" | sed -E 's/"instance":"[^"]*"//; s/,"traceId":"[0-9a-f]{32}"//')"
 expect "prompts: an id no prompt has is 422 VALIDATION_FAILED" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/bonds/$PR_BOND/entries" -H "Authorization: Bearer $PR_A" -H "Idempotency-Key: $(new_key)" -d '{"text":"x","promptId":"not-a-uuid"}'
 if [[ "$LAST_BODY" == *'"field":"promptId"'* ]]; then pass "prompts: …on the field promptId"; else fail "prompts: …on the field promptId" "${LAST_BODY:0:200}"; fi
 is "prompts: …the same body as for a uuid no prompt has" "$(no_instance | sed 's/"instance":"-"//')" "$PR_ONE"
@@ -2216,7 +2476,7 @@ SE_LONG="$(python3 -c 'print("zq" * 51)')"
 search "search: 102 characters is one 422 on q" 422 '"field":"q"' "$SE_LONG" "$SE_A"
 if [[ "$LAST_BODY" == *zqzqzq* ]]; then fail "search: the refusal carries q" "${LAST_BODY:0:200}"; else pass "search: the refusal does not carry q"; fi
 expect "search: NUL in q is one 422, not a 500" 422 '"field":"q"' -- "$API/bonds/$SE_BOND/search?q=zq%00zq" -H "Authorization: Bearer $SE_A"
-SE_STRANGER="$(curl -s "$API/bonds/$SE_BOND/search" -H "Authorization: Bearer $SE_O" | sed 's/"instance":"[^"]*"//')"
+SE_STRANGER="$(curl -s "$API/bonds/$SE_BOND/search" -H "Authorization: Bearer $SE_O" | sed -E 's/"instance":"[^"]*"//; s/,"traceId":"[0-9a-f]{32}"//')"
 expect "search: a stranger is told the bond's 404, whatever q is" 404 '"code":"NOT_FOUND"' -- -G "$API/bonds/$SE_BOND/search" --data-urlencode "q=   " -H "Authorization: Bearer $SE_O"
 is "search: …the same bytes as with no q at all" "$(no_instance | sed 's/"instance":"-"//')" "$SE_STRANGER"
 
@@ -2372,6 +2632,141 @@ if [ "$MI_MADE" = 6 ]; then
   is "milestones: …the same bytes for the one who left" "$LAST_BODY" "$MI_ENDED"
 else
   skip "milestones: the seventh day and the ending (the days could not be put in by hand)"
+fi
+
+echo; echo "streak — the run that ended, and why a day is a rest day (issue #141, ADR-0034 as amended)"
+flush_buckets
+# What this section is for: the two fields of issue #141 as the jar serves them, decided by the
+# real close job. No day ends during a run, so 21 past days are put in by hand, closed and NOT
+# evaluated, and the bond's pairing and zone history are moved back twenty-one days in the same
+# statement (so the calendar draws them, and the job's missing-days step finds nothing to add):
+# the joining day empty, as the job would write it; fourteen days both wrote bank a freeze; a solo day spends it (FROZEN, REST_DAY); a date a zone
+# change stepped over keeps the run (FROZEN, TIMEZONE_SHIFT); an empty day with nothing banked ends
+# the run at sixteen; three more days and today make four. The job, on its five-second schedule,
+# evaluates them; the read is then checked field by field, the same for both members.
+verified_account "streaker" "203.0.113.140"; SR_A="$ACCOUNT_ACCESS"
+verified_account "streaked" "203.0.113.141"; SR_B="$ACCOUNT_ACCESS"
+revealed_bond "streak" "$SR_A" "$SR_B" "thank you for the long run" "and thank you for starting again"
+SR_BOND="$RB_BOND"
+SR_TODAY="$(sql "SELECT (now() AT TIME ZONE 'Africa/Lagos')::date")"
+case "$SR_TODAY" in
+  psql-unavailable|psql-error*) SR_MADE=no ;;
+  *) SR_MADE="$(sql "WITH m AS (UPDATE bond_members SET joined_at = joined_at - interval '21 days' WHERE bond_id = '$SR_BOND' RETURNING 1),
+    b AS (UPDATE bonds SET created_at = created_at - interval '21 days' WHERE id = '$SR_BOND' RETURNING 1),
+    a AS (UPDATE bond_anchor_intervals SET effective_from = effective_from - interval '21 days', first_label = first_label - 21 WHERE bond_id = '$SR_BOND' RETURNING 1),
+    d AS (INSERT INTO bond_days (id, bond_id, date, status, anchor_timezone, starts_at, ends_at, entry_count, created_at, closed_at, version)
+      SELECT gen_random_uuid(), '$SR_BOND', g.d, s.status, 'Africa/Lagos', g.d::timestamp AT TIME ZONE 'Africa/Lagos',
+             (g.d + 1)::timestamp AT TIME ZONE 'Africa/Lagos', s.n, now(), (g.d + 1)::timestamp AT TIME ZONE 'Africa/Lagos', 0
+      FROM (SELECT ('$SR_TODAY'::date - k) AS d, k FROM generate_series(1, 21) AS k) g
+      CROSS JOIN LATERAL (SELECT CASE g.k WHEN 21 THEN 'EMPTY' WHEN 6 THEN 'SOLO' WHEN 5 THEN 'FROZEN' WHEN 4 THEN 'EMPTY' ELSE 'REVEALED' END AS status,
+                                 CASE g.k WHEN 21 THEN 0 WHEN 6 THEN 1 WHEN 5 THEN 0 WHEN 4 THEN 0 ELSE 2 END AS n) s
+      RETURNING 1)
+    SELECT (SELECT count(*) FROM m) || '/' || (SELECT count(*) FROM b) || '/' || (SELECT count(*) FROM a) || '/' || (SELECT count(*) FROM d)")" ;;
+esac
+if [ "$SR_MADE" = "2/1/1/21" ]; then
+  SR_BROKEN="$(sql "SELECT '$SR_TODAY'::date - 4")"
+  SR_REST="$(sql "SELECT '$SR_TODAY'::date - 6")"
+  SR_SHIFT="$(sql "SELECT '$SR_TODAY'::date - 5")"
+  # The close job runs every five seconds; give it a few runs to evaluate the twenty days.
+  for _ in $(seq 1 30); do
+    [ "$(sql "SELECT count(*) FROM bond_days WHERE bond_id = '$SR_BOND' AND evaluated_at IS NOT NULL")" = 21 ] && break
+    sleep 1
+  done
+  db_is "streak: the close job evaluated the twenty-one days" "$(sql "SELECT count(*) FROM bond_days WHERE bond_id = '$SR_BOND' AND evaluated_at IS NOT NULL")" "21"
+  expect "streak: a run of sixteen ended, and today is the fourth of the next" 200 '"current":4' -- "$API/bonds/$SR_BOND/streak" -H "Authorization: Bearer $SR_A"
+  SR_BODY="$LAST_BODY"
+  is "streak: …the numbers, the ended run with the day that ended it" \
+    "$(python3 -c 'import json,sys; b=json.loads(sys.argv[1]); print(b["current"], b["longest"], b["freezesAvailable"], b["lastRunLength"], b["lastRunBrokenOn"])' "$SR_BODY")" \
+    "4 16 0 16 $SR_BROKEN"
+  is "streak: …a rest day a freeze paid for, a date a zone change stepped over, and no reason on any other square" \
+    "$(python3 -c 'import json,sys; b=json.loads(sys.argv[1]); print(sorted((d["date"], d["status"], d["reason"]) for d in b["days"] if d["reason"] or d["status"] == "FROZEN"), sum(1 for d in b["days"] if "reason" not in d))' "$SR_BODY")" \
+    "[('$SR_REST', 'FROZEN', 'REST_DAY'), ('$SR_SHIFT', 'FROZEN', 'TIMEZONE_SHIFT')] 0"
+  [[ "$SR_BODY" == *"{\"date\":\"$SR_BROKEN\",\"status\":\"MISSED\",\"reason\":null,\"settlesAt\":null}"* ]] && pass "streak: …the day that ended it is MISSED, with no reason" || fail "streak: broken day" "${SR_BODY:0:250}"
+  db_is "streak: …and the job wrote the ended run on the projection, as recalculate would" "$(sql "SELECT last_run_length || '/' || last_run_broken_on FROM streak_states WHERE bond_id = '$SR_BOND'")" "16/$SR_BROKEN"
+  expect "streak: the same for the other member" 200 '"lastRunLength":16' -- "$API/bonds/$SR_BOND/streak" -H "Authorization: Bearer $SR_B"
+  is "streak: …the same bytes" "$LAST_BODY" "$SR_BODY"
+  expect "streak: today's streak object is as it was, without the new fields" 200 '"streak":{"current":4,"longest":16,"freezesAvailable":0,"strictMode":false}' -- "$API/bonds/$SR_BOND/today" -H "Authorization: Bearer $SR_A"
+else
+  skip "streak: the ended run and the rest-day reasons (the days could not be put in by hand: $SR_MADE)"
+fi
+
+echo; echo "late entries — a Bond-day stays open twelve hours past its end (issue #132, BR-3a, ADR-0033 decision 15)"
+flush_buckets
+# What this section is for: the grace as the jar serves it, with the real close job running on
+# its five-second schedule. No day ends during a run, so a fresh bond is moved back three days and
+# into a region zone where it is now between 01:00 and 05:59 — yesterday ended hours ago and its
+# grace has hours left, whatever the time the run starts. Then: the job writes the two days that
+# are past their grace (EMPTY) and does NOT write yesterday, which nobody has opened; an entry
+# sent now with an intendedAt before midnight counts for yesterday; one older than the grace lands
+# on today; GET /today and GET /streak say when each open day settles; and after more runs of the
+# job yesterday is still open, with the late entry on it.
+verified_account "late-writer" "203.0.113.150"; LE_A="$ACCOUNT_ACCESS"
+verified_account "late-reader" "203.0.113.151"; LE_B="$ACCOUNT_ACCESS"
+expect "late entries: a bond" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $LE_A" -d "$(bond_body "Us")"
+LE_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+LE_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "late entries: …joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$LE_CODE/accept" -H "Authorization: Bearer $LE_B"
+LE_ZONE="$(python3 -c '
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, available_timezones
+now = datetime.now(timezone.utc)
+for z in sorted(available_timezones()):
+    if "/" not in z or z.startswith(("Etc/", "SystemV/", "US/", "posix/", "right/")):
+        continue
+    if 1 <= now.astimezone(ZoneInfo(z)).hour <= 5:
+        print(z)
+        break' 2>/dev/null || true)"
+LE_MADE=no
+if [ -n "$LE_ZONE" ]; then
+  LE_MADE="$(sql "WITH m AS (UPDATE bond_members SET joined_at = joined_at - interval '3 days' WHERE bond_id = '$LE_BOND' RETURNING 1),
+    b AS (UPDATE bonds SET created_at = created_at - interval '3 days', anchor_timezone = '$LE_ZONE' WHERE id = '$LE_BOND' RETURNING 1),
+    a AS (UPDATE bond_anchor_intervals SET zone = '$LE_ZONE', effective_from = effective_from - interval '3 days',
+            first_label = ((effective_from - interval '3 days') AT TIME ZONE '$LE_ZONE')::date WHERE bond_id = '$LE_BOND' RETURNING 1)
+    SELECT (SELECT count(*) FROM m) || '/' || (SELECT count(*) FROM b) || '/' || (SELECT count(*) FROM a)")"
+fi
+if [ "$LE_MADE" = "2/1/1" ]; then
+  LE_TODAY="$(sql "SELECT (now() AT TIME ZONE '$LE_ZONE')::date")"
+  LE_YDAY="$(sql "SELECT (now() AT TIME ZONE '$LE_ZONE')::date - 1")"
+  LE_OLDER="$(sql "SELECT (now() AT TIME ZONE '$LE_ZONE')::date - 2")"
+  utc() { sql "SELECT to_char(($1) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')"; }
+  LE_BEFORE_MIDNIGHT="$(utc "('$LE_TODAY'::date::timestamp - interval '30 minutes') AT TIME ZONE '$LE_ZONE'")"
+  LE_TOO_OLD="$(utc "now() - interval '13 hours'")"
+  LE_YDAY_SETTLES="$(utc "('$LE_TODAY'::date::timestamp AT TIME ZONE '$LE_ZONE') + interval '12 hours'")"
+  LE_TODAY_SETTLES="$(utc "(('$LE_TODAY'::date + 1)::timestamp AT TIME ZONE '$LE_ZONE') + interval '12 hours'")"
+  # The job runs every five seconds: wait for it to write the day past its grace, which is
+  # also the run that would have written yesterday closed if the grace were not kept.
+  for _ in $(seq 1 30); do
+    [ "$(sql "SELECT count(*) FROM bond_days WHERE bond_id = '$LE_BOND' AND date = '$LE_OLDER' AND closed_at IS NOT NULL")" = 1 ] && break
+    sleep 1
+  done
+  db_is "late entries: the job wrote the day before yesterday, past its grace, closed EMPTY ($LE_ZONE)" \
+    "$(sql "SELECT status FROM bond_days WHERE bond_id = '$LE_BOND' AND date = '$LE_OLDER' AND closed_at IS NOT NULL")" "EMPTY"
+  db_is "late entries: …and did not write yesterday, which nobody opened and whose grace has hours left" \
+    "$(sql "SELECT count(*) FROM bond_days WHERE bond_id = '$LE_BOND' AND date = '$LE_YDAY'")" "0"
+  expect "late entries: yesterday is OPEN on the calendar, saying when it settles" 200 "{\"date\":\"$LE_YDAY\",\"status\":\"OPEN\",\"reason\":null,\"settlesAt\":\"$LE_YDAY_SETTLES\"}" -- "$API/bonds/$LE_BOND/streak" -H "Authorization: Bearer $LE_B"
+  expect "late entries: written before midnight, sent after it, the entry counts for yesterday" 201 "\"date\":\"$LE_YDAY\"" -- \
+    -X POST "$API/bonds/$LE_BOND/entries" -H "Authorization: Bearer $LE_A" -H "Idempotency-Key: $(new_key)" \
+    -d "{\"text\":\"written last night, sent this morning\",\"intendedAt\":\"$LE_BEFORE_MIDNIGHT\"}"
+  is "late entries: …stamped with the instant it was written" "$(raw intendedAt)" "$LE_BEFORE_MIDNIGHT"
+  expect "late entries: one written longer ago than the grace lands on today" 201 "\"date\":\"$LE_TODAY\"" -- \
+    -X POST "$API/bonds/$LE_BOND/entries" -H "Authorization: Bearer $LE_B" -H "Idempotency-Key: $(new_key)" \
+    -d "{\"text\":\"written yesterday afternoon\",\"intendedAt\":\"$LE_TOO_OLD\"}"
+  expect "late entries: today says when it settles" 200 "\"bondDay\":{\"date\":\"$LE_TODAY\",\"status\":\"PARTIAL\",\"settlesAt\":\"$LE_TODAY_SETTLES\"}" -- "$API/bonds/$LE_BOND/today" -H "Authorization: Bearer $LE_A"
+  # Two more runs of the job (ten seconds), then yesterday: still open, with the late entry on it.
+  # As epoch seconds: `sql` strips whitespace, which a timestamp's own space would not survive.
+  LE_RUNS_FROM="$(sql "SELECT extract(epoch FROM locked_at)::bigint FROM shedlock WHERE name = 'close-days'")"
+  for _ in $(seq 1 30); do
+    [ "$(sql "SELECT count(*) FROM shedlock WHERE name = 'close-days' AND extract(epoch FROM locked_at) > $LE_RUNS_FROM + 4")" = 1 ] && break
+    sleep 1
+  done
+  db_is "late entries: the job has run since" "$(sql "SELECT count(*) FROM shedlock WHERE name = 'close-days' AND extract(epoch FROM locked_at) > $LE_RUNS_FROM + 4")" "1"
+  db_is "late entries: …and left yesterday open inside its grace, PARTIAL with the late entry" \
+    "$(sql "SELECT status || '/' || entry_count || '/' || (closed_at IS NULL) FROM bond_days WHERE bond_id = '$LE_BOND' AND date = '$LE_YDAY'")" "PARTIAL/1/true"
+  # The archive lists an unsettled day only for a member who wrote on it (ADR-0036): to the partner it is not there yet.
+  expect "late entries: …so the partner cannot read the lone entry yet: the day is not in their archive" 404 '"title":"Day not found"' -- "$API/bonds/$LE_BOND/days/$LE_YDAY" -H "Authorization: Bearer $LE_B"
+  [[ "$LAST_BODY" == *"written last night"* ]] && fail "late entries: lone entry" "readable to the partner inside the grace: ${LAST_BODY:0:200}" || pass "late entries: …its words are not in the partner's view of the day"
+else
+  skip "late entries: the grace on the wire (the bond could not be moved by hand: ${LE_ZONE:-no zone at 01-05h}, $LE_MADE)"
 fi
 
 echo; echo "push tokens (Phase 4 N1, ADR-0044)"
@@ -3010,7 +3405,7 @@ expect "reports: the reporter still reads the entry's words" 200 '"text":"for yo
 
 if [ "$PSQL_OK" = 1 ]; then
   RP_LIST="$(reports list 2>&1)"
-  case "$RP_LIST" in *"$RP_REPORT"$'\t'NON_CONSENSUAL$'\t'"$RP_ENTRY"$'\t'2$'\t't*) pass "reports: the operator's list shows the report, what it holds and that it has a detail";; *) fail "reports: list" "${RP_LIST:0:400}";; esac
+  case "$RP_LIST" in *"$RP_REPORT"$'\t'NON_CONSENSUAL$'\t'ENTRY$'\t'"$RP_ENTRY"$'\t-\t'2$'\t't*) pass "reports: the operator's list shows the report, what it holds and that it has a detail";; *) fail "reports: list" "${RP_LIST:0:400}";; esac
   case "$RP_LIST" in *"$RP_DETAIL"*) fail "reports: …and never the detail" "the detail is in the list";; *) pass "reports: …and never the detail";; esac
   RP_SHOW="$(reports show "$RP_REPORT" 2>&1)"
   case "$RP_SHOW" in *"\"$RP_DETAIL\""*"$RP_PHOTO"*) pass "reports: show gives the operator the detail and what is held";; *) fail "reports: show" "${RP_SHOW:0:400}";; esac
@@ -3092,6 +3487,168 @@ if grep -q "$RP_DETAIL" "$MOYI_LOG"; then fail "the report's detail is in no log
 rm -rf "$RP_DIR"
 flush_buckets
 
+echo; echo "member reports — a member reports the other member of the bond to a person (FR-100's member half, ADR-0053 amended for #127)"
+# The reported member's own reads are taken before and after, bytes and ETag: nothing they can see may change
+# (doc 26 §2.2). The report is then the operator's, in the same queue as an entry report.
+verified_account "mr-reported" "203.0.113.185"; MR_A="$ACCOUNT_ACCESS"
+verified_account "mr-reporter" "203.0.113.186"; MR_B="$ACCOUNT_ACCESS"
+verified_account "mr-stranger" "203.0.113.187"; MR_O="$ACCOUNT_ACCESS"
+expect "member reports: a bond for the two" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $MR_A" -d "$(bond_body "Us")"
+MR_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+MR_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "reporting the member of a bond with no partner yet is 404" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_A" -H "Idempotency-Key: $(new_key)" -d '{"reason":"OTHER"}'
+MR_ALONE="$(no_instance | sed "s/$MR_BOND/-/g")"
+expect "member reports: …joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$MR_CODE/accept" -H "Authorization: Bearer $MR_B"
+expect "a stranger reporting a member of the bond is 404" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_O" -H "Idempotency-Key: $(new_key)" -d '{"reason":"OTHER"}'
+is "member reports: …the same bytes as the bond with nobody to report" "$(no_instance | sed "s/$MR_BOND/-/g")" "$MR_ALONE"
+expect "member reports: the reported member writes" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$MR_BOND/entries" -H "Authorization: Bearer $MR_A" -H "Idempotency-Key: $(new_key)" -d '{"text":"for you"}'
+expect "member reports: the reporter writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$MR_BOND/entries" -H "Authorization: Bearer $MR_B" -H "Idempotency-Key: $(new_key)" -d '{"text":"and mine"}'
+expect "member reports: the reported member reads the bond, before" 200 "\"id\":\"$MR_BOND\"" -- "$API/bonds/$MR_BOND" -H "Authorization: Bearer $MR_A"
+MR_BOND_BEFORE="$LAST_BODY"; MR_BOND_TAG_BEFORE="$(tag)"
+expect "member reports: the reported member reads today, before" 200 '"myEntry"' -- "$API/bonds/$MR_BOND/today" -H "Authorization: Bearer $MR_A"
+MR_TODAY_BEFORE="$LAST_BODY"; MR_TODAY_TAG_BEFORE="$(tag)"
+expect "a report with an unknown reason is 422 on the member route too" 422 '"field":"reason"' -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_B" -H "Idempotency-Key: $(new_key)" -d '{"reason":"SPAM"}'
+MR_KEY="$(new_key)"
+expect "the reporter reports the other member: 201" 201 '"reason":"HARASSMENT"' -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_B" -H "Idempotency-Key: $MR_KEY" -d '{"reason":"HARASSMENT","detail":"smoke-fake-member-report-detail"}'
+MR_FIRST="$LAST_BODY"; MR_REPORT="$(printf '%s' "$LAST_BODY" | jget id)"
+is "member reports: …the answer is the id and the reason, nothing else" "$(python3 -c 'import json,sys; print(sorted(json.loads(sys.argv[1])))' "$MR_FIRST")" "['id', 'reason']"
+expect "the same key again is the same member report, replayed" 201 "\"id\":\"$MR_REPORT\"" -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_B" -H "Idempotency-Key: $MR_KEY" -d '{"reason":"HARASSMENT","detail":"smoke-fake-member-report-detail"}'
+header_is "member reports: …marked as a replay" "Idempotency-Replayed" "true"
+db_is "member reports: …one report, of the member, open, holding nothing" \
+  "$(sql "SELECT count(*) || '|' || min(target) || '|' || bool_and(entry_id IS NULL) || '|' || min(status) || '|' || (SELECT count(*) FROM media_report_holds WHERE report_id = '$MR_REPORT') FROM entry_reports WHERE bond_id = '$MR_BOND'")" "1|MEMBER|true|OPEN|0"
+expect "member reports: the reported member reads the bond, after" 200 "\"id\":\"$MR_BOND\"" -- "$API/bonds/$MR_BOND" -H "Authorization: Bearer $MR_A"
+is "member reports: …the reported member's GET /bonds/{id} is byte for byte what it was" "$LAST_BODY" "$MR_BOND_BEFORE"
+is "member reports: …and its ETag" "$(tag)" "$MR_BOND_TAG_BEFORE"
+case "$MR_BOND_TAG_BEFORE" in '"'*'"') pass "member reports: …which is a real ETag ($MR_BOND_TAG_BEFORE)";; *) fail "member reports: the bond's ETag" "got '$MR_BOND_TAG_BEFORE'";; esac
+expect "member reports: the reported member reads today, after" 200 '"myEntry"' -- "$API/bonds/$MR_BOND/today" -H "Authorization: Bearer $MR_A"
+is "member reports: …the reported member's GET /today is byte for byte what it was" "$LAST_BODY" "$MR_TODAY_BEFORE"
+is "member reports: …and its ETag" "$(tag)" "$MR_TODAY_TAG_BEFORE"
+expect "member reports: the reporter blocks the reported member" 204 '' -- -X POST "$API/bonds/$MR_BOND/block" -H "Authorization: Bearer $MR_B" -d '{"withdrawEntries":false}'
+expect "a member report after a block is 201" 201 '"reason":"VIOLENCE_OR_SELF_HARM"' -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_B" -H "Idempotency-Key: $(new_key)" -d '{"reason":"VIOLENCE_OR_SELF_HARM"}'
+MR_AFTER_BLOCK="$(printf '%s' "$LAST_BODY" | jget id)"
+if docker compose exec -T postgres true >/dev/null 2>&1; then
+  MR_LIST="$(reports list 2>&1)"
+  case "$MR_LIST" in *"$MR_REPORT"$'\t'HARASSMENT$'\t'MEMBER$'\t-\t'*$'\t'0$'\t't*) pass "member reports: the operator's list shows the member report, naming no entry and holding nothing";; *) fail "member reports: list" "${MR_LIST:0:400}";; esac
+  MR_OUT="$(reports dismiss "$MR_REPORT" "smoke: dismissed" 2>&1)" && MR_OUT2="$(reports dismiss "$MR_AFTER_BLOCK" "smoke: dismissed" 2>&1)" \
+    && pass "the operator dismisses the member reports" || fail "the operator dismisses the member reports" "$MR_OUT ${MR_OUT2:-}"
+else
+  skip "member reports: the operator's queue (psql not reachable through docker compose)"
+fi
+if grep -q "smoke-fake-member-report-detail" "$MOYI_LOG"; then fail "the member report's detail is in no log line" "it is in $MOYI_LOG"; else pass "the member report's detail is in no log line"; fi
+flush_buckets
+
+echo; echo "support — a message to a person, acknowledged without its words (FR-102, ADR-0057)"
+support() {
+  MOYI_OPERATOR=smoke-operator MOYI_OPS_PSQL="docker compose exec -T postgres psql -U moyi -d $MOYI_DB" \
+    scripts/moyi support "$@"
+}
+verified_account "support" "203.0.113.190"; SU_A="$ACCOUNT_ACCESS"
+flush_buckets
+SU_SUBJECT="Support~subject~$RANDOM$RANDOM"
+SU_BODY="Support~body~$RANDOM$RANDOM we cannot see today"
+SU_MESSAGE="{\"subject\":\"$SU_SUBJECT\",\"body\":\"$SU_BODY\"}"
+expect "a support message without a token is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHENTICATED"' -- -X POST "$API/support/messages" -d "$SU_MESSAGE"
+expect "a support message with no subject is 422 on subject" 422 '"field":"subject"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "{\"body\":\"$SU_BODY\"}"
+expect "a support message with a subject over 120 characters is 422 on subject" 422 '"field":"subject"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "{\"subject\":\"$(printf 's%.0s' $(seq 1 121))\",\"body\":\"$SU_BODY\"}"
+expect "a support message with a body over 5000 characters is 422 on body" 422 '"field":"body"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "{\"subject\":\"$SU_SUBJECT\",\"body\":\"$(python3 -c 'print("b" * 5001)')\"}"
+if [[ "$LAST_BODY" == *"$SU_SUBJECT"* || "$LAST_BODY" == *"bbbbbbbbbb"* ]]; then fail "support: …and the refusal repeats nothing sent" "${LAST_BODY:0:200}"; else pass "support: …and the refusal repeats nothing sent"; fi
+SU_KEY="$(new_key)"
+expect "a support message is 201 with its id and time" 201 '"createdAt"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -H "Idempotency-Key: $SU_KEY" -d "$SU_MESSAGE"
+SU_ID="$(printf '%s' "$LAST_BODY" | jget id)"
+SU_FIRST="$LAST_BODY"
+if [[ "$LAST_BODY" == *"$SU_BODY"* || "$LAST_BODY" == *"$SU_SUBJECT"* ]]; then fail "support: …which repeats nothing of the message" "${LAST_BODY:0:200}"; else pass "support: …which repeats nothing of the message"; fi
+expect "a support message replayed under its key is the same ticket" 201 "\"id\":\"$SU_ID\"" -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -H "Idempotency-Key: $SU_KEY" -d "$SU_MESSAGE"
+header_is "support: …and says it was replayed" Idempotency-Replayed true
+is "support: …the same body, byte for byte" "$LAST_BODY" "$SU_FIRST"
+expect "the sixth support message in a day is 429 RATE_LIMITED" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "$SU_MESSAGE"
+header_is "support: …five a day" X-RateLimit-Limit 5
+SU_RETRY="$(printf '%s\n' "$LAST_HEADERS" | grep -i '^retry-after:' | head -1 | cut -d' ' -f2- || true)"
+if [[ "$SU_RETRY" =~ ^[0-9]+$ ]] && [ "$SU_RETRY" -gt 0 ]; then pass "the sixth support message carries Retry-After ($SU_RETRY s)"; else fail "the sixth support message carries Retry-After" "got '${SU_RETRY:-<absent>}'"; fi
+db_is "support: one ticket was filed, open, for the replay and the 201 together" "$(sql "SELECT count(*) || '|' || min(status) FROM support_tickets WHERE user_id = (SELECT user_id FROM support_tickets WHERE id = '$SU_ID')")" "1|OPEN"
+SU_ACK=""
+for _ in $(seq 1 40); do
+  SU_ACK="$(grep -c "Support ticket $SU_ID acknowledgement: ACCEPTED" "$MOYI_LOG" || true)"
+  [ "$SU_ACK" -gt 0 ] && break
+  sleep 0.25
+done
+is "support: the acknowledgement was sent once (provider=log)" "$SU_ACK" "1"
+if grep -q "Your reference is $SU_ID" "$MOYI_LOG"; then pass "the support acknowledgement gives the ticket's id as its reference"; else fail "the support acknowledgement gives the ticket's id as its reference" "no 'Your reference is $SU_ID' in $MOYI_LOG"; fi
+if grep -qF "$SU_BODY" "$MOYI_LOG" || grep -qF "$SU_SUBJECT" "$MOYI_LOG"; then fail "the support acknowledgement does not repeat the message" "the subject or body is in $MOYI_LOG"; else pass "the support acknowledgement does not repeat the message, nor does any log line"; fi
+if [ "$PSQL_OK" = 1 ]; then
+  SU_OUT="$(support list 2>&1)" || true
+  if [[ "$SU_OUT" == *"$SU_ID"* && "$SU_OUT" != *"$SU_BODY"* ]]; then pass "support: the operator's list names the ticket, not its words"; else fail "support: the operator's list names the ticket, not its words" "${SU_OUT:0:300}"; fi
+  SU_OUT="$(support show "$SU_ID" 2>&1)" || true
+  if [[ "$SU_OUT" == *"$SU_BODY"* && "$SU_OUT" == *"reply to:   end-support-"* ]]; then pass "support: show gives the words and the address to answer at"; else fail "support: show gives the words and the address to answer at" "${SU_OUT:0:300}"; fi
+  SU_OUT="$(support close "$SU_ID" "smoke: answered by email" 2>&1)" && pass "support: the operator closes it" || fail "support: the operator closes it" "$SU_OUT"
+  db_is "support: …its words are deleted, and every look is logged" \
+    "$(sql "SELECT (subject IS NULL AND body IS NULL) || '|' || status || '|' || (SELECT string_agg(action, ',' ORDER BY at) FROM support_ticket_log WHERE ticket_id = '$SU_ID') FROM support_tickets WHERE id = '$SU_ID'")" "true|CLOSED|READ,CLOSED"
+else
+  skip "support: the operator's queue (psql not reachable through docker compose)"
+fi
+flush_buckets
+
+echo; echo "account deletion — asked for, called off, asked again, carried out (FR-008, ADR-0058)"
+# The job runs on a five-second schedule here (the boot above; with --attach, start the server with
+# --moyi.scheduling.account-deletion.cron='*/5 * * * * *'), and the window is moved back by SQL,
+# because fourteen days cannot be waited out. Everything before the move is the API alone.
+verified_account "deleter" "203.0.113.200"; DL_A="$ACCOUNT_ACCESS"; DL_EMAIL="$ACCOUNT_EMAIL"
+verified_account "deleters-partner" "203.0.113.201"; DL_B="$ACCOUNT_ACCESS"
+flush_buckets
+DL_WORDS="Deleter~words~$RANDOM$RANDOM"
+revealed_bond "account deletion" "$DL_A" "$DL_B" "$DL_WORDS" "Partner~words~$RANDOM"
+DL_BOND="$RB_BOND"; DL_A_ENTRY="$RB_A_ENTRY"; DL_B_ENTRY="$RB_B_ENTRY"
+expect "account deletion without a token is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHENTICATED"' -- -X POST "$API/me/deletion-request" -d "{\"password\":\"$PASSWORD\"}"
+expect "account deletion with no password is 422 on password" 422 '"field":"password"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d '{}'
+expect "account deletion with a blank password is 422 on password" 422 '"field":"password"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d '{"password":"  "}'
+expect "account deletion with a wrong password is 401 INVALID_CREDENTIALS" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d '{"password":"not the password"}'
+header_is "…without WWW-Authenticate: the session is fine" "WWW-Authenticate" ""
+expect "GET /me says no deletion is pending" 200 '"deletionRequest":null' -- "$API/me" -H "Authorization: Bearer $DL_A"
+expect "cancelling with nothing pending is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/me/deletion-request" -H "Authorization: Bearer $DL_A"
+DL_NOTHING="$LAST_BODY"
+DL_MAILS="$(grep -c "Your Moyi account will be deleted" "$MOYI_LOG" || true)"
+expect "account deletion with the password is 202 with its dates" 202 '"cancellableUntil":"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d "{\"password\":\"$PASSWORD\"}"
+DL_FIRST="$LAST_BODY"
+is "…cancellable for 14 days, done within 30" "$(python3 -c "
+import json, sys
+from datetime import datetime
+b = json.loads(sys.argv[1]); p = lambda k: datetime.fromisoformat(b[k].replace('Z', '+00:00'))
+print((p('cancellableUntil') - p('requestedAt')).days, (p('deleteBy') - p('requestedAt')).days)" "$DL_FIRST")" "14 30"
+expect "asking again while it is pending is 202" 202 '"requestedAt":"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d "{\"password\":\"$PASSWORD\"}"
+is "…with the same dates, byte for byte" "$LAST_BODY" "$DL_FIRST"
+expect "GET /me shows the pending deletion" 200 '"deletionRequest":{"' -- "$API/me" -H "Authorization: Bearer $DL_A"
+is "…with the same dates as the 202" "$(python3 -c "import json,sys; print(json.dumps(json.loads(sys.argv[1])['deletionRequest'], sort_keys=True))" "$LAST_BODY")" "$(python3 -c "import json,sys; print(json.dumps(json.loads(sys.argv[1]), sort_keys=True))" "$DL_FIRST")"
+for _ in $(seq 1 40); do [ "$(grep -c "Your Moyi account will be deleted" "$MOYI_LOG" || true)" -gt "$DL_MAILS" ] && break; sleep 0.25; done
+is "the person is emailed once, with how to cancel, for the two requests" "$(( $(grep -c "Your Moyi account will be deleted" "$MOYI_LOG" || true) - DL_MAILS ))" "1"
+if grep -q "cancel it under \"Delete my account\"" "$MOYI_LOG"; then pass "…and the email says where to cancel"; else fail "…and the email says where to cancel" "no such line in $MOYI_LOG"; fi
+expect "while it is pending the person still signs in" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$DL_EMAIL" "$PASSWORD")"
+expect "cancelling inside the window is 204" 204 "" -- -X DELETE "$API/me/deletion-request" -H "Authorization: Bearer $DL_A"
+expect "cancelling again is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/me/deletion-request" -H "Authorization: Bearer $DL_A"
+is "…the same bytes as cancelling with nothing ever asked" "$LAST_BODY" "$DL_NOTHING"
+expect "GET /me is clear again" 200 '"deletionRequest":null' -- "$API/me" -H "Authorization: Bearer $DL_A"
+flush_buckets
+expect "asked for again: 202" 202 '"cancellableUntil":"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d "{\"password\":\"$PASSWORD\"}"
+if [ "$PSQL_OK" = 1 ]; then
+  DL_USER="$(sql "SELECT id FROM users WHERE email = '$DL_EMAIL'")"
+  db_is "…its window is moved back fifteen days, as fourteen days on would leave it" \
+    "$(sql "WITH moved AS (UPDATE deletion_requests SET requested_at = requested_at - interval '15 days', execute_after = execute_after - interval '15 days' WHERE user_id = '$DL_USER' AND cancelled_at IS NULL AND executed_at IS NULL RETURNING 1) SELECT count(*) FROM moved")" "1"
+  # Up to 45 seconds: the job runs every five here, but ShedLock holds its lock at least 30 after each run.
+  for _ in $(seq 1 45); do [ "$(sql "SELECT status FROM users WHERE id = '$DL_USER'")" = "DELETED" ] && break; sleep 1; done
+  db_is "the job carries it out: the account is DELETED, its address and name gone, its password and sessions deleted" \
+    "$(sql "SELECT status || '|' || (email = 'deleted-' || id || '@deleted.invalid') || '|' || (display_name <> 'Smoke') || '|' || (SELECT count(*) FROM credentials WHERE user_id = u.id) || '|' || (SELECT count(*) FROM refresh_tokens WHERE user_id = u.id) FROM users u WHERE id = '$DL_USER'")" "DELETED|true|true|0|0"
+  expect "the deleted account's access token is refused: 401" 401 '"code":"UNAUTHENTICATED"' -- "$API/me" -H "Authorization: Bearer $DL_A"
+  expect "the deleted account cannot sign in: 401 INVALID_CREDENTIALS" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$DL_EMAIL" "$PASSWORD")"
+  for _ in $(seq 1 15); do [ "$(sql "SELECT status FROM bonds WHERE id = '$DL_BOND'")" = "ARCHIVED" ] && [ "$(sql "SELECT author_deleted_account FROM entries WHERE id = '$DL_A_ENTRY'")" = "t" ] && break; sleep 1; done
+  expect "the partner sees the bond ended, as a leave ends it" 200 '"status":"ARCHIVED"' -- "$API/bonds/$DL_BOND" -H "Authorization: Bearer $DL_B"
+  db_is "the deleted person's entry is a flagged tombstone (BR-10), and the partner's is untouched" \
+    "$(sql "SELECT string_agg((text IS NULL) || ':' || status || ':' || author_deleted_account, ',' ORDER BY (id = '$DL_A_ENTRY') DESC) FROM entries WHERE id IN ('$DL_A_ENTRY', '$DL_B_ENTRY')")" "true:DELETED:true,false:REVEALED:false"
+  db_is "…and the day they both wrote keeps its status, so the partner's streak stands" \
+    "$(sql "SELECT d.status FROM bond_days d JOIN entries e ON e.bond_day_id = d.id WHERE e.id = '$DL_B_ENTRY'")" "REVEALED"
+else
+  skip "account deletion: carried out by the job (psql not reachable through docker compose)"
+fi
+if grep -q "$DL_WORDS" "$MOYI_LOG"; then fail "the deleted person's words are in no log line" "they are in $MOYI_LOG"; else pass "the deleted person's words are in no log line"; fi
+flush_buckets
+
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
 # Two tokens by now — the verification link and the reset link — both consumed.
@@ -3113,8 +3670,10 @@ echo; echo "scheduling — the close job runs, under its lock, without error (sp
 CLOSE_LOCK="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM shedlock WHERE name='close-days'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
 case "$CLOSE_LOCK" in psql-unavailable) skip "lock check";; 1) pass "the close job has taken its ShedLock row";; *) fail "close job" "expected one shedlock row named close-days, got '$CLOSE_LOCK'";; esac
 if grep -qE "close: day .* failed|close: the missing days of bond|streak: bond .* could not be evaluated|FAILED [1-9]|Unexpected error occurred in scheduled task" "$MOYI_LOG"; then fail "close job" "the close job logged a failure"; else pass "…and has logged no failure"; fi
-UNCLOSED_PAST="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM bond_days WHERE closed_at IS NULL AND ends_at < now() - interval '1 minute'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
-case "$UNCLOSED_PAST" in psql-unavailable) skip "unclosed-day check";; 0) pass "…and no day that has ended is still unclosed";; *) fail "close job" "$UNCLOSED_PAST ended days are still unclosed";; esac
+# A day stays open for its twelve-hour late-entry grace (issue #132, ADR-0033 decision 15), so
+# what must be closed is every day whose grace has run out, a minute ago.
+UNCLOSED_PAST="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM bond_days WHERE closed_at IS NULL AND ends_at < now() - interval '12 hours 1 minute'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
+case "$UNCLOSED_PAST" in psql-unavailable) skip "unclosed-day check";; 0) pass "…and no day past its grace is still unclosed";; *) fail "close job" "$UNCLOSED_PAST days past their grace are still unclosed";; esac
 
 echo; printf '%d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
 # The exit status is the failure count, as the README says (capped at what a

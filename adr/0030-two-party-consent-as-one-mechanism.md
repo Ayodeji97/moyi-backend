@@ -141,6 +141,7 @@ The cost is real and worth stating: **a member who has left cannot start a mutua
 What they keep is their own copy's fate — account deletion (FR-008) destroys it — and export
 (FR-009). If that ever proves too blunt, the answer is a one-sided deletion of the caller's
 own data, not a request that travels to the other person.
+*Discharged 2026-11-09 by ADR-0058 (issue #125): that account deletion exists now; it erases the person's entries in every bond, left ones included, and ends as a leave every bond they are still in, a cooling-off one keeping its countdown.*
 
 **11. Ending a bond cancels every open proposal** — ADR-0028's obligation, which that ADR
 recorded and could not discharge because this table did not exist. Without it a confirmation

@@ -185,6 +185,35 @@ internal class RateLimitingEndpointTest(
         resend("user99@example.com").status shouldBe 429
     }
 
+    // ---- auth:code, per email and per IP (#135) -----------------------------
+
+    @Test
+    fun `ten typed codes a day per address, both endpoints together, identical for an address with no account`() {
+        repeat(5) { verifyByCode("nobody@example.com", from = "203.0.113.${it + 10}").status shouldBe 422 }
+        repeat(5) { resetByCode("nobody@example.com", from = "203.0.113.${it + 20}").status shouldBe 422 }
+
+        val refused = verifyByCode("nobody@example.com", from = "203.0.113.30")
+        refused.status shouldBe 429
+        refused.getHeader("X-RateLimit-Limit") shouldBe "10"
+        // Greedy refill: one try back every 2.4 hours.
+        refused.getHeader(HttpHeaders.RETRY_AFTER) shouldBe "8640"
+        resetByCode("NOBODY@example.com", from = "203.0.113.31").status shouldBe 429
+
+        verifyByCode("somebody-else@example.com", from = "203.0.113.32").status shouldBe 422
+    }
+
+    @Test
+    fun `twenty presentations an hour from one client address, codes and links on both endpoints`() {
+        repeat(10) { verifyByCode("user$it@example.com").status shouldBe 422 }
+        repeat(5) { verifyByToken("not-a-token-$it").status shouldBe 422 }
+        repeat(5) { resetByCode("other$it@example.com").status shouldBe 422 }
+
+        val refused = verifyByToken("one-more")
+        refused.status shouldBe 429
+        refused.getHeader("X-RateLimit-Limit") shouldBe "20"
+        resetByCode("last@example.com").status shouldBe 429
+    }
+
     // ---- global authenticated, per user -------------------------------------
 
     @Test
@@ -208,7 +237,34 @@ internal class RateLimitingEndpointTest(
         me(token).status shouldBe 200
     }
 
+    // ---- account:deletion, per user (ADR-0058) ------------------------------
+
+    @Test
+    fun `a sixth account-deletion request in an hour is 429, wrong passwords counted alike`() {
+        register("ada@example.com").status shouldBe 201
+        val userId = jdbc.queryForObject("SELECT id FROM users", UUID::class.java)!!
+        val token = issuer.issue(userId).token
+
+        repeat(5) { deletionRequest(token).status shouldBe 401 }
+
+        val refused = deletionRequest(token)
+        refused.status shouldBe 429
+        refused.getHeader(HttpHeaders.RETRY_AFTER) shouldBe "720"
+        refused.contentAsString shouldContain "\"code\":\"RATE_LIMITED\""
+        // Spent before the password was looked at: the sixth cost no Argon2id.
+        hasher.matchesCalls.get() shouldBe 5
+    }
+
     // ---- helpers -----------------------------------------------------------
+
+    private fun deletionRequest(token: String): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/me/deletion-request") {
+                header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"password":"not the password"}"""
+            }.andReturn()
+            .response
 
     private fun login(
         email: String = "ada@example.com",
@@ -249,6 +305,31 @@ internal class RateLimitingEndpointTest(
             .post("/api/v1/auth/resend-verification") {
                 contentType = MediaType.APPLICATION_JSON
                 content = """{"email":"$email"}"""
+            }.andReturn()
+            .response
+
+    private fun verifyByCode(
+        email: String,
+        from: String = "127.0.0.1",
+    ) = post("/api/v1/auth/verify-email", """{"email":"$email","code":"123456"}""", from)
+
+    private fun verifyByToken(token: String) = post("/api/v1/auth/verify-email", """{"token":"$token"}""", "127.0.0.1")
+
+    private fun resetByCode(
+        email: String,
+        from: String = "127.0.0.1",
+    ) = post("/api/v1/auth/reset-password", """{"email":"$email","code":"123456","password":"a different good password"}""", from)
+
+    private fun post(
+        path: String,
+        body: String,
+        from: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .post(path) {
+                contentType = MediaType.APPLICATION_JSON
+                content = body
+                with { request -> request.apply { remoteAddr = from } }
             }.andReturn()
             .response
 

@@ -349,7 +349,7 @@ internal class MissingDaysTest(
     }
 
     private companion object {
-        val NOW: Instant = Instant.parse("2026-09-15T10:00:00Z")
+        val NOW: Instant = Instant.parse("2026-09-15T12:00:00Z")
         const val BUDGET = 1_000
     }
 }

@@ -127,8 +127,8 @@ internal class ErasureReleasesMediaTest(
         // Just after the 15th ended in Lagos; the consumer is kept off until after the close job has run.
         clock.set(Instant.parse("2026-09-15T23:00:10Z"))
         rig.block(ada, bond)
-        rig.postpone(bond, Instant.parse("2026-09-16T06:00:00Z"))
-        clock.set(Instant.parse("2026-09-15T23:02:00Z"))
+        rig.postpone(bond, Instant.parse("2026-09-16T18:00:00Z"))
+        clock.set(Instant.parse("2026-09-16T11:02:00Z"))
         closer.closeElapsedDays(clock.instant(), BUDGET).failed shouldBe 0
 
         rig.delivery(bond)["processed_at"].shouldBeNull()
@@ -150,7 +150,7 @@ internal class ErasureReleasesMediaTest(
 
         clock.set(MIDDAY.plusSeconds(3_600))
         rig.block(ada, bond)
-        rig.postpone(bond, Instant.parse("2026-09-16T06:00:00Z"))
+        rig.postpone(bond, Instant.parse("2026-09-16T18:00:00Z"))
         rig.today(bea, bond)
 
         rig.delivery(bond)["processed_at"].shouldBeNull()

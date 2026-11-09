@@ -17,3 +17,12 @@
   Cache-Control: no-store
 /invite
   Cache-Control: no-store
+
+# The app-link files (README.md, "App links"). Android and Apple read them as
+# JSON; the Apple one has no extension, so without this it would go out as
+# application/octet-stream. Neither is a page, so neither is ever redirected:
+# _redirects has no rule for /.well-known/*.
+/.well-known/assetlinks.json
+  Content-Type: application/json
+/.well-known/apple-app-site-association
+  Content-Type: application/json

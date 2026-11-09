@@ -1,7 +1,9 @@
 # ADR-0033 — The close job
 
 **Status:** Accepted · **Date:** 2026-10-05 · **Deciders:** Daniel
-**Amended:** 2026-10-09 (the status; "C5, the archive" discharged — ADR-0036)
+**Amended:** 2026-10-09 (the status; "C5, the archive" discharged — ADR-0036) · 2026-11-08
+(decision 15, the late-entry grace, issue #132: decisions 4, 5, 6 and 9 now wait for it — see
+"Amendment — 2026-11-08")
 
 *(2026-10-09: the status read "Proposed" until this date, though the slice merged as #54 on 2026-10-06. Brought to the convention of ADR-0026 to ADR-0031, which say "Accepted"; noted in ADR-0036's slice.)*
 
@@ -75,7 +77,8 @@ to find days that have a row. V15 adds the partial index the scan uses
 most it now serves the `PENDING_REVEAL` arm of the scan. Which the planner chooses for
 that arm has not been looked at: the test asserts only that V15's index is used.
 
-**5. A day is settled only once it has been over for a minute.** The one-minute margin
+**5. A day is settled only once it has been over for a minute.** *(Amended 2026-11-08,
+decision 15: for its twelve-hour late-entry grace and a minute.)* The one-minute margin
 absorbs ordinary clock skew between instances. It is no longer relied on to cover a
 transaction waiting for the bond lock: pairing and timezone changes serialize with close on
 the bond row. `AcceptInvite` captures `joinedAt` after it acquires that lock and rechecks
@@ -305,3 +308,95 @@ lock is acquired. The code now uses bond-then-day locking in `CloseDay` and reco
 `joinedAt` after `AcceptInvite` obtains the bond lock. This supersedes the no-bond-lock ruling
 for the existing-day close path. `CreateMissingDays` still uses its unique conflict handling
 for rows it inserts directly; it does not close an existing day.
+
+## Amendment — 2026-11-08: the late-entry grace (issue #132)
+
+**The owner's ruling, 2026-11-08** (FR-045 and BR-3a amended in the corpus the same day): an
+entry written offline before a Bond-day ends and sent within twelve hours counts for the day
+it was written, and a Bond-day is not closed until twelve hours after it ends. Before this,
+BR-3a's offline-draft rule was unreachable as built: this job settled every day a minute after
+its end, so an entry written at 23:00 offline and sent at 07:00 found its day closed and was
+filed under the day of sending (BR-3a's third clause), and the lone entry the partner had
+written was already unlocked and the streak already broken.
+
+**15. A day is settled once its late-entry grace has run out, and a minute more.** The grace
+is `moyi.gratitude.days.late-entry-grace` (default `PT12H`), read once into a
+`LateEntryGrace` bean (`gratitude.service.DayProperties`); every reader takes the bean. Two
+rules use it, and they are the same length by construction:
+
+- `DayAssignment.resolve` trusts an `intendedAt` no older than the grace before the
+  submission (BR-3a's window, thirty-six hours until this ruling; ADR-0031 decision 20 as
+  amended). There is no separate "offline window" any more.
+- `CloseElapsedDays` passes `now − grace − SETTLE_MARGIN` as the threshold to both of its
+  steps: the candidates (decision 4) and `CloseDay`'s "has it ended?" (decision 3 step 4),
+  **and** `CreateMissingDays` (decision 6). The last is not optional. A day nobody had opened
+  would otherwise be written closed `EMPTY` a minute after midnight, and a late entry meant
+  for it would find it settled and be filed on today — the fault this amendment removes,
+  through the other door.
+
+Because the two lengths are one, a claim the first rule accepts lies inside a day that ended
+after the claim, so less than the grace ago, and the second rule has not settled it. The
+recheck under the day lock (ADR-0031 decision 20) still stands for what can still settle a
+day early: an instance whose clock runs ahead, and a `REVEALED` day (settled by the reveal,
+not the close). `CloseRaceTest` holds a late submission against the job at the boundary, in
+both orders, synchronised on the bond row: first, it lands on its day and the job closes the
+day with it; second, it finds the day settled and is filed on today, never on the settled day.
+
+**What waits for the grace, and what does not.**
+
+- **Decided once, after it:** the close itself (`OPEN` → `EMPTY`, `PARTIAL` → `SOLO`, a
+  `PENDING_REVEAL` day past its time → `REVEALED`), the lone entry's unlock to the partner
+  (FR-063, decision 9), the missed day, the rest-day spend and the streak (ADR-0034: the
+  evaluation runs only on settled days), and `DayClosed` with every push that follows from it.
+  Nothing is recomputed afterwards: a day is still closed and evaluated once.
+- **Not delayed:** a reveal. Two entries reveal the day the moment the second lands, late
+  or not, and a `PENDING_REVEAL` day is still revealed by this job when its time comes
+  (decision 3 step 3 is unchanged). The reveal gate is unchanged too: a late entry is a
+  member writing, so it is what lets them read the other's — the partner of a lone writer
+  cannot read the lone entry during the grace without writing first, because the unlock that
+  would have shown it at midnight now waits for the close.
+- **Judged by the day's end, not by the close:** whether the bond separated before the day
+  ended (decision 9 as amended, ADR-0040) and the Strict mode a day ended under (ADR-0034
+  decision 6). A later close changes neither question's answer.
+- **Time-zone changes** (ADR-0031): a confirmed change takes hold at the end of the current
+  Bond-day, and the timeline is history, so yesterday's window during its grace is the one it
+  had; a westward merge lengthens the *new* day, never the one in its grace. The grace is
+  counted from the day's own end, whatever its length.
+- **A rejected claim is unchanged:** an `intendedAt` older than the grace, ahead of the clock,
+  before the bond, or on a settled day still falls back to the day of submission.
+
+**What a reader sees.** `GET /streak` draws every undecided day — today, an earlier day
+inside its grace, and a stored day past it that this job has not evaluated yet — `OPEN` until
+it has revealed (`COMPLETE`), with a new required, nullable `settlesAt` on each square that is
+set exactly on an `OPEN` one; and the shown run adds every
+undecided day that has revealed, oldest first, while each follows the last evaluated day
+(ADR-0034 decision 8 as amended). `GET /today`'s `bondDay` gains a required `settlesAt`.
+**`settlesAt` is the earliest a day can be decided, not the moment it is:** this job settles it
+on its first run after `settlesAt` and the settle margin, up to a margin and a period later
+(about sixteen minutes at the production schedule). The readers do not stop treating a day as
+undecided at `settlesAt`: a stored day stays undecided until it has been evaluated
+(`LateEntryGrace.undecidedUntil`), so no reader has to know this job's schedule (review M1). `GET /days` shows yesterday as it is (`PARTIAL`, say) until it settles.
+
+**Consequences.**
+
+- A lone entry is unlocked to the partner, and a missed day is announced, about twelve hours
+  later than before — noon or so the next day, in the bond's zone. `DayClosed` pushes arrive
+  then rather than just after midnight.
+- **The monitoring check had to move with it.** `ops/monitoring/close-check.sh` alarmed on any
+  day ended more than thirty minutes ago and still unclosed; every day now is, for twelve
+  hours. It now allows the grace (`LATE_ENTRY_GRACE`, default `12 hours`). The new script must
+  be on the server before the image that carries this (ops/monitoring/README.md).
+- No migration: no stored value changes meaning. Days closed before this ships stay closed.
+- The skipped date of an eastward change (decision 6) is written `FROZEN` once the day before
+  it has settled, so a grace later than before. Until then the streak read's walk stops at the
+  missing date, so a day after it that both have completed is not yet added and the shown run
+  is short by it for those hours; the stored run is right once the job has written and
+  evaluated the date. The review fix above does not cover it: there is no row yet to be
+  "not yet evaluated". Accepted (review L2) as rare — it needs an approved eastward change.
+
+**Checked:** `LateEntryGraceTest`, `DayAssignmentTest`, `CloseElapsedDaysTest` (a day left open
+through its grace takes a late entry and is decided once; a day nobody opened is not written
+inside it), `CloseMatrixTest` (every zone's day is still `PARTIAL` a minute after its end and a
+second before its grace runs out), `CloseRaceTest` (the boundary race, both orders),
+`StreakEndpointTest` (yesterday `OPEN` with its `settlesAt`, completed late and counted once),
+the smoke run's late-entry section (`scripts/smoke.sh`).

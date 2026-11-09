@@ -2,7 +2,9 @@
 
 **Status:** Accepted · **Date:** 2026-10-05 · **Deciders:** Daniel
 **Amended:** 2026-10-09 (the status; "Owed — C5, the archive" discharged — ADR-0036);
-2026-10-22 ("Owed — C6" discharged — ADR-0041)
+2026-10-22 ("Owed — C6" discharged — ADR-0041); 2026-11-08 (the ended run and the rest day's
+reason, issue #141: see "Amendment — 2026-11-08"); 2026-11-08 (decision 8, the undecided days
+of the late-entry grace, issue #132 — ADR-0033 decision 15)
 
 *(2026-10-09: the status read "Proposed" until this date, though the slice merged as #55, and its rulings as #56, on 2026-10-06. Brought to the convention of ADR-0026 to ADR-0031, which say "Accepted"; noted in ADR-0036's slice.)*
 
@@ -113,6 +115,23 @@ Nothing else is computed at read time. A run that has lapsed reads zero because 
 wrote and evaluated the missed days, never because a read noticed a gap; and while the job
 is behind, today is *not* added to a run that yesterday may have ended.
 
+*Amended 2026-11-08 (issue #132, ADR-0033 decision 15).* Yesterday is not settled, so not
+evaluated, until its late-entry grace (`moyi.gratitude.days.late-entry-grace`) has run out and
+the close job has next run. "Today" here now reads **"every undecided day"**: today, any
+earlier day still inside its grace, and any day after the last evaluated one that the job has
+not evaluated yet, whatever the clock says (`LateEntryGrace.undecidedUntil`; review M1: a
+reader that let yesterday go at the grace's end dropped it for the minutes until the job ran,
+so the run fell by a day at noon and came back). Each is drawn `OPEN` (with
+`settlesAt`) until it has revealed, then `COMPLETE`; and the read steps each revealed one,
+oldest first, while each directly follows the last evaluated day or the one stepped before it
+(or is the bond's first shared day). The first undecided day that has not revealed stops the
+walk: today cannot extend a run that an open yesterday may yet break. Without this, a couple
+who completed yesterday would be shown one day less every morning until noon. The reads go:
+the stored run, then the last evaluated date, then the squares, so an evaluation committing
+between them leaves the number one short for a moment and never counts a day twice
+(`GetStreak`'s KDoc). The walk takes every square after the last evaluated date, so a day
+evaluated after that date was read is added once, by the read, and never by the stored run too.
+
 **9. The streak's row is its mutex.** Evaluation and `recalculate` take the bond's
 `streak_states` row `FOR UPDATE` (inserted if absent) and hold it for the bond's
 transaction. **It takes the bond's lock first**, as the closer does since ADR-0033 was
@@ -207,7 +226,8 @@ click. Both decide nothing: every rule is the server's.
   make one response show yesterday's number. It cannot count a day twice: a today that
   has been evaluated is never added.
 - **`states.md` and this API differ in three places**, recorded as gaps for the design
-  system and not guessed at: the calendar has no field that tells a freeze-covered day from
+  system and not guessed at *(the first two closed on 2026-11-08, issue #141: see
+  "Amendment — 2026-11-08")*: the calendar has no field that tells a freeze-covered day from
   a stepped-over date (both are `FROZEN`, and the "we used a rest day" copy fits only the
   first); the length of a run that has just broken ("your streak ended at 23 days") is not
   sent, `longest` being the longest ever; and `states.md` §7's Strict-mode
@@ -290,6 +310,66 @@ pull request that follows the slice's.
 
    *Ruled by the owner on 2026-10-21: confirmed. It stands as built, and the question is
    closed.*
+
+## Amendment — 2026-11-08: the run that ended, and why a day is a rest day (issue #141)
+
+The mobile client could not draw two lines of `states.md` §7 from this API, the first two
+gaps under Consequences: "Your streak ended at 21 days" and "Yesterday slipped by. We used a
+rest day." `GET /bonds/{bondId}/streak` now carries both. `GET /today`'s `streak` object is
+unchanged.
+
+**1. `lastRunLength` and `lastRunBrokenOn`: the run the latest break ended, always sent.**
+`lastRunLength` is the length of the run that the latest `BROKEN` day ended, and
+`lastRunBrokenOn` the date of that day — the missed day the run did not survive, itself not
+in the run. Both are `null` until a run has ended, and are `null` together. **They are not
+cleared when the next run starts**: they stay the last ended run while the next one grows,
+and a client shows the "ended" copy when `current` is 0 and `lastRunLength` is not `null`.
+Two other definitions were weighed and refused. "Present only while `current` is 0" makes
+the field's presence a second statement of `current`, and moves under it at read time —
+decision 8 adds a complete today to `current` before midnight, so the field would vanish
+mid-day by a rule this function does not own. "The run before the current one, whatever
+ended it" has no answer for a run broken by nothing (a bond's first run). A break is the
+one event that ends a run (decision 5's table), so it is the one that sets the field.
+
+What sets it follows from decision 5 and from nothing new: a covered day, a day missed on a
+run of zero, a stepped-over date, a suspended day and a day after the end are not breaks,
+and leave it as it was. So `lastRunLength` is at least one and never above `longest`.
+
+**It is part of the projection** — `StreakState`, set by `StreakRules.step` and by nothing
+else — **and persisted** on `streak_states` (V43, two columns and a check that they are null
+together). It could have been read from `streak_events` at request time: the latest
+`BROKEN` line's `streak_before` and date are exactly these two values. It is not, because
+`streak_events` is an audit log that `recalculate` does not rebuild (decision 10), and a
+number a member is shown belongs where FR-074 can put it back. Being in the fold, it is
+rebuilt by `recalculate` like every other column, and the replay property of decision 13
+holds it for free. V43 back-fills existing rows from that same audit line, which is the
+value a replay would produce; nothing was deployed with a break whose line is missing.
+
+**2. A square's `reason`: why it is `FROZEN`, always sent.** `REST_DAY` for a missed day a
+banked freeze covered; `TIMEZONE_SHIFT` for a date an approved zone change stepped over
+(BR-6); `null` on every other square. **Derived, not stored**: decision 4 already keeps
+`evaluated_as` on the day because "a missed day a freeze covered becomes `FROZEN`, the same
+status as a date a zone change stepped over, and the two replay differently". A `FROZEN`
+square comes from exactly two outcomes — `FROZEN_BY_SKIP`, and `MISSED` on a day whose status
+evaluation changed to `FROZEN` because it spent a freeze (V17's `bond_days_freeze_check`) — so
+the outcome names the reason. `StreakDay.of` decides square and reason together; no second
+statement of which days are frozen exists to drift.
+
+**3. On the wire.** Both fields of 1 and the field of 2 are in their schema's `required`
+list and nullable (`contracts`' `documentStreak`), with descriptions that say when they are
+`null`; `reason`'s enum lists `null`, as the entry's `reaction` does. The fields that were
+there before keep their documentation: making them `required` changes a generated client's
+types and is not this change's. Additive; no `breaking-api-change` label. FR-076 is
+unaffected: a run's length and a reason are about the bond, and say nothing a member's own
+calendar does not.
+
+**Checked:** `StreakRulesTest`, `StreakPropertiesTest` (the ended run is what the latest
+break ended, on 2,000 timelines), `RecalculateStreakTest` (the replay reproduces both
+columns), `StreakEndpointTest`, `StreakEvaluationTest` (a real zone change gives
+`TIMEZONE_SHIFT`), `OpenApiContractTest`; and the smoke run, where the close job evaluates
+hand-placed days into a run that ends and both kinds of rest day. Each mutation — the break
+not recording the run, the reasons swapped, the store not writing the columns, the contract
+documentation removed — was seen to fail a named test, listed on the pull request.
 
 ## Revisit when
 

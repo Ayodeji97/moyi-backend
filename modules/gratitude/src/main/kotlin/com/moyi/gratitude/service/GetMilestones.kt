@@ -4,11 +4,9 @@ import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondMembership
 import com.moyi.gratitude.domain.Milestone
 import com.moyi.gratitude.domain.Milestones
-import com.moyi.gratitude.domain.StreakCell
 import com.moyi.gratitude.infra.database.StreakCalendar
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import java.time.Clock
 
 /** What a bond has reached (FR-075): each milestone with the date of the day that reached it, oldest first, and the next one to aim at. */
 internal data class MilestonesView(
@@ -21,23 +19,21 @@ internal data class MilestonesView(
  * `GET /bonds/{bondId}/milestones` (ADR-0041).
  *
  * **Dated by the bond's days.** The Nth day evaluated `COMPLETE` is the day that reached N
- * (decision 2); `streak_states` is not read. **Today is added by `GET /streak`'s own rule**
- * ([GetStreak.countsToday]): once it has revealed, and only when it follows the last evaluated
- * day. Its square is read as `GetStreak.detail` reads it, from [StreakCalendar.between].
+ * (decision 2); `streak_states` is not read. **The undecided days are added by `GET /streak`'s
+ * own rule** ([GetStreak.pending]): today, and yesterday while its late-entry grace runs (BR-3a
+ * as amended 2026-11-08), each once it has revealed, and only while each follows the last
+ * evaluated day or the one added before it. Their squares are read as `GetStreak.detail` reads
+ * them, from [StreakCalendar.between].
  *
- * **Whether today counts is decided before the timeline is read** (review I1). The reads are
- * separate statements at `READ COMMITTED`, and the close job may commit yesterday's evaluation
- * between them. Read in this order, that commit can only leave the answer a day behind: if
- * [GetStreak.countsToday] saw yesterday unevaluated, today is not added, and the timeline read
- * after it holds yesterday or not, a total that is right for the moment of the read or one
- * short. If it saw yesterday evaluated, the timeline read after it holds that day too. Read the
- * other way round, a timeline from before the commit and a last evaluated day from after it
- * would add today in yesterday's place: "7 reached today" for the day `MilestoneReached` dates
- * yesterday, an answer neither moment gives. Today itself is never evaluated while it is today
- * (ADR-0034, Consequences), so nothing is counted twice. That rests on the settle margin: a day
- * is settled only a minute after it ends (ADR-0033 decision 5), so a request that read `today`
- * just before midnight cannot see that day evaluated by its later statements. Without the
- * margin this read order would no longer be enough (ADR-0041 decision 5).
+ * **What is pending is decided before the timeline is read, and trimmed after** (review I1, and
+ * the grace). The reads are separate statements at `READ COMMITTED`, and the close job may
+ * commit an evaluation between them. Before the grace, today was never evaluated while it was
+ * today, so reading "does today count" first was enough. Now yesterday can be pending and be
+ * evaluated a moment later, so a pending day is dropped if the last evaluated date read after
+ * the timeline has reached it: a day the timeline counted is never counted again. A commit
+ * between the timeline and that last read can leave the total one short for a moment, the
+ * same tolerance as before, never one over ("7 reached today" for the day `MilestoneReached`
+ * dates yesterday, an answer neither moment gives) (ADR-0041 decision 5).
  *
  * **`next` is `null` when the membership takes no writes** (decision 7): ended, left, blocked
  * and the deletion countdown alike, so nothing says which. What was reached stays. Asked of the
@@ -46,7 +42,7 @@ internal data class MilestonesView(
  * guard's membership would still take writes (as `GetDays.onThisDay`; C6b final review m2).
  *
  * **It remembers nothing about who asked** (H-M1): read-only, and handed the bond's access
- * port, the calendar, the streak's rule and the clock, nothing else (`ArchitectureTest` holds
+ * port, the calendar and the streak's rule, nothing else (`ArchitectureTest` holds
  * the list). Whether a milestone is new to somebody is their device's to know, from `achievedOn`.
  */
 @Service
@@ -54,20 +50,22 @@ internal class GetMilestones(
     private val access: BondAccess,
     private val calendar: StreakCalendar,
     private val streak: GetStreak,
-    private val clock: Clock,
 ) {
     @Transactional(readOnly = true)
     fun of(membership: BondMembership): MilestonesView {
         val now = access.membershipNow(membership)
-        val today = todayOf(membership, clock)
-        // Today first, the timeline last: see the class KDoc. Each statement reads what has
-        // committed by then, and an evaluation sets a day's evaluated_at and evaluated_as in one
-        // commit, so the order is the guarantee.
-        val todayComplete = calendar.between(membership.bondId, today, today, today).singleOrNull()?.cell == StreakCell.COMPLETE
-        val counted = streak.countsToday(membership, today, todayComplete)
+        // The undecided days first, the timeline last: see the class KDoc. Each statement reads
+        // what has committed by then, and an evaluation sets a day's evaluated_at and
+        // evaluated_as in one commit, so the order is the guarantee.
+        val pending = streak.pending(membership)
         val evaluated = calendar.completeDays(membership.bondId, Milestones.THRESHOLDS)
-        val total = if (counted) evaluated.total + 1 else evaluated.total
-        val dates = if (counted) evaluated.dates + (total to today) else evaluated.dates
+        // A pending day the job evaluated after `pending` read it is in the timeline now: counted
+        // there, it is dropped here. Asked after the timeline, so a commit between the two can
+        // only leave the total one short for a moment, never count a day twice.
+        val evaluatedSince = streak.lastEvaluatedDate(membership)
+        val counted = pending.complete.filter { evaluatedSince == null || it.isAfter(evaluatedSince) }
+        val total = evaluated.total + counted.size
+        val dates = evaluated.dates + counted.mapIndexed { index, date -> (evaluated.total + index + 1) to date }
         return MilestonesView(
             achieved = Milestones.achieved(total, dates),
             next = if (now.takesWrites) Milestones.next(total) else null,

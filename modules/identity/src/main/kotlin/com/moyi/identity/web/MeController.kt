@@ -1,13 +1,23 @@
 package com.moyi.identity.web
 
+import com.moyi.common.security.ClientContext
 import com.moyi.common.security.CurrentUser
+import com.moyi.identity.domain.Acceptance
+import com.moyi.identity.domain.DeletionRequest
 import com.moyi.identity.domain.User
 import com.moyi.identity.domain.UserId
 import com.moyi.identity.domain.UserStatus
+import com.moyi.identity.service.AcceptedLegal
+import com.moyi.identity.service.AccountDeletion
 import com.moyi.identity.service.GetProfile
+import com.moyi.identity.service.LegalConsent
+import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -28,9 +38,88 @@ import java.util.UUID
 @RequestMapping("/api/v1/me")
 internal class MeController(
     private val getProfile: GetProfile,
+    private val legalConsent: LegalConsent,
+    private val deletion: AccountDeletion,
 ) {
     @GetMapping
-    fun me(caller: CurrentUser): UserResponse = UserResponse.from(getProfile.byId(UserId(caller.id)))
+    fun me(caller: CurrentUser): ProfileResponse {
+        val id = UserId(caller.id)
+        return ProfileResponse.from(getProfile.byId(id), legalConsent.acceptedBy(id), deletion.pendingOf(id))
+    }
+
+    /**
+     * `POST /me/legal-consent` (FR-011, FR-103, ADR-0056): the caller accepts
+     * the **current** Terms and Privacy Policy, the versions `GET /meta/legal`
+     * names. No body: what is recorded is decided here, never by the client.
+     * Idempotent; `204` whether or not anything was new.
+     */
+    @PostMapping("/legal-consent")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun acceptLegalDocuments(
+        caller: CurrentUser,
+        client: ClientContext,
+    ) {
+        legalConsent.acceptCurrent(UserId(caller.id), client)
+    }
+}
+
+/**
+ * `GET /me`'s body: [UserResponse]'s fields, and the legal documents the
+ * person accepted. Its own type rather than a field on [UserResponse], which
+ * sign-in and refresh also send and which would then cost both a read they do
+ * not need (ADR-0056 decision 5).
+ */
+internal data class ProfileResponse(
+    val id: UUID,
+    val email: String,
+    val displayName: String,
+    val locale: String,
+    val emailVerified: Boolean,
+    val status: UserStatus,
+    val legalAccepted: LegalAcceptedResponse,
+    /**
+     * The account deletion waiting to be carried out, or `null` when none is (FR-008,
+     * ADR-0058 decision 4): here so that a client reinstalled during the 14 days draws the
+     * pending state, with its cancel, from the one read it makes on start.
+     */
+    val deletionRequest: DeletionRequestResponse?,
+) {
+    companion object {
+        fun from(
+            user: User,
+            legal: AcceptedLegal,
+            deletion: DeletionRequest?,
+        ): ProfileResponse {
+            val profile = UserResponse.from(user)
+            return ProfileResponse(
+                id = profile.id,
+                email = profile.email,
+                displayName = profile.displayName,
+                locale = profile.locale,
+                emailVerified = profile.emailVerified,
+                status = profile.status,
+                legalAccepted = LegalAcceptedResponse(legal.terms?.let(::AcceptanceResponse), legal.privacy?.let(::AcceptanceResponse)),
+                deletionRequest = deletion?.let(DeletionRequestResponse::from),
+            )
+        }
+    }
+}
+
+/**
+ * Which version of each consented document the person accepted, and when. A
+ * version that differs from `GET /meta/legal`'s is the client's cue to ask
+ * again; `null` means no acceptance is recorded, and is not a version.
+ */
+internal data class LegalAcceptedResponse(
+    val terms: AcceptanceResponse?,
+    val privacy: AcceptanceResponse?,
+)
+
+internal data class AcceptanceResponse(
+    val version: String,
+    val acceptedAt: Instant,
+) {
+    constructor(acceptance: Acceptance) : this(acceptance.version, acceptance.acceptedAt)
 }
 
 /**

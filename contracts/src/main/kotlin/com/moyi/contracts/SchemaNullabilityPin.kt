@@ -21,6 +21,11 @@ import org.springframework.context.annotation.Configuration
  * touched. Adopting Kotlin nullability in the contract is a deliberate follow-up, under the
  * `breaking-api-change` label, never a side effect of a dependency. `OpenApiContractTest` fails
  * if this stops working, for instance if a springdoc upgrade renames the bean.
+ *
+ * The follow-up came as a rule of this module's own rather than as this module (#138,
+ * `ResponseFieldsDocumentation`): every field of a success body is required, because the mapper
+ * writes nulls. The Kotlin module would have marked request fields as well, by non-nullability,
+ * which says nothing about what a request may leave out, so the pin stays.
  */
 @Suppress("UtilityClassWithPublicConstructor") // A class: Spring instantiates configurations, and the bean must be static.
 @Configuration(proxyBeanMethods = false)

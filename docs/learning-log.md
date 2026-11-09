@@ -2959,6 +2959,220 @@ Wrong about: a systemd service being active means its watcher is stable. Product
          would fail on the production V36 database. A fresh encrypted backup succeeded;
          the vault-dependent restore drill remains a separate deployment gate.
 
+## 2026-11-08 · Feature · One Android channel per push category (issue #134)
+
+Expected: every push already landed somewhere sensible on Android.
+Reality: without `android.notification.channel_id`, every category shares FCM's fallback
+         channel, so muting reminders would also mute reveals. The id is now the category's
+         lower-case name, derived from the same stem as the localisation keys, so the
+         two cannot drift.
+Wrong about: nothing yet. The list is spelt out in a test because the client creates these
+         ids, and a rename here would quietly move pushes to the default channel.
+
+## 2026-11-08 · Ops · The FCM switch-on runbook, and the comment that would have stopped the worker (issue #133)
+
+Expected: turning pushes on is the one-line change `config/deploy.yml` described ("remove
+         this line and add the FCM variables").
+Reality: that line is in the shared env, which the media worker reads too. The worker builds a
+         push sender in every profile and holds no secrets, so following the comment would have
+         left it refusing to start. The runbook switches FCM on in the web role alone, and the
+         comment now says the shared line stays.
+Wrong about: a config comment being a safe place for a procedure. A procedure that spans a
+         vault, a cloud console and two roles belongs in a runbook, read end to end.
+
+## 2026-11-08 · Feature · The ended run and the rest day's reason — one was stored already, one was in the audit log
+
+Expected: two new columns, one for each field of issue #141.
+Reality: the reason needed none. ADR-0034 had stored `evaluated_as` on every day precisely
+         because a covered day and a stepped-over date are both `FROZEN` and replay differently;
+         the calendar had been reading that column all along and throwing the distinction away.
+         The ended run was already in `streak_events` too, as the latest `BROKEN` line's
+         `streak_before`. It went into the projection anyway (V43), because the audit log is
+         what `recalculate` does not rebuild, and a number on a member's screen should be one
+         FR-074 can put back. The audit line became the back-fill instead.
+Wrong about: the property test's "compare everything but the date" helper. Copying a state
+         with only the date nulled tripped the new invariant (length and date null together)
+         on the first seed: an invariant on a data class constrains every `copy` a test makes,
+         not just the code's.
+
+## 2026-11-08 · Feature · Legal versions are the server's, and re-consent (issue #128, ADR-0056)
+
+Expected: consent was already "recorded with version and timestamp" (FR-011), so the work was a
+         read-only `GET /meta/legal`.
+Reality: the rows existed, but their version was whatever the sign-up request said, one string
+         for all three documents. The server now records its own configured versions, `GET /me`
+         reports what was accepted, and `POST /me/legal-consent` accepts the current ones,
+         idempotently on the unique key. Existing rows are left as they are: rewriting them
+         would invent consent.
+Wrong about: naming `/me`'s new body `MeResponse`. The name was already the bond
+         module's, and springdoc settled the clash by silently pointing `/me` at the wrong schema;
+         only reading the contract diff showed it. (Also designed in, not found by a run:
+         `/me` reports the current version's row before the newest, or a rolled-back version would
+         prompt for ever, re-consent writing nothing.)
+
+## 2026-11-08 · Contract · a legal document is not a decodable one
+
+Expected: the contract was precise because it validated and the client was generated from it.
+Reality: the mobile client filed five issues (#137 to #140, #142), each a place where the
+         document said less than the server does. Thirty-odd response schemas had no
+         `required` list, so every field generated as optional; the auth routes left out 401,
+         410, 415 and 503 that the state map had listed as gaps for weeks; `partnerEntry`'s
+         discriminator mapped three values to one schema, which is valid OpenAPI and which
+         OpenAPI Generator 7.26 turned into a sealed class nothing extended. Running the
+         generator against the document before and after was the proof both ways; reading
+         the document had passed it for a month.
+Wrong about: "a parent with a discriminator and one schema per value" being enough. A
+         `oneOf` of four one-to-one schemas generated the same empty sealed class; only the
+         `allOf` inheritance shape, with `status` declared on the parent alone, produced
+         subclasses. And `traceId` had been left out "until tracing exists" with nothing to
+         say when that would be: it was a dependency and a line in the problem builder.
+         The build was green with it; the smoke run was not: 27 probes that compare two
+         refusals byte for byte (the no-oracle checks) failed, because each body now names its
+         own request. No test had compared two error bodies under a tracer. The probes now
+         compare without the id, which is random per request and so says nothing either way.
+
+## 2026-11-08 · Feature · In-app support messages (issue #129, ADR-0057)
+
+Expected: one route, one table, one migration, in the shape of the report route.
+Reality: the idempotency record's `result_kind` CHECK is common:web's table, so a new idempotent
+         resource needs a second migration in that module's sequence. It was first V45.1, beside
+         V45, which `FlywayMigrationTest` (reading versions as integers) refused; the ruling was
+         no decimal versions, and it is V47. And
+         the acknowledgement could not be sent from the new module without learning the address,
+         which `UserDirectory` withholds on purpose: identity now sends it (`AccountMail`), to a
+         confirmed address only.
+Wrong about: the brief's "follow how entries count length". Graphemes cannot be backed by a
+         database CHECK; the report's detail already chose code points for that reason, and so
+         does support.
+## 2026-11-08 · Feature · Reporting the other member, and the 404 that had to come from bond (issue #127)
+
+Expected: a second report route would need a second table, a second queue and new reasons.
+Reality: none of them. The report table takes a `target` column and the operator's commands work
+         unchanged; "How they're treating me" was already `HARASSMENT`. The one real choice was where
+         the "nobody has joined yet" 404 is made: in `gratitude` it would have restated the bond's
+         message, so `BondAccess.partnerMemberIdOf` throws the bond's own exception, and a test
+         compares its bytes with a stranger's. The review of #151 found the route's own two 404s
+         (an unreadable id, a replay of someone else's report) still hand-copying that sentence;
+         it is now one constant in `bond.api` that the guard's exception is built from too.
+Wrong about: nothing yet. Nothing the reported member reads may change, so the test reads their
+         bond and their today, bytes and ETag, before and after; the smoke does the same over HTTP.
+
+
+## 2026-11-08 · Feature · A 30-second grace window for a lost refresh answer (issue #136, ADR-0021 amended)
+
+Expected: a time check in front of the reuse branch, and a column to mark the successor that a retry
+         makes worthless.
+Reality: the column was the easy part. The voided successor had to be a reuse when it came back —
+         that is the only way a thief who replays inside the window is caught — and must never be
+         retried in its turn, or two holders could void each other's tokens for as long as they
+         kept inside the window. Both follow from marking it rotated at the instant it was voided,
+         with nothing after it.
+Wrong about: the re-read after the sessions lock. `RotateRefreshToken` looked the token up by hash,
+         took the lock, and "re-read" it by id, but the first read had made it a managed entity, so
+         the second was answered from the persistence context: the state from before the wait. A
+         refresh that waited on a revocation saw a live token, lost the compare-and-set, and called
+         it a reuse, emailing the person about a theft that never happened. The row-lock test found
+         it on its first run against the old code; the lookup now returns a projection, and the
+         read after the lock is `SELECT … FOR UPDATE`.
+
+
+## 2026-11-08 · Feature · A typed code is a guessable credential, so every refusal is one (issue #135)
+
+Expected: a six-digit code is a shorter token; reuse the token's two answers, 422 "not
+         recognised" and 410 "expired or used".
+Reality: a code is typed beside an address, so a 410 says "this was real", which says the
+         address has an account; and anyone can make one real by burning a stranger's code
+         with five wrong guesses, then ask. Every refusal of a code is one 422, with the same
+         bytes and the same work (counted, not timed). Two smaller ones: the wrong attempt
+         has to commit before the refusal is thrown, so `@Transactional` (which rolls back on
+         the exception and un-counts the guess) is the wrong tool; and the first draft of the
+         resend test expected no code left after a verification, when the spent row still
+         holds its own (dead) code. The count is right only under a row lock, which a test
+         proves by blocking on it, and removing the lock makes the test wait forever.
+
+
+## 2026-11-08 · Feature · A Bond-day stays open twelve hours past its end (issue #132, ADR-0033 decision 15)
+
+Expected: one threshold in the close job: settle days that ended twelve hours ago, not one
+         minute ago.
+Reality: three places had to move together, and the third was not the obvious one. The close
+         threshold, BR-3a's window (36 h became 12 h, and is now the same `LateEntryGrace`, so the
+         two cannot drift apart), and the missing-days step, which writes days nobody opened
+         closed `EMPTY` a minute after midnight: left alone, it would have settled the very day
+         a late entry was meant for, through the other door. And every reader that took "past"
+         to mean "decided" — the streak drew only today as open and added only today, so a
+         couple who completed yesterday would have been shown one day less every morning until
+         noon. The streak now walks every undecided day, oldest first.
+Wrong about: the walk's first version stopped at a square the job had already evaluated,
+         because "undecided" was computed from the read's clock while the test's job had run at
+         a later instant. A square already in the stored run is skipped, not a reason to stop.
+         Found by the existing streak tests, not the new ones.
+         And review M1 found the same mistake one step on: the readers let yesterday go at
+         exactly `end + grace`, but the job settles it on its first run after that and its
+         margin, so for up to sixteen minutes a day each noon was neither undecided nor
+         evaluated, and the run shown fell by a day and came back. The tests missed it because
+         `closeThrough` jumped the job straight past the window. Now a stored day is undecided
+         until it has been evaluated (`LateEntryGrace.undecidedUntil`): the store says when the
+         window ends, so no reader keeps a copy of the job's schedule. Also from that review:
+         the index test raced two plans on the shared test database; the competing index is now
+         dropped inside a rolled-back transaction, so only one plan is left to choose.
+
+
+## 2026-11-09 · Feature · A typed code fails closed while Redis is down (owner's ruling, ADR-0023 amended)
+
+Expected: one line where the limiter fails open, and a branch in it for one bucket.
+Reality: there is no such line. The limiter never throws, by design: it answers `Unavailable`,
+         and every consumer fails open by checking only for `Rejected`. So the policy went on
+         the bucket (`failsClosed`, in the closed table, pinned by a test to exactly one entry)
+         and the refusal in the bucket's one consumer, `VerificationCodeCheck.limit`, which
+         already ran before any read. That placement is what makes the 503 cheap to get right:
+         no lookup, no count, no spend, and the same bytes for every address, for free.
+Wrong about: the switched-off limiter. `enabled=false` answered `Unavailable` too, so the first
+         version refused every code in every module test context, which runs with the limiter
+         off. Found before running by reading `RateLimitConfiguration`; proved by folding the
+         new `Disabled` decision back into `Unavailable`, which fails 12 of
+         `EmailCodeEndpointTest`'s 13. "Off" and "unreachable" had been one answer because, until
+         a bucket treated them differently, they meant the same thing.
+         The new problem code is a new enum value in every error response, so oasdiff calls
+         the contract change breaking (response-property-enum-value-added, 390 places) though
+         no route changed shape: the PR carries `breaking-api-change`.
+
+
+## 2026-11-09 · Feature · Account deletion: one event, five shares (FR-008, #125, ADR-0058)
+
+Expected: a job in `identity` that deletes a person.
+Reality: `identity` can reach none of the modules holding what the person wrote: `bond`,
+         `gratitude` and `support` depend on it, and `media` is a leaf. So `identity` carries out
+         its own share in one transaction and publishes `AccountDeleted`, and each module erases
+         its share from that event, the shape ending a bond already had (ADR-0035) turned the
+         other way. Each share is idempotent and none needs another first, which is what makes a
+         crash part-way safe: the outbox retries what did not commit.
+Wrong about: `users.status = PENDING_DELETION` during the window, which doc 07 lists.
+         `User.canAuthenticate` refuses it, so the person could not have signed in to cancel.
+         The request is its own row instead, and the status changes only when it is carried out.
+Also: a mutation helper that undid an edit by replacing the new text with the old corrupted
+         two files when the new text was empty (`"".replace` inserts at every position). Undo by
+         position, never by search, when the replacement can be empty. Two guards came back
+         green under mutation and are recorded rather than kept as untested claims: a re-check of
+         "due" under the lock (removed: once due a request cannot change), and a member filter in
+         `EndBond.endEveryBondOf` that `Bond.end` already makes redundant.
+Also: the first smoke run waited 20 s for a job on a five-second cron and failed. ShedLock's
+         `lockAtLeastFor` (30 s) is a floor on the gap between two runs, whatever the cron says;
+         a probe that waits on a ShedLocked job must outwait that, not the schedule.
+
+
+## 2026-11-09 · Site · The app-link files under `.well-known` (moyi-app #49)
+
+Expected: a dot-directory the host might not deploy, needing a rename and a rewrite.
+Reality: Wrangler's Pages ignore list is `_worker.js`, `_redirects`, `_headers`,
+         `_routes.json`, `functions`, `.DS_Store`, `node_modules`, `.git` and `.wrangler`
+         (read in wrangler 4.158's bundled source), so `.well-known/` deploys as it is.
+         The real trap was the Apple file's missing extension: without a `_headers` rule it
+         goes out as a download, and `wrangler pages dev` showed the override replaces the
+         type rather than adding a second header.
+Also: the Android fingerprint is the upload key's. Play re-signs the app, so a Play install
+         will not verify until the App Signing key's SHA-256 is added beside it.
+
 ## 2026-11-05 · Ops · The deploy of V37–V41: every gate held, and the step between two gates did not
 
 Expected: the gates to be where a deploy could go wrong: R2's token, the worker's limiter, the

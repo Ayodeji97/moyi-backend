@@ -9,6 +9,7 @@ import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -91,6 +92,10 @@ internal class StreakEndpointTest(
         streak.numbers() shouldBe Numbers(current = 0, longest = 0, freezes = 0, progress = 0, total = 0)
         streak["strictMode"].asBoolean() shouldBe false
         streak["lastCompleteDate"].isNull shouldBe true
+        // No run has ended: both fields are sent, and null.
+        streak["lastRunLength"].isNull shouldBe true
+        streak["lastRunBrokenOn"].isNull shouldBe true
+        streak["days"].first()["reason"].isNull shouldBe true
         calendar(ada) shouldBe listOf("${day(0)} OPEN")
         today(ada)["streak"].toString() shouldBe """{"current":0,"longest":0,"freezesAvailable":0,"strictMode":false}"""
     }
@@ -192,6 +197,127 @@ internal class StreakEndpointTest(
         streak(ada).numbers() shouldBe Numbers(current = 1, longest = 3, freezes = 0, progress = 4, total = 4)
     }
 
+    // --- the late-entry grace (issue #132, BR-3a as amended 2026-11-08) ---
+
+    /**
+     * Yesterday is not decided until twelve hours after it ends: until then its square is OPEN,
+     * says when it settles, and a late entry can still complete it. The numbers move the moment
+     * it is complete, by the rule the job will apply, and are not counted twice once it has.
+     */
+    @Test
+    fun `yesterday stays OPEN through its grace, saying when it settles, and a late entry completes it`() {
+        (1..3).forEach { bothWriteOn(it) }
+        closeThrough(3)
+        clock.set(at(4))
+        submit(ada)
+
+        // 08:00 in Lagos on day 5: day 4 ended at 23:00 local, nine hours ago.
+        clock.set(Instant.parse("${day(5)}T07:00:00Z"))
+        val squares = streak(bea)["days"].toList().takeLast(2)
+        squares.map { "${it["date"].asString()} ${it["status"].asString()} ${it["settlesAt"].asString()}" } shouldBe
+            listOf("${day(4)} OPEN ${day(5)}T11:00:00Z", "${day(5)} OPEN ${day(6)}T11:00:00Z")
+        streak(bea)["days"].toList().dropLast(2).forEach { it["settlesAt"].isNull shouldBe true }
+        streak(bea)["current"].asInt() shouldBe 3
+        today(bea)["bondDay"]["settlesAt"].asString() shouldBe "${day(6)}T11:00:00Z"
+
+        // Bea wrote at 22:00 on day 4, offline; it is sent now and counts for day 4.
+        mockMvc
+            .post("/api/v1/bonds/$bond/entries") {
+                header(HttpHeaders.AUTHORIZATION, bearer(bea))
+                header(IdempotencyInterceptor.HEADER, UUID.randomUUID().toString())
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"text":"thank you, late","intendedAt":"${day(4)}T21:00:00Z"}"""
+            }.andReturn()
+            .response.contentAsString shouldContain "\"date\":\"${day(4)}\""
+
+        for (member in listOf(ada, bea)) {
+            calendar(member).takeLast(2) shouldBe listOf("${day(4)} COMPLETE", "${day(5)} OPEN")
+            streak(member).numbers() shouldBe Numbers(current = 4, longest = 4, freezes = 0, progress = 4, total = 4)
+            today(member)["streak"]["current"].asInt() shouldBe 4
+        }
+
+        // Both write today too: yesterday and today are both added, oldest first.
+        submit(ada)
+        submit(bea)
+        streak(ada).numbers() shouldBe Numbers(current = 5, longest = 5, freezes = 0, progress = 5, total = 5)
+        today(bea)["streak"]["current"].asInt() shouldBe 5
+
+        // The job settles day 4. It is in the stored run now, and is not added a second time.
+        closeThrough(4)
+        streak(ada).numbers() shouldBe Numbers(current = 5, longest = 5, freezes = 0, progress = 5, total = 5)
+        calendar(ada).takeLast(2) shouldBe listOf("${day(4)} COMPLETE", "${day(5)} COMPLETE")
+    }
+
+    /**
+     * Review M1: the grace runs out at 11:00Z (noon in Lagos), but the job settles a day only
+     * on its first run after that and the settle margin. In between, yesterday is neither in its
+     * grace nor evaluated, and it is still undecided: drawn and counted as before, not dropped
+     * until the job catches up. A couple at three who completed day 4 and day 5 see five
+     * throughout, never three for the minutes before the job runs.
+     */
+    @Test
+    fun `a day whose grace has run out but which the job has not yet settled still counts`() {
+        (1..3).forEach { bothWriteOn(it) }
+        closeThrough(3)
+        bothWriteOn(4)
+        bothWriteOn(5)
+
+        clock.set(Instant.parse("${day(5)}T10:59:59Z"))
+        streak(ada)["current"].asInt() shouldBe 5
+
+        clock.set(Instant.parse("${day(5)}T11:00:30Z"))
+        for (member in listOf(ada, bea)) {
+            streak(member).numbers() shouldBe Numbers(current = 5, longest = 5, freezes = 0, progress = 5, total = 5)
+            calendar(member).takeLast(2) shouldBe listOf("${day(4)} COMPLETE", "${day(5)} COMPLETE")
+            today(member)["streak"]["current"].asInt() shouldBe 5
+        }
+
+        // Once the job has run, day 4 is in the stored run and is not counted twice.
+        closeThrough(4)
+        streak(ada).numbers() shouldBe Numbers(current = 5, longest = 5, freezes = 0, progress = 5, total = 5)
+    }
+
+    /**
+     * The same window for a day only one wrote on: past its grace and not yet settled it is
+     * still OPEN, saying when it could first be decided, and it still stops the walk.
+     */
+    @Test
+    fun `a partial day past its grace and not yet settled stays OPEN until the job runs`() {
+        (1..3).forEach { bothWriteOn(it) }
+        closeThrough(3)
+        clock.set(at(4))
+        submit(ada)
+        bothWriteOn(5)
+
+        clock.set(Instant.parse("${day(5)}T11:00:30Z"))
+        calendar(ada).takeLast(2) shouldBe listOf("${day(4)} OPEN", "${day(5)} COMPLETE")
+        streak(ada)["days"].toList().single { it["date"].asString() == "${day(4)}" }["settlesAt"].asString() shouldBe "${day(5)}T11:00:00Z"
+        streak(ada)["current"].asInt() shouldBe 3
+
+        closeThrough(4)
+        calendar(ada).takeLast(2) shouldBe listOf("${day(4)} SOLO", "${day(5)} COMPLETE")
+    }
+
+    /** An open yesterday stops the walk: today, complete, cannot extend a run yesterday may yet break. */
+    @Test
+    fun `today is not added while yesterday is still open in its grace, and is once it settles complete`() {
+        (1..3).forEach { bothWriteOn(it) }
+        closeThrough(3)
+        clock.set(at(4))
+        submit(ada)
+        clock.set(Instant.parse("${day(5)}T07:00:00Z"))
+        submit(ada)
+        submit(bea)
+
+        streak(ada)["current"].asInt() shouldBe 3
+        calendar(ada).takeLast(2) shouldBe listOf("${day(4)} OPEN", "${day(5)} COMPLETE")
+
+        // Nobody completed day 4 in its grace: it settles SOLO and ends the run; today starts the next.
+        closeThrough(4)
+        calendar(ada).takeLast(2) shouldBe listOf("${day(4)} SOLO", "${day(5)} COMPLETE")
+        streak(ada).numbers() shouldBe Numbers(current = 1, longest = 3, freezes = 0, progress = 4, total = 4)
+    }
+
     // --- the calendar ---
 
     /**
@@ -267,6 +393,40 @@ internal class StreakEndpointTest(
 
         // Day 15, one entry, covered by the freeze; day 16, none, and nothing left to cover it.
         calendar(bea).takeLast(4) shouldBe listOf("${day(14)} COMPLETE", "${day(15)} FROZEN", "${day(16)} MISSED", "${day(17)} OPEN")
+        // Issue #141: the rest day says it was one; no other square has a reason.
+        reasons(bea).takeLast(4) shouldBe listOf("${day(14)} null", "${day(15)} REST_DAY", "${day(16)} null", "${day(17)} null")
+        // And day 16 ended a run of fifteen: fourteen written, one covered.
+        streak(bea).let { (it["lastRunLength"].asInt() to it["lastRunBrokenOn"].asString()) shouldBe (15 to day(16).toString()) }
+    }
+
+    /**
+     * Issue #141, `states.md` §7: "Your streak ended at 21 days." `longest` is the longest run
+     * ever, so it cannot say that; [lastRunLength] is the run the latest break ended, with the
+     * date of the day that ended it, and it stays that while the next run grows.
+     */
+    @Test
+    fun `a broken run is sent with its length and the day that ended it, and is kept while the next one grows`() {
+        (1..5).forEach { bothWriteOn(it) }
+        closeThrough(6)
+        clock.set(at(7))
+
+        for (member in listOf(ada, bea)) {
+            val ended = streak(member)
+            (ended["current"].asInt() to ended["longest"].asInt()) shouldBe (0 to 5)
+            (ended["lastRunLength"].asInt() to ended["lastRunBrokenOn"].asString()) shouldBe (5 to day(6).toString())
+        }
+
+        // Days 7 to 9 a run of three, day 10 missed, day 11 the start of the next.
+        (7..9).forEach { bothWriteOn(it) }
+        bothWriteOn(11)
+        closeThrough(11)
+        clock.set(at(12))
+
+        // The run of five is the longest; the run of three is the last that ended. The new one is one.
+        streak(ada).let {
+            (it["current"].asInt() to it["longest"].asInt()) shouldBe (1 to 5)
+            (it["lastRunLength"].asInt() to it["lastRunBrokenOn"].asString()) shouldBe (3 to day(10).toString())
+        }
     }
 
     /** FR-072, as the couple sees it: the fourteenth day shows the freeze it earned beside the fourteen, not at midnight. */
@@ -374,8 +534,19 @@ internal class StreakEndpointTest(
         val streak = streak(ada)
 
         streak.propertyNames().toSet() shouldBe
-            setOf("current", "longest", "freezesAvailable", "freezeProgress", "strictMode", "totalCompleteDays", "lastCompleteDate", "days")
-        streak["days"].first().propertyNames().toSet() shouldBe setOf("date", "status")
+            setOf(
+                "current",
+                "longest",
+                "freezesAvailable",
+                "freezeProgress",
+                "strictMode",
+                "totalCompleteDays",
+                "lastCompleteDate",
+                "lastRunLength",
+                "lastRunBrokenOn",
+                "days",
+            )
+        streak["days"].first().propertyNames().toSet() shouldBe setOf("date", "status", "reason", "settlesAt")
         today(ada)["streak"].propertyNames().toSet() shouldBe setOf("current", "longest", "freezesAvailable", "strictMode")
     }
 
@@ -432,6 +603,9 @@ internal class StreakEndpointTest(
     private fun calendar(member: UUID): List<String> =
         streak(member)["days"].toList().map { "${it["date"].asString()} ${it["status"].asString()}" }
 
+    private fun reasons(member: UUID): List<String> =
+        streak(member)["days"].toList().map { "${it["date"].asString()} ${it["reason"].takeUnless { r -> r.isNull }?.asString()}" }
+
     private fun leave(member: UUID) {
         mockMvc
             .post("/api/v1/bonds/$bond/leave") { header(HttpHeaders.AUTHORIZATION, bearer(member)) }
@@ -461,8 +635,9 @@ internal class StreakEndpointTest(
 
     private fun at(n: Int): Instant = Instant.parse("${day(n)}T10:00:00Z")
 
+    /** Day [n] ends at 23:00Z and settles twelve hours later (BR-3a's grace): the job's first run after that. */
     private fun closeThrough(n: Int) {
-        closer.closeElapsedDays(Instant.parse("${day(n)}T23:01:00Z"), 1_000).failed shouldBe 0
+        closer.closeElapsedDays(Instant.parse("${day(n + 1)}T11:01:00Z"), 1_000).failed shouldBe 0
     }
 
     private fun bothWriteOn(n: Int) {

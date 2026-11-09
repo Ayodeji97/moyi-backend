@@ -156,6 +156,16 @@ internal class Favourites(
     }
 
     /**
+     * Every bookmark [memberIds] made, on any entry (ADR-0058 decision 8, ADR-0036's Phase 5
+     * item): what a deleted person kept does not outlive them. Their account can make no new
+     * one, so nothing is racing this for the rows.
+     */
+    fun removeAllBy(memberIds: Collection<UUID>) {
+        if (memberIds.isEmpty()) return
+        jdbc.update("DELETE FROM entry_favourites WHERE member_id = ANY (?)", memberIds.toTypedArray())
+    }
+
+    /**
      * Which of [entryIds] this member has marked. One query, and none at all
      * for an empty collection.
      *

@@ -52,6 +52,7 @@ class ArchitectureTest {
                 "admin",
                 "analytics",
                 "ai",
+                "support",
             )
 
         /**
@@ -154,6 +155,7 @@ class ArchitectureTest {
                 "remindersDueBetween",
                 "audienceOf",
                 "onThisDayDueBetween",
+                "membershipsOfAccount",
             )
 
         /**
@@ -173,6 +175,7 @@ class ArchitectureTest {
                 "NotifyDayMembers.kt",
                 "SendOnThisDayPushes.kt",
                 "EmbedPendingEntries.kt",
+                "EraseDeletedAccount.kt",
             )
 
         /**
@@ -437,7 +440,7 @@ class ArchitectureTest {
         assertTrue(
             violations.isEmpty(),
             "Only the close job, the withdrawal's consumer, the reminder sweep, the day's push consumer, the on-this-day " +
-                "sweep and the embedding sweep may call bond's unguarded reads. Found in: $violations",
+                "sweep, the embedding sweep and the account deletion's erasure may call bond's unguarded reads. Found in: $violations",
         )
     }
 
@@ -583,6 +586,21 @@ class ArchitectureTest {
                 .filter { file -> "ProcessBuilder(" in file.text || "Runtime.getRuntime().exec" in file.text }
                 .map { it.name }
         assertEquals(listOf("Sandbox"), starters, "only the media Sandbox may start a process (T-07, ADR-0048)")
+    }
+
+    @Test
+    fun `no response type leaves a null field out, so every field of a response is sent`() {
+        // The contract marks every field of every success body required (#138, contracts' ResponseFieldsDocumentation),
+        // which is true because the mapper writes nulls. @JsonInclude on a type in a web layer would make it false
+        // for that type alone, silently. The one use is the Resend client's request body, which is no response of ours.
+        val violations =
+            project.files
+                .filter { it.normalisedProjectPath.contains("/src/main/") }
+                .filter { file ->
+                    file.imports.any { it.name == "com.fasterxml.jackson.annotation.JsonInclude" } ||
+                        "@JsonInclude" in file.text
+                }.map { it.name }
+        assertEquals(listOf("ResendEmailSender"), violations, "a response type must not exclude null fields (#138)")
     }
 
     @Test
@@ -784,9 +802,9 @@ class ArchitectureTest {
                 .orEmpty()
                 .map { it.type.name }
         assertTrue(
-            handed.sorted() == listOf("BondAccess", "Clock", "GetStreak", "StreakCalendar") &&
+            handed.sorted() == listOf("BondAccess", "GetStreak", "StreakCalendar") &&
                 milestones.secondaryConstructors.isEmpty(),
-            "GetMilestones is handed the bond's access port, the calendar, the streak's rule for today and the clock, " +
+            "GetMilestones is handed the bond's access port, the calendar and the streak's rule for the undecided days, " +
                 "and nothing else. Found: $handed",
         )
 

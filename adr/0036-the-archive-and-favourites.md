@@ -961,6 +961,7 @@ then a record of what a deleted person kept would outlive them, until the bond's
 hard-deleted (the foreign key's cascade from `entries` takes them then). This belongs in
 Phase 5's deletion checklist and not only here; and a member's export should carry their
 own bookmarks and nobody else's.
+*Discharged 2026-11-09 by ADR-0058 (issue #125): an account deletion deletes every bookmark the person made (decision 8 there), and their entries' bookmarks go with the entries through `EraseEntry`.*
 
 **`bond`.** The partner's display name is still not obtainable in `gratitude`:
 `BondMembership` names nothing about the other member (ADR-0031, Consequences). The

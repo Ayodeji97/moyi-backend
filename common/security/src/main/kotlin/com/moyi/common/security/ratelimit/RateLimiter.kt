@@ -45,6 +45,19 @@ sealed interface RateLimitDecision {
      * is a coordinator, never a source of truth, and a Redis outage must not
      * become a login outage), and no `X-RateLimit-*` headers are sent,
      * because there are no true numbers to put in them.
+     *
+     * **Except for a bucket that [RateLimitBucket.failsClosed]**: its consumer
+     * refuses the request instead (ADR-0023, amended 2026-11-09). One bucket
+     * does, `auth:code:email`.
      */
     data object Unavailable : RateLimitDecision
+
+    /**
+     * Limiting is switched off by configuration (`moyi.security.rate-limit.enabled=false`).
+     * Not an outage: nothing failed, so even a bucket that [RateLimitBucket.failsClosed]
+     * lets the request through. No headers, as for [Unavailable]. Kept apart from
+     * [Unavailable] because the two now differ for that one bucket: a test context
+     * that turns the limiter off is not a Redis that went away.
+     */
+    data object Disabled : RateLimitDecision
 }

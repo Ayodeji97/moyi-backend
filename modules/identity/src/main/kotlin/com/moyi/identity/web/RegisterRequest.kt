@@ -27,9 +27,8 @@ import jakarta.validation.constraints.Size
  * mirror `User`'s own two rules (and `@Size` is what publishes `maxLength`,
  * which `OpenApiContractTest` holds to `ArchivePageBudget`), and asks the
  * domain for its character rule through [ValidDisplayName] (ADR-0015, amended
- * 2026-10-28). `locale` and `acceptedTermsVersion` keep ordinary annotations
- * because their domain rules are `isNotBlank` and nothing more — there is no
- * second definition to drift from.
+ * 2026-10-28). `locale` keeps ordinary annotations because its domain rule
+ * is `isNotBlank` and nothing more — there is no second definition to drift from.
  */
 internal data class RegisterRequest(
     @field:NotBlank
@@ -50,9 +49,13 @@ internal data class RegisterRequest(
     @field:NotBlank
     @field:Pattern(regexp = LANGUAGE_TAG, message = "must be a language tag such as en or en-GB")
     val locale: String = "en",
-    @field:NotBlank
+    /**
+     * **Deprecated and ignored** (ADR-0056): the versions recorded are the ones
+     * this server names in `GET /meta/legal`, never the client's. Optional now,
+     * and still bounded, so an older client that sends it is not refused.
+     */
     @field:Size(max = CONSENT_VERSION_MAX_LENGTH)
-    val acceptedTermsVersion: String,
+    val acceptedTermsVersion: String? = null,
     /** FR-011. `false` is a validation failure, not a silent skip — there is no account without it. */
     @field:AssertTrue(message = "must be confirmed")
     val over18: Boolean,
@@ -79,7 +82,6 @@ internal data class RegisterRequest(
             password = Password.of(password),
             displayName = displayName.trim(),
             locale = locale,
-            acceptedTermsVersion = acceptedTermsVersion.trim(),
             client = client,
         )
 

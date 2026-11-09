@@ -1,6 +1,7 @@
 package com.moyi.identity.infra.security
 
 import com.moyi.identity.domain.TokenGenerator
+import com.moyi.identity.domain.VerificationCode
 import com.moyi.identity.domain.VerificationSecret
 import org.springframework.stereotype.Component
 import java.security.SecureRandom
@@ -31,8 +32,18 @@ internal class SecureRandomTokenGenerator : TokenGenerator {
         return VerificationSecret(encoder.encodeToString(bytes))
     }
 
+    /**
+     * `nextInt(bound)` is uniform over the bound (it rejects the biased tail), so every one of
+     * the million codes is equally likely, leading zeros included.
+     */
+    override fun verificationCode(): VerificationCode =
+        VerificationCode(random.nextInt(CODE_SPACE).toString().padStart(VerificationCode.LENGTH, '0'))
+
     internal companion object {
         const val SECRET_BYTES = 32
+
+        /** 10^6: every six-digit string. */
+        const val CODE_SPACE = 1_000_000
 
         /** 32 bytes in base64 is 44 characters with padding, 43 without. */
         const val ENCODED_LENGTH = 43

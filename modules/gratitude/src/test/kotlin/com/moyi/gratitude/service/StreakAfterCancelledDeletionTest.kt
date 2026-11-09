@@ -332,7 +332,7 @@ internal class StreakAfterCancelledDeletionTest(
     private fun at(n: Int): Instant = Instant.parse("${day(n)}T10:00:00Z")
 
     private fun closeThrough(n: Int) {
-        closer.closeElapsedDays(Instant.parse("${day(n)}T23:01:00Z"), 1_000).failed shouldBe 0
+        closer.closeElapsedDays(Instant.parse("${day(n + 1)}T11:01:00Z"), 1_000).failed shouldBe 0
     }
 
     private fun bothWriteOn(n: Int) {

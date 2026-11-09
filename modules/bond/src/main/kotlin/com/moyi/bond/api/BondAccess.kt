@@ -143,7 +143,39 @@ interface BondAccess {
      * discloses nothing the caller's own `GET /bonds/{bondId}` does not.
      */
     fun partnerDisplayNameOf(membership: BondMembership): String?
+
+    /**
+     * The `bond_members` id of the other member of [membership]'s bond: the
+     * member a member report names (FR-100's member half, ADR-0053 as
+     * amended for #127). The other member row, as [partnerDisplayNameOf]
+     * reads it, **whether or not they have left or blocked**: a report is
+     * never contact, and the member who has just blocked may need it most.
+     *
+     * Takes a [BondMembership] for [partnerDisplayNameOf]'s reason: the guard
+     * that minted it is the check.
+     *
+     * @throws com.moyi.common.web.NotFoundException the bond has never had a
+     * second member: **the same `404` as a bond the caller is not in**, thrown
+     * here, where that answer is made, so its bytes cannot drift from it.
+     * There is nobody to report, and saying so differently would tell a
+     * caller something about a bond they could not otherwise learn.
+     */
+    fun partnerMemberIdOf(membership: BondMembership): UUID
+
+    /**
+     * Every membership row [userId] holds **or held**, in any bond, open or ended, for the work
+     * that has no caller: account deletion's erasure of what that person wrote, kept and
+     * reacted with (ADR-0058). Runs no guard, which is why it is one of `ArchitectureTest`'s
+     * unguarded reads and must never be reachable from a request.
+     */
+    fun membershipsOfAccount(userId: UUID): List<AccountMembership>
 }
+
+/** One membership row of an account, by id only: which bond, and which member of it the person was. */
+data class AccountMembership(
+    val bondId: UUID,
+    val memberId: UUID,
+)
 
 /**
  * What a bond is for (cADR-0013), as another module may know it. The same four values as

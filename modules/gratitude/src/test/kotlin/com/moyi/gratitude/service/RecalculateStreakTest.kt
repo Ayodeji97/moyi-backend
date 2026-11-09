@@ -118,6 +118,9 @@ internal class RecalculateStreakTest(
                 "freeze_progress" to 3.toShort(),
                 "freezes_consumed" to 1,
                 "total_complete_days" to 31,
+                // Issue #141: the run of twenty-nine that day 30 ended, in Strict mode with a freeze spent.
+                "last_run_length" to 29,
+                "last_run_broken_on" to java.sql.Date.valueOf(day(30)),
             )
 
         val result = recalculate.recalculate(UUID.fromString(bond))
@@ -131,7 +134,10 @@ internal class RecalculateStreakTest(
     fun `a streak row that has drifted from its days is put back`() {
         aHistoryWithEverythingInIt()
         val stored = state()
-        jdbc.update("UPDATE streak_states SET current_streak = 99, longest_streak = 99, freezes_available = 2, total_complete_days = 0")
+        jdbc.update(
+            "UPDATE streak_states SET current_streak = 99, longest_streak = 99, freezes_available = 2, total_complete_days = 0, " +
+                "last_run_length = 7, last_run_broken_on = DATE '2026-01-01'",
+        )
 
         recalculate.recalculate(UUID.fromString(bond)).changed shouldBe true
 
@@ -184,7 +190,7 @@ internal class RecalculateStreakTest(
     private fun state(): Map<String, Any?> =
         jdbc.queryForMap(
             "SELECT current_streak, longest_streak, last_complete_date, freezes_available, freeze_progress, " +
-                "freezes_consumed, total_complete_days FROM streak_states WHERE bond_id = ?::uuid",
+                "freezes_consumed, total_complete_days, last_run_length, last_run_broken_on FROM streak_states WHERE bond_id = ?::uuid",
             bond,
         )
 
@@ -197,7 +203,7 @@ internal class RecalculateStreakTest(
     private fun at(n: Int): Instant = Instant.parse("${day(n)}T10:00:00Z")
 
     private fun closeThrough(n: Int) {
-        closer.closeElapsedDays(Instant.parse("${day(n)}T23:01:00Z"), 1_000).failed shouldBe 0
+        closer.closeElapsedDays(Instant.parse("${day(n + 1)}T11:01:00Z"), 1_000).failed shouldBe 0
     }
 
     private fun bothWriteOn(n: Int) {

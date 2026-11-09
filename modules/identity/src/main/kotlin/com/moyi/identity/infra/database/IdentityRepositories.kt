@@ -1,7 +1,9 @@
 package com.moyi.identity.infra.database
 
 import com.moyi.identity.domain.VerificationPurpose
+import jakarta.persistence.LockModeType
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.Repository
@@ -108,12 +110,83 @@ internal interface CredentialsRepository : Repository<CredentialsEntity, UUID> {
     ): Int
 }
 
+// Each statement is one of rotation's, revocation's or the sessions list's, named; the grace window added three.
+@Suppress("TooManyFunctions")
 internal interface RefreshTokenRepository : Repository<RefreshTokenEntity, UUID> {
     fun save(token: RefreshTokenEntity): RefreshTokenEntity
 
     fun findByTokenHash(tokenHash: String): RefreshTokenEntity?
 
-    fun findById(id: UUID): RefreshTokenEntity?
+    /**
+     * Which token a hash names and whose it is, **without loading the row as
+     * an entity**. Rotation needs the owner to take the sessions lock before it
+     * reads the state it acts on; had this loaded the entity, the read after
+     * the lock would have been answered from the persistence context — the
+     * state from before the wait, not what the lock holder committed. That is
+     * how a refresh that waited on a revocation used to call it a reuse.
+     */
+    @Query(
+        """
+        SELECT new com.moyi.identity.infra.database.RefreshTokenRef(t.id, t.userId)
+          FROM RefreshTokenEntity t
+         WHERE t.tokenHash = :tokenHash
+        """,
+    )
+    fun findRefByTokenHash(tokenHash: String): RefreshTokenRef?
+
+    /**
+     * The row, locked (`SELECT … FOR UPDATE`) for the rest of the transaction.
+     * Rotation reads the presented token and its successor this way under the
+     * sessions lock, so what it decides on is what it then changes
+     * (ADR-0021, amended 2026-11-08).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT t FROM RefreshTokenEntity t WHERE t.id = :id")
+    fun findByIdForUpdate(id: UUID): RefreshTokenEntity?
+
+    /**
+     * Voids an unused successor: the grace retry of its predecessor replaced it
+     * before it was used. Marked rotated at the same instant, so it leaves every
+     * live query and presenting it is a reuse. Conditional like [rotate]: `0`
+     * means it was used or revoked after all.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE RefreshTokenEntity t
+           SET t.rotatedAt = :now,
+               t.voidedAt = :now
+         WHERE t.id = :id
+           AND t.rotatedAt IS NULL
+           AND t.revokedAt IS NULL
+        """,
+    )
+    fun void(
+        id: UUID,
+        now: Instant,
+    ): Int
+
+    /**
+     * Points a rotated token at the successor its grace retry minted, in place
+     * of the one that retry voided. `rotatedAt` is left alone: the window runs
+     * from the first rotation. Conditional on the successor it replaces.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE RefreshTokenEntity t
+           SET t.replacedBy = :replacementId
+         WHERE t.id = :id
+           AND t.replacedBy = :voidedId
+           AND t.voidedAt IS NULL
+           AND t.revokedAt IS NULL
+        """,
+    )
+    fun repoint(
+        id: UUID,
+        voidedId: UUID,
+        replacementId: UUID,
+    ): Int
 
     /**
      * Serialises every mutation of one user's sessions for the rest of the
@@ -249,6 +322,12 @@ internal interface RefreshTokenRepository : Repository<RefreshTokenEntity, UUID>
     fun familyStartsOf(userId: UUID): List<FamilyStart>
 }
 
+/** A refresh token's id and owner, read without making it a managed entity (JPQL constructor projection). */
+internal data class RefreshTokenRef(
+    val id: UUID,
+    val userId: UUID,
+)
+
 /** A family and the moment it was created (JPQL constructor projection). */
 internal data class FamilyStart(
     val familyId: UUID,
@@ -286,8 +365,8 @@ internal interface DeviceRepository : Repository<DeviceEntity, UUID> {
 }
 
 /**
- * Consent records. One method, because writing is the only thing this slice
- * does with them — the export path (FR-009) adds its own read when it exists.
+ * Consent records: written at registration and by re-consent, and read one
+ * person at a time for `GET /me` (ADR-0056).
  *
  * On the bare [Repository] marker for the same reason as
  * [CredentialsRepository]: what a repository *cannot* do is part of its
@@ -296,6 +375,37 @@ internal interface DeviceRepository : Repository<DeviceEntity, UUID> {
  */
 internal interface ConsentRecordRepository : Repository<ConsentRecordEntity, UUID> {
     fun saveAll(records: Iterable<ConsentRecordEntity>): List<ConsentRecordEntity>
+
+    /** One person's rows: served by the unique key, whose leading column is `user_id` (V3). */
+    fun findAllByUserId(userId: UUID): List<ConsentRecordEntity>
+
+    /**
+     * Re-consent (ADR-0056 decision 4): the row, unless this person has already
+     * accepted this version of this document. `ON CONFLICT DO NOTHING` on the
+     * unique key rather than a read first, so two requests at once both succeed
+     * and the first acceptance, and its moment, is the one kept. `1` when a row
+     * was written, `0` when it was already there.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        nativeQuery = true,
+        value = """
+        INSERT INTO consent_records (id, user_id, document, version, accepted_at, ip_hash, user_agent_hash)
+        VALUES (:id, :userId, :document, :version, :acceptedAt, CAST(:ipHash AS text), CAST(:userAgentHash AS text))
+        ON CONFLICT ON CONSTRAINT consent_records_user_document_version_key DO NOTHING
+        
+        """,
+    )
+    @Suppress("LongParameterList") // The row's columns, one parameter each.
+    fun insertIfAbsent(
+        id: UUID,
+        userId: UUID,
+        document: String,
+        version: String,
+        acceptedAt: Instant,
+        ipHash: String?,
+        userAgentHash: String?,
+    ): Int
 }
 
 /**
@@ -372,6 +482,77 @@ internal interface VerificationTokenRepository : Repository<VerificationTokenEnt
         purpose: VerificationPurpose,
         now: Instant,
     ): Int
+
+    /**
+     * Spends the token with this id if it is still live: [consume]'s compare-and-set, by id,
+     * for a caller that already holds the row (the code path, and the reset that follows it).
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE VerificationTokenEntity t
+           SET t.consumedAt = :now
+         WHERE t.id = :id
+           AND t.consumedAt IS NULL
+           AND t.expiresAt > :now
+        """,
+    )
+    fun consumeById(
+        id: UUID,
+        now: Instant,
+    ): Int
+
+    /**
+     * The one row of this person's for [purpose] that holds a code (V51's partial unique
+     * index makes it one), **locked** `FOR UPDATE` until the transaction ends. The lock is
+     * what makes the attempt count a count: every concurrent attempt against the code waits
+     * here, then reads the number the one before it wrote, so five wrong codes are five and
+     * the sixth, however many arrive at once, finds the code burned (ADR-0018, amended
+     * 2026-11-08). Whether the code is live is the domain's to say; this only finds it.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query(
+        """
+        SELECT t FROM VerificationTokenEntity t
+         WHERE t.userId = :userId
+           AND t.purpose = :purpose
+           AND t.codeHash IS NOT NULL
+        """,
+    )
+    fun lockHeldCode(
+        userId: UUID,
+        purpose: VerificationPurpose,
+    ): VerificationTokenEntity?
+
+    /** One more wrong code against this row. Zero rows for an id that is no row: the path with nothing to count. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE VerificationTokenEntity t SET t.codeAttempts = t.codeAttempts + 1 WHERE t.id = :id")
+    fun recordWrongCode(id: UUID): Int
+
+    /** Takes the code off every row of this person's for [purpose]; their links are left as they were. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE VerificationTokenEntity t
+           SET t.codeHash = NULL, t.codeExpiresAt = NULL
+         WHERE t.userId = :userId
+           AND t.purpose = :purpose
+           AND t.codeHash IS NOT NULL
+        """,
+    )
+    fun retireCodes(
+        userId: UUID,
+        purpose: VerificationPurpose,
+    ): Int
+
+    /**
+     * Serialises issuing codes to one person: two emails asked for at once would each retire
+     * the codes they can see and insert their own, and the second insert would break V51's
+     * one-code index (a 500). Namespace `5` in the two-key form; `1` to `4` are taken
+     * (`PushBudgetLedger`'s list). Released at commit or rollback.
+     */
+    @Query(nativeQuery = true, value = "SELECT 1 FROM (SELECT pg_advisory_xact_lock(5, hashtext(CAST(:userId AS text)))) AS held")
+    fun lockCodeIssue(userId: UUID): Int
 }
 
 /**

@@ -6,8 +6,11 @@
     "version" : "v1"
   },
   "servers" : [ {
-    "url" : "http://localhost",
-    "description" : "Generated server url"
+    "url" : "https://api.getmoyi.app",
+    "description" : "Production. Every path begins with /api/v1."
+  }, {
+    "url" : "http://localhost:8080",
+    "description" : "Local development: the application run by hand (README)."
   } ],
   "security" : [ {
     "bearerAuth" : [ ]
@@ -39,6 +42,26 @@
               }
             },
             "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized: `UNAUTHENTICATED`. This route needs no access token, but one that is sent is checked, and an expired or unaccepted one is refused. Send no `Authorization` header here."
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
           },
           "422" : {
             "content" : {
@@ -109,6 +132,26 @@
             },
             "description" : "Bad Request"
           },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized: `INVALID_CREDENTIALS` for every refused sign-in (a wrong password, an unknown address, a locked account: one answer for all, on purpose); `UNAUTHENTICATED` when an `Authorization` header is sent whose token is not accepted. No `WWW-Authenticate`."
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
           "422" : {
             "content" : {
               "application/problem+json" : {
@@ -138,6 +181,16 @@
               }
             },
             "description" : "Internal Server Error"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Service Unavailable: `HASHING_CAPACITY_EXCEEDED`, with `Retry-After: 1`. Password hashing is momentarily full; retry the same request."
           }
         },
         "security" : [ ],
@@ -170,6 +223,26 @@
               }
             },
             "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized: `UNAUTHENTICATED`. This route needs no access token, but one that is sent is checked, and an expired or unaccepted one is refused. Send no `Authorization` header here."
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
           },
           "422" : {
             "content" : {
@@ -291,6 +364,26 @@
             },
             "description" : "Bad Request"
           },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized: `REFRESH_TOKEN_INVALID` for a refresh token that is unknown, expired or revoked: sign in again. `TOKEN_REUSE_DETECTED` for one already exchanged: every session of its family has been ended, so drop the stored credentials and sign in again. `UNAUTHENTICATED` when an `Authorization` header is sent whose token is not accepted."
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
           "422" : {
             "content" : {
               "application/problem+json" : {
@@ -353,6 +446,26 @@
             },
             "description" : "Bad Request"
           },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized: `UNAUTHENTICATED`. This route needs no access token, but one that is sent is checked, and an expired or unaccepted one is refused. Send no `Authorization` header here."
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
           "422" : {
             "content" : {
               "application/problem+json" : {
@@ -382,6 +495,16 @@
               }
             },
             "description" : "Internal Server Error"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Service Unavailable: `HASHING_CAPACITY_EXCEEDED`, with `Retry-After: 1`. Password hashing is momentarily full; retry the same request."
           }
         },
         "security" : [ ],
@@ -414,6 +537,26 @@
               }
             },
             "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized: `UNAUTHENTICATED`. This route needs no access token, but one that is sent is checked, and an expired or unaccepted one is refused. Send no `Authorization` header here."
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
           },
           "422" : {
             "content" : {
@@ -477,6 +620,36 @@
             },
             "description" : "Bad Request"
           },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized: `UNAUTHENTICATED`. This route needs no access token, but one that is sent is checked, and an expired or unaccepted one is refused. Send no `Authorization` header here."
+          },
+          "410" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Gone: `PASSWORD_RESET_TOKEN_EXPIRED`. The link was real but is past its hour or was already used. Ask for a new one. Only a `token` is answered 410; an `email` and `code` never are."
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
           "422" : {
             "content" : {
               "application/problem+json" : {
@@ -485,7 +658,7 @@
                 }
               }
             },
-            "description" : "Unprocessable Entity"
+            "description" : "Unprocessable: `VALIDATION_FAILED` for a body that is not exactly one of a `token`, or an `email` and a six-digit `code`, or for the new `password` (`VALID_PASSWORD`, `NOT_BREACHED`); that refusal spends nothing. `PASSWORD_RESET_TOKEN_INVALID` for a token that matches nothing, and for every refused code: no such account, a wrong code, or one expired (15 minutes), burned (5 wrong tries) or spent. One answer for all of them, on purpose; ask for a new email."
           },
           "429" : {
             "content" : {
@@ -506,6 +679,16 @@
               }
             },
             "description" : "Internal Server Error"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Service Unavailable: `HASHING_CAPACITY_EXCEEDED`, with `Retry-After: 1`. Password hashing is momentarily full; retry the same request. The link or the code is not spent. Or `CODE_CHECK_UNAVAILABLE`, with `Retry-After: 60`, for an `email` and `code` only: the limit on typed codes cannot be read just now, so no code is checked. The code is not spent or counted, and the answer is the same whether the address has an account. The link in the same email still works; offer it, or try the code again after the wait."
           }
         },
         "security" : [ ],
@@ -666,6 +849,36 @@
             },
             "description" : "Bad Request"
           },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized: `UNAUTHENTICATED`. This route needs no access token, but one that is sent is checked, and an expired or unaccepted one is refused. Send no `Authorization` header here."
+          },
+          "410" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Gone: `VERIFICATION_TOKEN_EXPIRED`. The link was real but is past its 24 hours or was already used. Ask for a new one. Only a `token` is answered 410; an `email` and `code` never are."
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
           "422" : {
             "content" : {
               "application/problem+json" : {
@@ -674,7 +887,7 @@
                 }
               }
             },
-            "description" : "Unprocessable Entity"
+            "description" : "Unprocessable: `VALIDATION_FAILED` for a body that is not exactly one of a `token`, or an `email` and a six-digit `code`. `VERIFICATION_TOKEN_INVALID` for a token that matches nothing, and for every refused code: no such account, a wrong code, or one expired (15 minutes), burned (5 wrong tries) or spent. One answer for all of them, on purpose; ask for a new email."
           },
           "429" : {
             "content" : {
@@ -695,6 +908,16 @@
               }
             },
             "description" : "Internal Server Error"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Service Unavailable: `CODE_CHECK_UNAVAILABLE`, with `Retry-After: 60`, for an `email` and `code` only: the limit on typed codes cannot be read just now, so no code is checked. The code is not spent or counted, and the answer is the same whether the address has an account. The link in the same email still works; offer it, or try the code again after the wait."
           }
         },
         "security" : [ ],
@@ -828,6 +1051,16 @@
               }
             },
             "description" : "Conflict"
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
           },
           "422" : {
             "content" : {
@@ -1052,6 +1285,16 @@
             },
             "description" : "Precondition Failed"
           },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
           "422" : {
             "content" : {
               "application/problem+json" : {
@@ -1161,6 +1404,16 @@
               }
             },
             "description" : "Not Found"
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
           },
           "422" : {
             "content" : {
@@ -2045,6 +2298,16 @@
             },
             "description" : "Conflict"
           },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
           "422" : {
             "content" : {
               "application/problem+json" : {
@@ -2234,6 +2497,16 @@
               }
             },
             "description" : "Conflict"
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
           },
           "422" : {
             "content" : {
@@ -2425,6 +2698,16 @@
             },
             "description" : "Conflict"
           },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
           "422" : {
             "content" : {
               "application/problem+json" : {
@@ -2457,6 +2740,122 @@
           }
         },
         "tags" : [ "bond-member-settings-controller" ]
+      }
+    },
+    "/api/v1/bonds/{bondId}/members/other/report" : {
+      "post" : {
+        "operationId" : "reportMember",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "bondId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReportRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MemberReportResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unprocessable Entity"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "member-reports-controller" ]
       }
     },
     "/api/v1/bonds/{bondId}/milestones" : {
@@ -3256,6 +3655,16 @@
             },
             "description" : "Conflict"
           },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
           "422" : {
             "content" : {
               "application/problem+json" : {
@@ -3379,6 +3788,16 @@
               }
             },
             "description" : "Conflict"
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
           },
           "422" : {
             "content" : {
@@ -4024,6 +4443,16 @@
             },
             "description" : "Conflict"
           },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
           "422" : {
             "content" : {
               "application/problem+json" : {
@@ -4412,7 +4841,7 @@
             "content" : {
               "application/json" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/UserResponse"
+                  "$ref" : "#/components/schemas/ProfileResponse"
                 }
               }
             },
@@ -4460,6 +4889,165 @@
           }
         },
         "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/me/deletion-request" : {
+      "delete" : {
+        "description" : "Calls off the pending account deletion. `204`. `404 NOT_FOUND` when there is nothing to cancel, whether nothing was requested, it was already cancelled, or `cancellableUntil` has passed: one answer for all, because there is nothing the person can do about any of them.",
+        "operationId" : "cancelAccountDeletion",
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "deletion-request-controller" ]
+      },
+      "post" : {
+        "description" : "Asks for the signed-in account to be deleted (FR-008). Nothing is destroyed now: `202` answers with `requestedAt`, `cancellableUntil` (14 days later) and `deleteBy` (30 days later, FR-008's bound). Until `cancellableUntil` the person can still sign in and use the app, and `DELETE` calls it off; other sessions are not ended. From `cancellableUntil` it cannot be cancelled, and within the hour the account is deleted: the address and name are erased and the account can no longer sign in; every entry its owner wrote becomes a blank placeholder in each shared archive, so the other person's days and streak stay as they were; their bookmarks, reactions, photos and voice notes, devices and sessions are deleted, their open support messages emptied, and every bond they are still in ends as if they had left it. Asking again while one is pending is the same `202` with the same dates. The current `password` is required: wrong is `401 INVALID_CREDENTIALS` (the session is fine; do not sign out), absent or blank is `422`. A confirmed address is emailed once per request, saying when and how to cancel. Five an hour per account, wrong passwords included: the sixth is `429` with `Retry-After`.",
+        "operationId" : "requestAccountDeletion",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/DeletionRequestBody"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DeletionRequestResponse"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unprocessable Entity"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "deletion-request-controller" ]
       }
     },
     "/api/v1/me/devices/current/push-token" : {
@@ -4578,6 +5166,16 @@
             },
             "description" : "Not Found"
           },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
           "422" : {
             "content" : {
               "application/problem+json" : {
@@ -4610,6 +5208,58 @@
           }
         },
         "tags" : [ "push-token-controller" ]
+      }
+    },
+    "/api/v1/me/legal-consent" : {
+      "post" : {
+        "description" : "The caller accepts the current Terms of Service and Privacy Policy, the versions `GET /meta/legal` names. No body, and none is read: the versions recorded are the server's. `204` whether or not anything was new; a version accepted before keeps the moment it was first accepted. Afterwards `GET /me`'s `legalAccepted` names the current versions.",
+        "operationId" : "acceptLegalDocuments",
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "me-controller" ]
       }
     },
     "/api/v1/media/upload-intent" : {
@@ -5027,10 +5677,250 @@
         },
         "tags" : [ "media-controller" ]
       }
+    },
+    "/api/v1/meta/legal" : {
+      "get" : {
+        "description" : "The current Terms of Service, Privacy Policy and data-processing summary: each a `version` and the absolute `url` it is read at. Public: no token is needed, because sign-up shows them before there is an account. A `version` is an opaque label (letters, digits, `.`, `_`, `-`; at most 40): compare it with `GET /me`'s `legalAccepted`, never parse it. Where the two differ, ask the person to accept again and send `POST /me/legal-consent`. The data-processing summary is shown, never accepted on its own. Registration records the Terms and Privacy versions this answer names, whatever the request says.",
+        "operationId" : "legalDocuments",
+        "parameters" : [ {
+          "description" : "The `ETag` of an earlier answer the client still holds. If it is still current the answer is `304` with no body; any other value is ignored and the whole response is sent.",
+          "in" : "header",
+          "name" : "If-None-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LegalResponse"
+                }
+              }
+            },
+            "description" : "OK",
+            "headers" : {
+              "ETag" : {
+                "description" : "Strong validator of this response body (RFC 9110 §8.8.3). Opaque: keep the whole value and send it back as `If-None-Match`. The same for every caller; sent with `Cache-Control: public, no-cache`.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "304" : {
+            "description" : "Not Modified: the documents are still those the client holds under that tag. No body.",
+            "headers" : {
+              "ETag" : {
+                "description" : "Strong validator of this response body (RFC 9110 §8.8.3). Opaque: keep the whole value and send it back as `If-None-Match`. The same for every caller; sent with `Cache-Control: public, no-cache`.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized: `UNAUTHENTICATED`. This route needs no access token, but one that is sent is checked, and an expired or unaccepted one is refused. Send no `Authorization` header here."
+          },
+          "406" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Acceptable"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "security" : [ ],
+        "tags" : [ "legal-controller" ]
+      }
+    },
+    "/api/v1/support/messages" : {
+      "post" : {
+        "description" : "Writes to Moyi's support, as the signed-in account: the message becomes a ticket a person reads, and `201` answers with its id and when it arrived. Once it is stored, an acknowledgement email is attempted once, to the account's address if that address has been confirmed; it gives the id as a reference and never repeats the subject or the body. It is best effort and not promised: it is not retried if the email provider fails. A signed-out person cannot use this route. An `Idempotency-Key` is optional: repeating the request with the same key is the same ticket, `201` again with `Idempotency-Replayed: true`, filed once and acknowledged at most once; without a key, each request is a new ticket. A replay spends one of the five a day as well, so a retry can be `429`: wait for `Retry-After`, then the same key returns the same ticket. A `subject` or `body` that is absent, null, blank or too long is `422` naming the field. Five messages a day per account, refused ones and replays included: the sixth is `429` with `Retry-After`.",
+        "operationId" : "sendSupportMessage",
+        "parameters" : [ {
+          "description" : "A client-chosen key, unique per retried request (doc 06 §1). A replay of the same key with the same request returns the first attempt's status and the same resource, re-read and rendered from its current state — never a stored copy. A replay is authorised as a read of the result: a caller who may still read it gets it back even if a new write would now be refused, a caller who may no longer read it gets the read's refusal, and a resource erased since is returned as its tombstone. Only a success is recorded; a request that was refused may be corrected and retried under the same key. The same key with a different method, path or body is 422; the same key while the first attempt is still in flight is 409. The key itself is 1 to 255 visible ASCII characters (a UUID is the usual choice); a malformed one is 422 VALIDATION_FAILED with an `errors` entry naming this header, and so is a missing one wherever this parameter is marked required. Where it is optional, leaving it out makes an ordinary, unrecorded request.",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 255,
+            "minLength" : 1,
+            "pattern" : "^[\\x21-\\x7E]+$"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SupportMessageRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SupportMessageResponse"
+                }
+              }
+            },
+            "description" : "Created",
+            "headers" : {
+              "Idempotency-Replayed" : {
+                "description" : "`true` when this response answers a replay of an earlier request under the same Idempotency-Key (doc 06 §1): nothing was written again, and the body is the resource as it stands now. Absent on a fresh response.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Conflict"
+          },
+          "413" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Content Too Large"
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unprocessable Entity"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "support-controller" ]
+      }
     }
   },
   "components" : {
     "schemas" : {
+      "AcceptanceResponse" : {
+        "type" : "object",
+        "properties" : {
+          "acceptedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "version" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "acceptedAt", "version" ]
+      },
       "AchievedMilestoneResponse" : {
         "type" : "object",
         "properties" : {
@@ -5042,7 +5932,8 @@
             "type" : "integer",
             "format" : "int32"
           }
-        }
+        },
+        "required" : [ "achievedOn", "threshold" ]
       },
       "BondDayResponse" : {
         "type" : "object",
@@ -5051,11 +5942,17 @@
             "type" : "string",
             "format" : "date"
           },
+          "settlesAt" : {
+            "type" : "string",
+            "format" : "date-time",
+            "description" : "The earliest this day can be decided: its end on the bond's calendar plus the late-entry grace (twelve hours by default; issue #132). An entry written on this day and sent before then counts for it; one sent after counts for the day it is sent. The day is decided on the next run of the close job after this, usually within minutes; until then a lone entry is not yet unlocked to the partner, and a missed day not yet counted. Never null."
+          },
           "status" : {
             "type" : "string",
             "enum" : [ "OPEN", "PARTIAL", "PENDING_REVEAL", "REVEALED", "SOLO", "EMPTY", "SUSPENDED", "FROZEN" ]
           }
-        }
+        },
+        "required" : [ "date", "settlesAt", "status" ]
       },
       "BondResponse" : {
         "type" : "object",
@@ -5142,7 +6039,8 @@
             "type" : "string",
             "enum" : [ "COUPLE", "FRIENDS", "FAMILY", "PARENT_CHILD" ]
           }
-        }
+        },
+        "required" : [ "anchorTimezone", "archivedAt", "createdAt", "deletionScheduledFor", "id", "invite", "maxMembers", "me", "members", "name", "pendingDeletionRequest", "pendingSemanticSearchRequest", "pendingTimezoneChange", "revealTimeLocal", "semanticSearchEnabled", "status", "strictMode", "type" ]
       },
       "BondsResponse" : {
         "type" : "object",
@@ -5153,7 +6051,8 @@
               "$ref" : "#/components/schemas/BondResponse"
             }
           }
-        }
+        },
+        "required" : [ "bonds" ]
       },
       "ChangeTimezoneRequest" : {
         "type" : "object",
@@ -5196,7 +6095,8 @@
             "pattern" : "^([01]\\d|2[0-3]):[0-5]\\d$"
           },
           "type" : {
-            "type" : "string"
+            "type" : "string",
+            "enum" : [ "COUPLE", "FRIENDS", "FAMILY", "PARENT_CHILD" ]
           }
         },
         "required" : [ "anchorTimezone", "name", "type" ]
@@ -5219,19 +6119,8 @@
             "type" : [ "string", "null" ]
           },
           "partnerEntry" : {
-            "discriminator" : {
-              "mapping" : {
-                "DELETED" : "#/components/schemas/EntryResponse",
-                "LOCKED" : "#/components/schemas/LockedEntryResponse",
-                "REVEALED" : "#/components/schemas/EntryResponse",
-                "SUBMITTED" : "#/components/schemas/EntryResponse"
-              },
-              "propertyName" : "status"
-            },
             "oneOf" : [ {
-              "$ref" : "#/components/schemas/EntryResponse"
-            }, {
-              "$ref" : "#/components/schemas/LockedEntryResponse"
+              "$ref" : "#/components/schemas/PartnerEntryResponse"
             }, {
               "type" : "null"
             } ]
@@ -5240,7 +6129,8 @@
             "type" : "string",
             "enum" : [ "OPEN", "PARTIAL", "PENDING_REVEAL", "REVEALED", "SOLO", "EMPTY", "SUSPENDED", "FROZEN" ]
           }
-        }
+        },
+        "required" : [ "date", "myEntry", "partnerDisplayName", "partnerEntry", "status" ]
       },
       "DaysResponse" : {
         "type" : "object",
@@ -5254,83 +6144,10 @@
           "nextCursor" : {
             "type" : [ "string", "null" ]
           }
-        }
-      },
-      "DeviceRequest" : {
-        "type" : "object",
-        "properties" : {
-          "appVersion" : {
-            "type" : "string",
-            "maxLength" : 40,
-            "minLength" : 0
-          },
-          "osVersion" : {
-            "type" : "string",
-            "maxLength" : 40,
-            "minLength" : 0
-          },
-          "platform" : {
-            "type" : "string",
-            "minLength" : 1,
-            "pattern" : "ANDROID|IOS|WEAR"
-          }
         },
-        "required" : [ "appVersion", "osVersion", "platform" ]
+        "required" : [ "items", "nextCursor" ]
       },
-      "DeviceResponse" : {
-        "type" : "object",
-        "properties" : {
-          "appVersion" : {
-            "type" : "string"
-          },
-          "osVersion" : {
-            "type" : "string"
-          },
-          "platform" : {
-            "type" : "string",
-            "enum" : [ "ANDROID", "IOS", "WEAR" ]
-          }
-        }
-      },
-      "EndBondRequest" : {
-        "type" : "object",
-        "properties" : {
-          "withdrawEntries" : {
-            "type" : [ "boolean", "null" ],
-            "description" : "Whether to withdraw the caller's own entries in this bond: every one is erased, for both members, and this cannot be undone. What an absent or null value means depends on the route; each operation's description says. Only JSON true, false or null is accepted."
-          }
-        }
-      },
-      "EntryImageResponse" : {
-        "type" : "object",
-        "description" : "An entry's photo as the caller is shown it. url, width and height are present when status is READY: to its author once it is ready, to the other member only once it has also passed moderation; until then it is PROCESSING to them, whatever the reason. NOT_SHARED is its author's alone: the photo is held back, for review, from the other member, who is shown PROCESSING and never told it was removed; url, width and height are still given, unless it was blocked outright, when they are null. sensitive is true when the photo passed moderation with adult nudity found: show it blurred, behind a tap to view; it is false otherwise, and always false unless status is READY. The url is a signed GET, valid for at least 24 hours, ending on the hour and the same all hour, so it may be cached by; it is a credential for the photo.",
-        "properties" : {
-          "height" : {
-            "type" : [ "integer", "null" ],
-            "format" : "int32"
-          },
-          "id" : {
-            "type" : "string",
-            "format" : "uuid"
-          },
-          "sensitive" : {
-            "type" : "boolean"
-          },
-          "status" : {
-            "type" : "string",
-            "enum" : [ "READY", "PROCESSING", "NOT_SHARED" ]
-          },
-          "url" : {
-            "type" : [ "string", "null" ]
-          },
-          "width" : {
-            "type" : [ "integer", "null" ],
-            "format" : "int32"
-          }
-        },
-        "required" : [ "height", "id", "sensitive", "status", "url", "width" ]
-      },
-      "EntryResponse" : {
+      "DeletedPartnerEntryResponse" : {
         "allOf" : [ {
           "$ref" : "#/components/schemas/PartnerEntryResponse"
         }, {
@@ -5376,10 +6193,6 @@
               "description" : "The reaction on this entry: the one left by the member who did not write it, or null. Both members are sent the same value. Always null on an erased entry.",
               "enum" : [ "HEART", "THANK_YOU", "SMILE", "MOVED", "ME_TOO", null ]
             },
-            "status" : {
-              "type" : "string",
-              "enum" : [ "SUBMITTED", "REVEALED", "DELETED" ]
-            },
             "text" : {
               "type" : [ "string", "null" ]
             },
@@ -5392,8 +6205,176 @@
               } ]
             }
           },
-          "required" : [ "authorMemberId", "bondId", "createdAt", "date", "favourited", "id", "image", "intendedAt", "reaction", "status", "text", "voice" ]
-        } ]
+          "required" : [ "authorMemberId", "bondId", "createdAt", "date", "favourited", "id", "image", "intendedAt", "reaction", "text", "voice" ]
+        } ],
+        "description" : "The other member's entry, with every field an entry has, when its `status` is `DELETED`."
+      },
+      "DeletionRequestBody" : {
+        "type" : "object",
+        "properties" : {
+          "password" : {
+            "type" : "string",
+            "description" : "The account's current password, typed again. Absent, null or blank is `422`; wrong is `401`.",
+            "maxLength" : 512,
+            "minLength" : 1
+          }
+        },
+        "required" : [ "password" ]
+      },
+      "DeletionRequestResponse" : {
+        "type" : "object",
+        "properties" : {
+          "cancellableUntil" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "deleteBy" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "requestedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "cancellableUntil", "deleteBy", "requestedAt" ]
+      },
+      "DeviceRequest" : {
+        "type" : "object",
+        "properties" : {
+          "appVersion" : {
+            "type" : "string",
+            "maxLength" : 40,
+            "minLength" : 0
+          },
+          "osVersion" : {
+            "type" : "string",
+            "maxLength" : 40,
+            "minLength" : 0
+          },
+          "platform" : {
+            "type" : "string",
+            "enum" : [ "ANDROID", "IOS", "WEAR" ],
+            "minLength" : 1
+          }
+        },
+        "required" : [ "appVersion", "osVersion", "platform" ]
+      },
+      "DeviceResponse" : {
+        "type" : "object",
+        "properties" : {
+          "appVersion" : {
+            "type" : "string"
+          },
+          "osVersion" : {
+            "type" : "string"
+          },
+          "platform" : {
+            "type" : "string",
+            "enum" : [ "ANDROID", "IOS", "WEAR" ]
+          }
+        },
+        "required" : [ "appVersion", "osVersion", "platform" ]
+      },
+      "EndBondRequest" : {
+        "type" : "object",
+        "properties" : {
+          "withdrawEntries" : {
+            "type" : [ "boolean", "null" ],
+            "description" : "Whether to withdraw the caller's own entries in this bond: every one is erased, for both members, and this cannot be undone. What an absent or null value means depends on the route; each operation's description says. Only JSON true, false or null is accepted."
+          }
+        }
+      },
+      "EntryImageResponse" : {
+        "type" : "object",
+        "description" : "An entry's photo as the caller is shown it. url, width and height are present when status is READY: to its author once it is ready, to the other member only once it has also passed moderation; until then it is PROCESSING to them, whatever the reason. NOT_SHARED is its author's alone: the photo is held back, for review, from the other member, who is shown PROCESSING and never told it was removed; url, width and height are still given, unless it was blocked outright, when they are null. sensitive is true when the photo passed moderation with adult nudity found: show it blurred, behind a tap to view; it is false otherwise, and always false unless status is READY. The url is a signed GET, valid for at least 24 hours, ending on the hour and the same all hour, so it may be cached by; it is a credential for the photo.",
+        "properties" : {
+          "height" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "sensitive" : {
+            "type" : "boolean"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "READY", "PROCESSING", "NOT_SHARED" ]
+          },
+          "url" : {
+            "type" : [ "string", "null" ]
+          },
+          "width" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          }
+        },
+        "required" : [ "height", "id", "sensitive", "status", "url", "width" ]
+      },
+      "EntryResponse" : {
+        "type" : "object",
+        "description" : "An entry with every field it has. The caller's own entry is always this shape; the other member's is `PartnerEntryResponse`.",
+        "properties" : {
+          "authorMemberId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "bondId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "date" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "favourited" : {
+            "type" : "boolean"
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "image" : {
+            "description" : "The entry's photo, or null when it has none. Always null on an erased entry; a locked entry has no such field.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/EntryImageResponse"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "intendedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "reaction" : {
+            "type" : [ "string", "null" ],
+            "description" : "The reaction on this entry: the one left by the member who did not write it, or null. Both members are sent the same value. Always null on an erased entry.",
+            "enum" : [ "HEART", "THANK_YOU", "SMILE", "MOVED", "ME_TOO", null ]
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "SUBMITTED", "REVEALED", "DELETED" ]
+          },
+          "text" : {
+            "type" : [ "string", "null" ]
+          },
+          "voice" : {
+            "description" : "The entry's voice note, or null when it has none. Always null on an erased entry; a locked entry has no such field.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/EntryVoiceResponse"
+            }, {
+              "type" : "null"
+            } ]
+          }
+        },
+        "required" : [ "authorMemberId", "bondId", "createdAt", "date", "favourited", "id", "image", "intendedAt", "reaction", "status", "text", "voice" ]
       },
       "EntryVoiceResponse" : {
         "type" : "object",
@@ -5464,7 +6445,8 @@
             "type" : "string",
             "format" : "uri"
           }
-        }
+        },
+        "required" : [ "code", "expiresAt", "id", "link" ]
       },
       "InvitePreviewResponse" : {
         "type" : "object",
@@ -5479,7 +6461,8 @@
           "inviterDisplayName" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "bondName", "bondType", "inviterDisplayName" ]
       },
       "InviteResponse" : {
         "type" : "object",
@@ -5499,7 +6482,55 @@
             "type" : "string",
             "format" : "uri"
           }
-        }
+        },
+        "required" : [ "code", "expiresAt", "id", "link" ]
+      },
+      "LegalAcceptedResponse" : {
+        "type" : "object",
+        "properties" : {
+          "privacy" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/AcceptanceResponse"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "terms" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/AcceptanceResponse"
+            }, {
+              "type" : "null"
+            } ]
+          }
+        },
+        "required" : [ "privacy", "terms" ]
+      },
+      "LegalDocumentResponse" : {
+        "type" : "object",
+        "properties" : {
+          "url" : {
+            "type" : "string"
+          },
+          "version" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "url", "version" ]
+      },
+      "LegalResponse" : {
+        "type" : "object",
+        "properties" : {
+          "dataProcessingSummary" : {
+            "$ref" : "#/components/schemas/LegalDocumentResponse"
+          },
+          "privacy" : {
+            "$ref" : "#/components/schemas/LegalDocumentResponse"
+          },
+          "terms" : {
+            "$ref" : "#/components/schemas/LegalDocumentResponse"
+          }
+        },
+        "required" : [ "dataProcessingSummary", "privacy", "terms" ]
       },
       "LockedEntryResponse" : {
         "allOf" : [ {
@@ -5510,14 +6541,11 @@
             "authorMemberId" : {
               "type" : "string",
               "format" : "uuid"
-            },
-            "status" : {
-              "type" : "string",
-              "enum" : [ "LOCKED" ]
             }
           },
-          "required" : [ "authorMemberId", "status" ]
-        } ]
+          "required" : [ "authorMemberId" ]
+        } ],
+        "description" : "The other member's entry while it is locked: written, and not revealed to the caller yet. It carries its author and its `status`, LOCKED, and nothing else."
       },
       "LoginRequest" : {
         "type" : "object",
@@ -5558,7 +6586,8 @@
           "user" : {
             "$ref" : "#/components/schemas/UserResponse"
           }
-        }
+        },
+        "required" : [ "accessToken", "expiresIn", "refreshToken", "user" ]
       },
       "LogoutRequest" : {
         "type" : "object",
@@ -5582,7 +6611,8 @@
             "type" : "string",
             "enum" : [ "OWNER", "MEMBER" ]
           }
-        }
+        },
+        "required" : [ "memberId", "role" ]
       },
       "MediaResponse" : {
         "type" : "object",
@@ -5624,7 +6654,8 @@
             "type" : [ "integer", "null" ],
             "format" : "int32"
           }
-        }
+        },
+        "required" : [ "contentType", "durationMs", "height", "id", "kind", "sensitive", "sizeBytes", "status", "url", "width" ]
       },
       "MemberNotificationsRequest" : {
         "type" : "object",
@@ -5645,7 +6676,22 @@
           "categories" : {
             "$ref" : "#/components/schemas/NotificationCategoriesResponse"
           }
-        }
+        },
+        "required" : [ "categories" ]
+      },
+      "MemberReportResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "reason" : {
+            "type" : "string",
+            "enum" : [ "NON_CONSENSUAL", "MINOR_SEXUAL_CONTENT", "VIOLENCE_OR_SELF_HARM", "HARASSMENT", "OTHER" ]
+          }
+        },
+        "required" : [ "id", "reason" ]
       },
       "MemberResponse" : {
         "type" : "object",
@@ -5669,7 +6715,8 @@
             "type" : "string",
             "enum" : [ "OWNER", "MEMBER" ]
           }
-        }
+        },
+        "required" : [ "displayName", "id", "joinedAt", "leftAt", "role" ]
       },
       "MemberSettingsRequest" : {
         "type" : "object",
@@ -5716,7 +6763,8 @@
           "reminderTimezone" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "nicknameForOther", "quietHoursEnd", "quietHoursStart", "reminderTimeLocal", "reminderTimezone" ]
       },
       "MilestonesResponse" : {
         "type" : "object",
@@ -5734,7 +6782,8 @@
               "type" : "null"
             } ]
           }
-        }
+        },
+        "required" : [ "achieved", "next" ]
       },
       "NextMilestoneResponse" : {
         "type" : "object",
@@ -5743,7 +6792,8 @@
             "type" : "integer",
             "format" : "int32"
           }
-        }
+        },
+        "required" : [ "threshold" ]
       },
       "NotificationCategoriesRequest" : {
         "type" : "object",
@@ -5789,7 +6839,8 @@
           "reveal" : {
             "type" : "boolean"
           }
-        }
+        },
+        "required" : [ "milestone", "onThisDay", "partnerJoined", "proposal", "reminder", "reveal" ]
       },
       "OnThisDayResponse" : {
         "type" : "object",
@@ -5800,9 +6851,29 @@
               "$ref" : "#/components/schemas/DayResponse"
             }
           }
-        }
+        },
+        "required" : [ "items" ]
       },
-      "PartnerEntryResponse" : { },
+      "PartnerEntryResponse" : {
+        "type" : "object",
+        "description" : "The other member's entry, as the caller is shown it. `status` says which shape this is, and the schema each value maps to is the whole of what is sent: LOCKED is an entry written and not yet revealed, and carries nothing but its author; REVEALED is the entry in full; DELETED is its tombstone, erased after it was revealed (its `text` is null). An entry erased before it was ever revealed is not shown at all: the field is null.",
+        "discriminator" : {
+          "mapping" : {
+            "DELETED" : "#/components/schemas/DeletedPartnerEntryResponse",
+            "LOCKED" : "#/components/schemas/LockedEntryResponse",
+            "REVEALED" : "#/components/schemas/RevealedPartnerEntryResponse",
+            "SUBMITTED" : "#/components/schemas/SubmittedPartnerEntryResponse"
+          },
+          "propertyName" : "status"
+        },
+        "properties" : {
+          "status" : {
+            "type" : "string",
+            "enum" : [ "SUBMITTED", "REVEALED", "DELETED", "LOCKED" ]
+          }
+        },
+        "required" : [ "status" ]
+      },
       "PatchBondRequest" : {
         "type" : "object",
         "properties" : {
@@ -5826,7 +6897,8 @@
             "type" : [ "boolean", "null" ]
           },
           "type" : {
-            "type" : [ "string", "null" ]
+            "type" : [ "string", "null" ],
+            "enum" : [ "COUPLE", "FRIENDS", "FAMILY", "PARENT_CHILD", null ]
           }
         }
       },
@@ -5866,7 +6938,8 @@
             "type" : "string",
             "format" : "uuid"
           }
-        }
+        },
+        "required" : [ "expiresAt", "requestedAt", "requestedByMemberId" ]
       },
       "PendingSemanticSearchRequestResponse" : {
         "type" : "object",
@@ -5883,7 +6956,8 @@
             "type" : "string",
             "format" : "uuid"
           }
-        }
+        },
+        "required" : [ "expiresAt", "requestedAt", "requestedByMemberId" ]
       },
       "PendingTimezoneChangeResponse" : {
         "type" : "object",
@@ -5907,15 +6981,21 @@
           "proposedTimezone" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "expiresAt", "id", "proposedAt", "proposedByMemberId", "proposedTimezone" ]
       },
       "ProblemDetail" : {
         "type" : "object",
         "description" : "RFC 9457 problem details (doc 06 §2). Switch on `code`; `detail` is prose and may change.",
         "properties" : {
+          "allowedFrom" : {
+            "type" : "string",
+            "format" : "date",
+            "description" : "Only with `TIMEZONE_CHANGE_TOO_SOON`: the first date (`YYYY-MM-DD`, in the bond's shared time zone, `anchorTimezone`) on which the shared time zone can be changed again, from its start. Absent on every other code."
+          },
           "code" : {
             "type" : "string",
-            "enum" : [ "FAVOURITE_BUSY", "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "ENTRY_NOT_REVEALED", "REACTION_ON_OWN_ENTRY", "REACTION_BUSY", "REPORT_ON_OWN_ENTRY", "DAY_CLOSED", "MEDIA_QUOTA_EXCEEDED", "MEDIA_TYPE_UNSUPPORTED", "MEDIA_NOT_UPLOADED", "MEDIA_STORAGE_UNAVAILABLE", "MEDIA_BUSY", "MEDIA_ATTACHED", "DAY_NOT_FOUND", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
+            "enum" : [ "FAVOURITE_BUSY", "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "CODE_CHECK_UNAVAILABLE", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "ENTRY_NOT_REVEALED", "REACTION_ON_OWN_ENTRY", "REACTION_BUSY", "REPORT_ON_OWN_ENTRY", "DAY_CLOSED", "MEDIA_QUOTA_EXCEEDED", "MEDIA_TYPE_UNSUPPORTED", "MEDIA_NOT_UPLOADED", "MEDIA_STORAGE_UNAVAILABLE", "MEDIA_BUSY", "MEDIA_ATTACHED", "DAY_NOT_FOUND", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
           },
           "detail" : {
             "type" : "string"
@@ -5937,12 +7017,54 @@
           "title" : {
             "type" : "string"
           },
+          "traceId" : {
+            "type" : "string",
+            "description" : "The id of the trace this request was served under: 32 lower-case hex digits (W3C Trace Context). The server's log lines for the request carry the same id, so quoting it to support finds them. It names a request, nothing in it, and is different on every request.",
+            "pattern" : "^[0-9a-f]{32}$"
+          },
           "type" : {
             "type" : "string",
             "format" : "uri"
           }
         },
         "required" : [ "code", "status", "title", "type" ]
+      },
+      "ProfileResponse" : {
+        "type" : "object",
+        "properties" : {
+          "deletionRequest" : {
+            "description" : "The account deletion waiting to be carried out, with its dates, or `null` when none is. Read it on start: a client reinstalled during the 14 days draws the pending state, and its cancel, from this.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/DeletionRequestResponse"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "displayName" : {
+            "type" : "string"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "emailVerified" : {
+            "type" : "boolean"
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "legalAccepted" : {
+            "$ref" : "#/components/schemas/LegalAcceptedResponse"
+          },
+          "locale" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "PENDING_VERIFICATION", "ACTIVE", "SUSPENDED", "PENDING_DELETION", "DELETED" ]
+          }
+        },
+        "required" : [ "deletionRequest", "displayName", "email", "emailVerified", "id", "legalAccepted", "locale", "status" ]
       },
       "PushTokenRequest" : {
         "type" : "object",
@@ -5981,7 +7103,7 @@
         "type" : "object",
         "properties" : {
           "acceptedTermsVersion" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "maxLength" : 40,
             "minLength" : 0
           },
@@ -6001,14 +7123,15 @@
             "pattern" : "^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})?$"
           },
           "over18" : {
-            "type" : "boolean"
+            "type" : "boolean",
+            "description" : "The person confirms they are 18 or older (FR-011). Required, and only `true` is accepted: `false` is `422 VALIDATION_FAILED`, and a body without the field is `400 MALFORMED_REQUEST`."
           },
           "password" : {
             "type" : "string",
             "minLength" : 1
           }
         },
-        "required" : [ "acceptedTermsVersion", "displayName", "email", "locale", "password" ]
+        "required" : [ "displayName", "email", "locale", "over18", "password" ]
       },
       "RememberResponse" : {
         "type" : "object",
@@ -6079,18 +7202,90 @@
       },
       "ResetPasswordRequest" : {
         "type" : "object",
+        "description" : "Exactly one of: `token`, the value after `?token=` in the emailed link; or `email` and `code`, the address the email was sent to and the six digits in it. Anything else is `422 VALIDATION_FAILED`.",
         "properties" : {
+          "code" : {
+            "type" : [ "string", "null" ],
+            "description" : "The six ASCII digits from the email (surrounding space is trimmed). Good for 15 minutes, until 5 wrong tries, and until a newer email is sent; spent with the link beside it. Another shape is `422 VALIDATION_FAILED` with the field's code `VALID_VERIFICATION_CODE`, and counts as no try."
+          },
+          "email" : {
+            "type" : [ "string", "null" ],
+            "description" : "The address the email was sent to, as typed (case and surrounding space do not matter). Send with `code`."
+          },
           "password" : {
             "type" : "string",
             "minLength" : 1
           },
           "token" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
+            "description" : "The token from the emailed link. Send it alone, without `email` or `code`.",
             "maxLength" : 256,
             "minLength" : 0
           }
         },
-        "required" : [ "password", "token" ]
+        "required" : [ "password" ]
+      },
+      "RevealedPartnerEntryResponse" : {
+        "allOf" : [ {
+          "$ref" : "#/components/schemas/PartnerEntryResponse"
+        }, {
+          "type" : "object",
+          "properties" : {
+            "authorMemberId" : {
+              "type" : "string",
+              "format" : "uuid"
+            },
+            "bondId" : {
+              "type" : "string",
+              "format" : "uuid"
+            },
+            "createdAt" : {
+              "type" : "string",
+              "format" : "date-time"
+            },
+            "date" : {
+              "type" : "string",
+              "format" : "date"
+            },
+            "favourited" : {
+              "type" : "boolean"
+            },
+            "id" : {
+              "type" : "string",
+              "format" : "uuid"
+            },
+            "image" : {
+              "description" : "The entry's photo, or null when it has none. Always null on an erased entry; a locked entry has no such field.",
+              "oneOf" : [ {
+                "$ref" : "#/components/schemas/EntryImageResponse"
+              }, {
+                "type" : "null"
+              } ]
+            },
+            "intendedAt" : {
+              "type" : "string",
+              "format" : "date-time"
+            },
+            "reaction" : {
+              "type" : [ "string", "null" ],
+              "description" : "The reaction on this entry: the one left by the member who did not write it, or null. Both members are sent the same value. Always null on an erased entry.",
+              "enum" : [ "HEART", "THANK_YOU", "SMILE", "MOVED", "ME_TOO", null ]
+            },
+            "text" : {
+              "type" : [ "string", "null" ]
+            },
+            "voice" : {
+              "description" : "The entry's voice note, or null when it has none. Always null on an erased entry; a locked entry has no such field.",
+              "oneOf" : [ {
+                "$ref" : "#/components/schemas/EntryVoiceResponse"
+              }, {
+                "type" : "null"
+              } ]
+            }
+          },
+          "required" : [ "authorMemberId", "bondId", "createdAt", "date", "favourited", "id", "image", "intendedAt", "reaction", "text", "voice" ]
+        } ],
+        "description" : "The other member's entry, with every field an entry has, when its `status` is `REVEALED`."
       },
       "SessionResponse" : {
         "type" : "object",
@@ -6117,7 +7312,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "createdAt", "current", "device", "id", "lastSeenAt" ]
       },
       "SessionsResponse" : {
         "type" : "object",
@@ -6128,7 +7324,8 @@
               "$ref" : "#/components/schemas/SessionResponse"
             }
           }
-        }
+        },
+        "required" : [ "sessions" ]
       },
       "StreakDayResponse" : {
         "type" : "object",
@@ -6137,11 +7334,22 @@
             "type" : "string",
             "format" : "date"
           },
+          "reason" : {
+            "type" : [ "string", "null" ],
+            "description" : "Why a FROZEN square is a rest day, and null on every other square. REST_DAY: a day the two did not both write on, covered by a banked freeze (\"we used a rest day\"). TIMEZONE_SHIFT: a date an approved time-zone change stepped over, which nobody could write on; no freeze was spent.",
+            "enum" : [ "REST_DAY", "TIMEZONE_SHIFT", null ]
+          },
+          "settlesAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time",
+            "description" : "The earliest an OPEN square's day can be decided, and null on every other square (issue #132): its end on the bond's calendar plus the late-entry grace (twelve hours by default). An entry written on that day and sent before this instant still counts for it. The day is decided (complete, a rest day or missed) on the next run of the close job after this, usually within minutes, and the square stays OPEN until then, so this can be in the past. An OPEN square is today, or an earlier day not yet decided."
+          },
           "status" : {
             "type" : "string",
             "enum" : [ "COMPLETE", "FROZEN", "SOLO", "MISSED", "OPEN" ]
           }
-        }
+        },
+        "required" : [ "date", "reason", "settlesAt", "status" ]
       },
       "StreakResponse" : {
         "type" : "object",
@@ -6168,6 +7376,16 @@
             "type" : [ "string", "null" ],
             "format" : "date"
           },
+          "lastRunBrokenOn" : {
+            "type" : [ "string", "null" ],
+            "format" : "date",
+            "description" : "The date of the missed day that ended the run lastRunLength counts, in the bond's calendar; that day is not part of the run. Null exactly when lastRunLength is."
+          },
+          "lastRunLength" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32",
+            "description" : "The length of the run the latest break ended, or null while no run has ended: \"your streak ended at 21 days\". A run ends on a missed day no rest day covered; a covered day, a day missed with no run, a suspended day and a day missed after the bond ended end nothing. It stays the last ended run while the next one grows, so the ended copy is for when current is 0 and this is not null. Never today: today can only extend a run. It is not longest, which is the longest run ever. At least 1."
+          },
           "longest" : {
             "type" : "integer",
             "format" : "int32"
@@ -6179,7 +7397,8 @@
             "type" : "integer",
             "format" : "int32"
           }
-        }
+        },
+        "required" : [ "current", "days", "freezeProgress", "freezesAvailable", "lastCompleteDate", "lastRunBrokenOn", "lastRunLength", "longest", "strictMode", "totalCompleteDays" ]
       },
       "SubmitEntryRequest" : {
         "type" : "object",
@@ -6211,6 +7430,100 @@
         },
         "required" : [ "text" ]
       },
+      "SubmittedPartnerEntryResponse" : {
+        "allOf" : [ {
+          "$ref" : "#/components/schemas/PartnerEntryResponse"
+        }, {
+          "type" : "object",
+          "properties" : {
+            "authorMemberId" : {
+              "type" : "string",
+              "format" : "uuid"
+            },
+            "bondId" : {
+              "type" : "string",
+              "format" : "uuid"
+            },
+            "createdAt" : {
+              "type" : "string",
+              "format" : "date-time"
+            },
+            "date" : {
+              "type" : "string",
+              "format" : "date"
+            },
+            "favourited" : {
+              "type" : "boolean"
+            },
+            "id" : {
+              "type" : "string",
+              "format" : "uuid"
+            },
+            "image" : {
+              "description" : "The entry's photo, or null when it has none. Always null on an erased entry; a locked entry has no such field.",
+              "oneOf" : [ {
+                "$ref" : "#/components/schemas/EntryImageResponse"
+              }, {
+                "type" : "null"
+              } ]
+            },
+            "intendedAt" : {
+              "type" : "string",
+              "format" : "date-time"
+            },
+            "reaction" : {
+              "type" : [ "string", "null" ],
+              "description" : "The reaction on this entry: the one left by the member who did not write it, or null. Both members are sent the same value. Always null on an erased entry.",
+              "enum" : [ "HEART", "THANK_YOU", "SMILE", "MOVED", "ME_TOO", null ]
+            },
+            "text" : {
+              "type" : [ "string", "null" ]
+            },
+            "voice" : {
+              "description" : "The entry's voice note, or null when it has none. Always null on an erased entry; a locked entry has no such field.",
+              "oneOf" : [ {
+                "$ref" : "#/components/schemas/EntryVoiceResponse"
+              }, {
+                "type" : "null"
+              } ]
+            }
+          },
+          "required" : [ "authorMemberId", "bondId", "createdAt", "date", "favourited", "id", "image", "intendedAt", "reaction", "text", "voice" ]
+        } ],
+        "description" : "The other member's entry, with every field an entry has, when its `status` is `SUBMITTED`."
+      },
+      "SupportMessageRequest" : {
+        "type" : "object",
+        "properties" : {
+          "body" : {
+            "type" : "string",
+            "description" : "At most 5000 characters (Unicode code points), not blank, U+0000 refused. Kept exactly as sent, read by a person, never shown back and never repeated in the acknowledgement email.",
+            "maxLength" : 5000,
+            "minLength" : 1
+          },
+          "subject" : {
+            "type" : "string",
+            "description" : "At most 120 characters (Unicode code points), not blank, U+0000 refused. Kept exactly as sent, read by a person, never shown back and never repeated in the acknowledgement email.",
+            "maxLength" : 120,
+            "minLength" : 1
+          }
+        },
+        "required" : [ "body", "subject" ]
+      },
+      "SupportMessageResponse" : {
+        "type" : "object",
+        "properties" : {
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        },
+        "required" : [ "createdAt", "id" ]
+      },
       "TodayPromptResponse" : {
         "type" : "object",
         "properties" : {
@@ -6221,7 +7534,8 @@
           "text" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "id", "text" ]
       },
       "TodayResponse" : {
         "type" : "object",
@@ -6237,19 +7551,8 @@
             } ]
           },
           "partnerEntry" : {
-            "discriminator" : {
-              "mapping" : {
-                "DELETED" : "#/components/schemas/EntryResponse",
-                "LOCKED" : "#/components/schemas/LockedEntryResponse",
-                "REVEALED" : "#/components/schemas/EntryResponse",
-                "SUBMITTED" : "#/components/schemas/EntryResponse"
-              },
-              "propertyName" : "status"
-            },
             "oneOf" : [ {
-              "$ref" : "#/components/schemas/EntryResponse"
-            }, {
-              "$ref" : "#/components/schemas/LockedEntryResponse"
+              "$ref" : "#/components/schemas/PartnerEntryResponse"
             }, {
               "type" : "null"
             } ]
@@ -6265,7 +7568,8 @@
           "streak" : {
             "$ref" : "#/components/schemas/TodayStreakResponse"
           }
-        }
+        },
+        "required" : [ "bondDay", "myEntry", "partnerEntry", "prompt", "streak" ]
       },
       "TodayStreakResponse" : {
         "type" : "object",
@@ -6285,7 +7589,8 @@
           "strictMode" : {
             "type" : "boolean"
           }
-        }
+        },
+        "required" : [ "current", "freezesAvailable", "longest", "strictMode" ]
       },
       "UploadIntentRequest" : {
         "type" : "object",
@@ -6325,7 +7630,8 @@
           "uploadUrl" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "expiresAt", "mediaId", "requiredHeaders", "uploadUrl" ]
       },
       "UserResponse" : {
         "type" : "object",
@@ -6350,18 +7656,28 @@
             "type" : "string",
             "enum" : [ "PENDING_VERIFICATION", "ACTIVE", "SUSPENDED", "PENDING_DELETION", "DELETED" ]
           }
-        }
+        },
+        "required" : [ "displayName", "email", "emailVerified", "id", "locale", "status" ]
       },
       "VerifyEmailRequest" : {
         "type" : "object",
+        "description" : "Exactly one of: `token`, the value after `?token=` in the emailed link; or `email` and `code`, the address the email was sent to and the six digits in it. Anything else is `422 VALIDATION_FAILED`.",
         "properties" : {
+          "code" : {
+            "type" : [ "string", "null" ],
+            "description" : "The six ASCII digits from the email (surrounding space is trimmed). Good for 15 minutes, until 5 wrong tries, and until a newer email is sent; spent with the link beside it. Another shape is `422 VALIDATION_FAILED` with the field's code `VALID_VERIFICATION_CODE`, and counts as no try."
+          },
+          "email" : {
+            "type" : [ "string", "null" ],
+            "description" : "The address the email was sent to, as typed (case and surrounding space do not matter). Send with `code`."
+          },
           "token" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
+            "description" : "The token from the emailed link. Send it alone, without `email` or `code`.",
             "maxLength" : 256,
             "minLength" : 0
           }
-        },
-        "required" : [ "token" ]
+        }
       }
     },
     "securitySchemes" : {

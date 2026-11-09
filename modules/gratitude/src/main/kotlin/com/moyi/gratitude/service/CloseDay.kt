@@ -102,8 +102,9 @@ internal class CloseDay(
     /**
      * @param now the caller's reading of the time: a reveal is due, or not, as of this
      * @param endedAsOf a day is closed only if it had ended by this instant. The job
-     * passes a minute before [now] (`DayCloser.SETTLE_MARGIN`); the default is for a
-     * caller that has no concurrent bond write to allow for.
+     * passes its late-entry grace and a minute before [now] (`LateEntryGrace`,
+     * `DayCloser.SETTLE_MARGIN`); the default is for a caller that has neither a late
+     * entry nor a concurrent bond write to allow for.
      */
     fun settle(
         dayId: BondDayId,

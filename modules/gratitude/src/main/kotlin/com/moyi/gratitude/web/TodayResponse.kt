@@ -7,6 +7,7 @@ import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.service.PromptView
 import com.moyi.gratitude.service.ShownMedia
 import com.moyi.gratitude.service.TodayView
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -76,7 +77,7 @@ internal data class TodayResponse(
     companion object {
         fun from(view: TodayView): TodayResponse =
             TodayResponse(
-                bondDay = BondDayResponse(date = view.date, status = view.status),
+                bondDay = BondDayResponse(date = view.date, status = view.status, settlesAt = view.settlesAt),
                 myEntry =
                     view.myEntry?.let {
                         EntryResponse.of(
@@ -133,12 +134,12 @@ internal data class TodayPromptResponse(
  * needing `@JsonTypeInfo` here — this type is only ever written to the
  * wire, never read back off it.
  *
- * **In the generated OpenAPI document this is a `oneOf` of the two,
- * discriminated on `status`.** springdoc resolves a sealed interface to its
- * branches by itself; `contracts.OpenApiConfiguration` adds the
- * discriminator. Each wire value names exactly one branch: `LOCKED` is
- * [LockedEntryResponse], and the entry's own statuses — `DELETED` included,
- * the wide tombstone — are [EntryResponse].
+ * **In the generated OpenAPI document this is a parent schema with one child
+ * per value of `status`** (#140, `contracts`' `PartnerEntryDocumentation`):
+ * `LOCKED` is [LockedEntryResponse], and each of the entry's own statuses,
+ * `DELETED` included, the wide tombstone, has a schema of its own with
+ * [EntryResponse]'s fields, because a generator cannot map several values to
+ * one class. The bytes on the wire are these two types' either way.
  */
 internal sealed interface PartnerEntryResponse {
     companion object {
@@ -192,4 +193,13 @@ internal sealed interface PartnerEntryResponse {
 internal data class BondDayResponse(
     val date: LocalDate,
     val status: BondDayStatus,
+    /**
+     * The earliest this day can be decided (BR-3a as amended 2026-11-08): its end on the bond's
+     * calendar plus the late-entry grace. An entry written on this day and sent before then
+     * counts for it; one sent after counts for the day it is sent. The close job decides the day
+     * on its next run after this: a lone entry is unlocked, a missed day counted and the streak
+     * moved only then.
+     * Never `null` here; the client compares it with its own clock only to word what it shows.
+     */
+    val settlesAt: Instant,
 )

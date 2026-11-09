@@ -88,6 +88,29 @@
               "label": "link expired"
             }
           ]
+        },
+        {
+          "id": "account.deletion",
+          "label": "Your account's deletion (FR-008: asked for with your password, cancellable for 14 days, then carried out)",
+          "states": [
+            {
+              "id": "NONE",
+              "label": "none (never asked for, or the last request cancelled)",
+              "initial": true
+            },
+            {
+              "id": "PENDING",
+              "label": "asked for, inside the 14 days: cancellable"
+            },
+            {
+              "id": "WINDOW_CLOSED",
+              "label": "the 14 days are over: no longer cancellable, carried out within the hour"
+            },
+            {
+              "id": "DELETED",
+              "label": "carried out: the account is anonymised and signs in no more"
+            }
+          ]
         }
       ]
     },
@@ -336,7 +359,7 @@
     },
     {
       "id": "event:day-ends",
-      "label": "the day ends and the close job runs",
+      "label": "the day ends, its twelve-hour late-entry grace runs out, and the close job runs",
       "actor": "system"
     },
     {
@@ -488,6 +511,16 @@
       "id": "event:operator-upholds-report",
       "label": "the operator upholds the report (moyi reports uphold delete|block)",
       "actor": "system"
+    },
+    {
+      "id": "event:deletion-window-closes",
+      "label": "the account deletion's 14 days run out",
+      "actor": "system"
+    },
+    {
+      "id": "event:account-deletion-runs",
+      "label": "the hourly account deletion job runs",
+      "actor": "system"
     }
   ],
   "everywhere": [
@@ -504,7 +537,8 @@
       "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/ProblemAuthenticationHandlers.kt#ErrorCode.UNAUTHENTICATED",
       "rowsAllowedIn": [
         "account",
-        "account.session"
+        "account.session",
+        "account.deletion"
       ]
     },
     {
@@ -564,144 +598,14 @@
       "note": "Sent with an If-None-Match that equals the bond's current ETag, the answer is 304 with no body, for as long as what you would be shown has not changed. Asserted by BondSettingsEndpointTest (rotating and expiring an invite invalidate a cached bond without a row version change) and BondTimezoneEndpointTest (proposal creation cancellation and expiry invalidate the other member's cached view)."
     },
     {
-      "endpoint": "POST /api/v1/bonds/{bondId}/leave",
-      "status": 415,
-      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike; it is what curl -X POST -d '' sends. Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes."
+      "endpoint": "POST /api/v1/bonds/{bondId}/members/other/report",
+      "status": 409,
+      "note": "IDEMPOTENCY_KEY_IN_FLIGHT, when a request with the same Idempotency-Key is still being processed: the shared idempotency interceptor's answer, which springdoc does not read off this route."
     },
     {
-      "endpoint": "POST /api/v1/bonds/{bondId}/block",
-      "status": 415,
-      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike; it is what curl -X POST -d '' sends. Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes."
-    },
-    {
-      "endpoint": "POST /api/v1/bonds",
-      "status": 415,
-      "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
-    },
-    {
-      "endpoint": "PATCH /api/v1/bonds/{bondId}",
-      "status": 415,
-      "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
-    },
-    {
-      "endpoint": "PUT /api/v1/bonds/{bondId}/members/me/settings",
-      "status": 415,
-      "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
-    },
-    {
-      "endpoint": "PATCH /api/v1/bonds/{bondId}/timezone",
-      "status": 415,
-      "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
-    },
-    {
-      "endpoint": "POST /api/v1/bonds/{bondId}/timezone/confirm",
-      "status": 415,
-      "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/register",
-      "status": 401,
-      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/verify-email",
-      "status": 401,
-      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/resend-verification",
-      "status": 401,
-      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/logout",
-      "status": 401,
-      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/forgot-password",
-      "status": 401,
-      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/reset-password",
-      "status": 401,
-      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/register",
-      "status": 503,
-      "note": "503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/register",
-      "status": 415,
-      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/verify-email",
-      "status": 410,
-      "note": "410 VERIFICATION_TOKEN_EXPIRED for a verification link that is past its 24 hours or was already used. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/verify-email",
-      "status": 415,
-      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/resend-verification",
-      "status": 415,
-      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/login",
-      "status": 401,
-      "note": "401 INVALID_CREDENTIALS for every refused sign-in: a wrong password, an unknown address, a locked account; and 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted (read from the code). The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/login",
-      "status": 503,
-      "note": "503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full; sign-in checks the password under the same limit as registration. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/login",
-      "status": 415,
-      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/refresh",
-      "status": 401,
-      "note": "401 REFRESH_TOKEN_INVALID for a refresh token that is unknown, expired or revoked, 401 TOKEN_REUSE_DETECTED for one already exchanged, and 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted (read from the code). The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/refresh",
-      "status": 415,
-      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/logout",
-      "status": 415,
-      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/forgot-password",
-      "status": 415,
-      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/reset-password",
-      "status": 410,
-      "note": "410 PASSWORD_RESET_TOKEN_EXPIRED for a reset link that is past its hour or was already used. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/reset-password",
-      "status": 503,
-      "note": "503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full; the link is not spent. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
-    },
-    {
-      "endpoint": "POST /api/v1/auth/reset-password",
-      "status": 415,
-      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+      "endpoint": "POST /api/v1/bonds/{bondId}/members/other/report",
+      "status": 413,
+      "note": "MALFORMED_REQUEST, for a body over one mebibyte: the shared idempotency interceptor refuses it before it is read, which springdoc does not read off this route."
     }
   ]
 }

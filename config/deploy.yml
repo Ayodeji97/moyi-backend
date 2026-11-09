@@ -229,15 +229,32 @@ env:
     MOYI_IDENTITY_VERIFICATION_LINK_BASE_URL: https://getmoyi.app/verify
     MOYI_IDENTITY_VERIFICATION_RESET_LINK_BASE_URL: https://getmoyi.app/reset-password
     MOYI_BOND_INVITE_LINK_BASE_URL: https://getmoyi.app/i
+    # The legal documents (FR-103, ADR-0056): required, no default. Every
+    # consent row records these versions, and changing one asks every person to
+    # accept again. NOT YET PUBLISHED: site/ has no /terms, /privacy or
+    # /data-processing page (2026-11-08), so these addresses are 404 until the
+    # owner publishes the documents. Until then each version is the sentinel
+    # "unpublished", never a date-like placeholder: a sign-up in the gap is then
+    # recorded as accepting "unpublished", and setting the real versions at
+    # publication asks every such person to accept again (review of #148).
+    # Real versions must be quoted: YAML reads a bare 2026-11-08 as a date.
+    # Shared, not the web role's: the media worker binds the same properties and
+    # would refuse to start without them.
+    MOYI_LEGAL_TERMS_VERSION: "unpublished"
+    MOYI_LEGAL_TERMS_URL: https://getmoyi.app/terms
+    MOYI_LEGAL_PRIVACY_VERSION: "unpublished"
+    MOYI_LEGAL_PRIVACY_URL: https://getmoyi.app/privacy
+    MOYI_LEGAL_SUMMARY_VERSION: "unpublished"
+    MOYI_LEGAL_SUMMARY_URL: https://getmoyi.app/data-processing
     # getmoyi.app is verified in Resend (SPF, DKIM and DMARC pass).
     MOYI_NOTIFICATION_EMAIL_FROM: Moyi <hello@getmoyi.app>
     # Since slice N3 (#100) production requests pushes, and each one is written
     # to the log, not sent, until there is a Firebase project (ADR-0044). The
     # log line names the category and the bond, never the token, and the
-    # ledger settles it as "not-sent:log", never as a delivery. To send:
-    # remove this line and add MOYI_NOTIFICATION_PUSH_FCM_PROJECT_ID
-    # here and _CLIENT_EMAIL and _PRIVATE_KEY_PEM as secrets; without them the
-    # default provider, FCM, refuses to start.
+    # ledger settles it as "not-sent:log", never as a delivery. To send, follow
+    # ops/notification/README.md: FCM is switched on in the web role's env,
+    # and this shared line STAYS, because the media worker builds a push sender
+    # too, holds no secrets, and on FCM would refuse to start.
     MOYI_NOTIFICATION_PUSH_PROVIDER: log
     # No entry is embedded for semantic search until the owner has chosen the
     # provider by the eval and holds its key (ADR-0054). `none` sends no word

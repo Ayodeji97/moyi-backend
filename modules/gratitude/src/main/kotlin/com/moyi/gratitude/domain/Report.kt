@@ -3,7 +3,8 @@ package com.moyi.gratitude.domain
 import java.util.UUID
 
 /**
- * Why a member reports their partner's entry (FR-100, ADR-0053 decision 3).
+ * Why a member reports their partner's entry, or their partner (FR-100, ADR-0053 decision 3, and its amendment
+ * for #127: the same five for both targets).
  * A small closed set: doc 26 §6 proposed four values that mixed what was
  * reported with why (OQ-26b, open), and the owner's ruling Q16 names the
  * cases a person must be able to act on. What is reported is the entry, with
@@ -96,6 +97,22 @@ internal data class EntryReport(
     val entryId: EntryId,
     val bondId: UUID,
     val reporterMemberId: UUID,
+    val reason: ReportReason,
+)
+
+/**
+ * A member's report of the other member of their bond (FR-100's member half,
+ * ADR-0053 as amended for #127), as the reporter is told of it: its id and the
+ * reason. The same five reasons as an entry report: "how they're treating me"
+ * (doc 26 §6, T-09) is [ReportReason.HARASSMENT]. Both members are named by
+ * their `bond_members` ids in [bondId], never a user id. It holds nothing back:
+ * a person has no photo.
+ */
+internal data class MemberReport(
+    val id: UUID,
+    val bondId: UUID,
+    val reporterMemberId: UUID,
+    val reportedMemberId: UUID,
     val reason: ReportReason,
 )
 

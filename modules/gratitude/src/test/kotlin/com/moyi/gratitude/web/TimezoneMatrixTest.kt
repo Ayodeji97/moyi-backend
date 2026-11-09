@@ -530,8 +530,8 @@ internal class TimezoneMatrixTest(
      * The crossing is 6c's. The 16th's row was opened before the change, so
      * it ends 09-16T10:00Z while the calendar's 16th now runs to 09-17T11:00Z.
      * At 09-17T12:00Z (01:00 on Pago Pago's 17th) Bea sends a draft with
-     * `intendedAt` 09-16T20:00Z — on the merged 16th, 16 hours back, inside
-     * BR-3a's window. The 16th is unsettled when the submission looks, so it
+     * `intendedAt` 09-17T01:00Z — on the merged 16th, 11 hours back, inside
+     * BR-3a's twelve-hour window. The 16th is unsettled when the submission looks, so it
      * resolves there and queues on the row's lock, which this test holds on
      * its own connection, standing in for `CloseDay`. The close stamps the
      * day `SOLO` and commits. The submission then holds a settled day whose
@@ -551,7 +551,7 @@ internal class TimezoneMatrixTest(
         clock.set(Instant.parse("2026-09-17T12:00:00Z"))
 
         withDayLockHeld("2026-09-16") { holderPid, closeAndCommit ->
-            val submission = pool.submit<MockHttpServletResponse> { submit(bea, intendedAt = "2026-09-16T20:00:00Z") }
+            val submission = pool.submit<MockHttpServletResponse> { submit(bea, intendedAt = "2026-09-17T01:00:00Z") }
             await().atMost(Duration.ofSeconds(10)).until { submission.isDone || blockedBehind(holderPid) > 0 }
             // Done already would mean it never queued on the 16th's row.
             submission.isDone shouldBe false

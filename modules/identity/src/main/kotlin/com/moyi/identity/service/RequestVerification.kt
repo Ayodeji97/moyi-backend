@@ -34,20 +34,29 @@ internal class RequestVerification(
     private val ids: IdGenerator,
     private val clock: Clock,
     private val events: ApplicationEventPublisher,
+    private val codes: VerificationCodeIssuer,
 ) {
     fun request(
         user: User,
         purpose: VerificationPurpose,
     ) {
         val now = clock.instant()
-        // The secret exists here, in the event, and in the email. Never in a row.
+        // A new email retires the code in the last one (#135); its link stays live
+        // (ADR-0018 decision 6, amended 2026-11-08). Under a per-person lock, so two
+        // emails asked for at once cannot both hold a code.
+        tokens.retireCodes(user.id, purpose)
+        // The secret and the code exist here, in the event, and in the email. Never in a row.
         val secret = generator.verificationSecret()
+        val id = ids.timeOrdered()
+        val code = codes.issue(id, purpose)
         val token =
             VerificationToken.issue(
-                id = ids.timeOrdered(),
+                id = id,
                 userId = user.id,
                 purpose = purpose,
                 secret = secret,
+                codeHash = code.hash,
+                codeTtl = code.ttl,
                 now = now,
             )
         tokens.insert(token)
@@ -62,6 +71,8 @@ internal class RequestVerification(
                 tokenId = token.id,
                 secret = secret,
                 expiresAt = token.expiresAt,
+                code = code.code,
+                codeExpiresAt = token.codeExpiresAt!!,
             ),
         )
     }

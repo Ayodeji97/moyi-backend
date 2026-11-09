@@ -27,6 +27,18 @@ enum class RateLimitBucket(
     val subject: Subject,
     val capacity: Long,
     val period: Duration,
+    /**
+     * What this bucket's consumer does when Redis cannot be reached
+     * ([RateLimitDecision.Unavailable]). `false`, the default and every bucket
+     * but one: the request goes through (ADR-0023, fail-open). `true`: the
+     * request is refused until Redis answers again, because this bucket is the
+     * only bound on something that can be guessed, and nothing else holds that
+     * bound while it is gone (ADR-0023, amended 2026-11-09). Read by the bucket's
+     * one consumer, which knows what the refusal is called; the interceptor never
+     * sees such a bucket, because only an `EMAIL` bucket fails closed and those
+     * are consumed in services.
+     */
+    val failsClosed: Boolean = false,
 ) {
     /** FR-012: 5 attempts / 15 min / account. Counts unknown addresses too, so it is not an oracle (T-18). */
     AUTH_LOGIN_EMAIL("auth:login:email", Subject.EMAIL, 5, Duration.ofMinutes(15)),
@@ -48,6 +60,27 @@ enum class RateLimitBucket(
 
     /** ADR-0023 addition, same reasoning as [AUTH_RESET_IP]. */
     AUTH_RESEND_IP("auth:resend:ip", Subject.IP, 20, Duration.ofHours(1)),
+
+    /**
+     * #135, ADR-0023 amended 2026-11-08: ten typed codes a day per address, on `verify-email`
+     * and `reset-password` together. A code is one of 10^6 and five wrong ones burn it, but
+     * codes can be asked for again; this is what bounds the guesses at one account to ten a
+     * day whatever is re-requested: at most 10 / 10^6 = 1 in 100,000 a day. Counted for every
+     * address alike, so the 429 is no oracle.
+     *
+     * **Fails closed** (owner's ruling, 2026-11-09, ADR-0023 amended): with Redis down the
+     * ten a day is gone and only the five wrong tries per code remain, which a re-request
+     * resets; so a typed code is refused, `503 CODE_CHECK_UNAVAILABLE`, until Redis is back.
+     * The link beside it is 256 bits, needs no such bound, and keeps working.
+     */
+    AUTH_CODE_EMAIL("auth:code:email", Subject.EMAIL, 10, Duration.ofDays(1), failsClosed = true),
+
+    /**
+     * #135, ADR-0023 amended 2026-11-08: twenty presentations an hour per client address,
+     * shared by `verify-email` and `reset-password`, links and codes alike, as the invite
+     * endpoints share theirs. Bounds one address spraying codes across many accounts.
+     */
+    AUTH_CODE_IP("auth:code:ip", Subject.IP, 20, Duration.ofHours(1)),
 
     /** Doc 06 §4: "`invite:create` (per user) 10 / day". Creating one revokes the outstanding one, so this bounds churn. */
     INVITE_CREATE_USER("invite:create:user", Subject.USER, 10, Duration.ofDays(1)),
@@ -96,6 +129,20 @@ enum class RateLimitBucket(
      * its own because a person types into it, and this is asked a question.
      */
     REMEMBER_USER("remember:user", Subject.USER, 30, Duration.ofHours(1)),
+
+    /**
+     * Doc 06 §4: "`support:create` (per user) 5 / day" (FR-102, ADR-0057). Each message puts a ticket in
+     * a person's queue and an email in the sender's mailbox, so this bounds both.
+     */
+    SUPPORT_CREATE_USER("support:create:user", Subject.USER, 5, Duration.ofDays(1)),
+
+    /**
+     * ADR-0058 addition (doc 06 §4 names no bucket for it): five account-deletion requests an hour
+     * per user. Each verifies the password, so this is what bounds the guesses a held session can
+     * make at it; a wrong one is not counted towards the sign-in lock, which a thief could
+     * otherwise use to keep the owner out of the account they need to cancel from.
+     */
+    ACCOUNT_DELETION_USER("account:deletion:user", Subject.USER, 5, Duration.ofHours(1)),
 
     /** Doc 06 §4: "global authenticated 120 / min", per user, on every request that carries a valid token. */
     AUTHENTICATED("authenticated:user", Subject.USER, 120, Duration.ofMinutes(1)),

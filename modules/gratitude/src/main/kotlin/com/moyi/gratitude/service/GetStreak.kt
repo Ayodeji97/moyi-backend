@@ -2,6 +2,7 @@ package com.moyi.gratitude.service
 
 import com.moyi.bond.api.BondMembership
 import com.moyi.gratitude.domain.DayOutcome
+import com.moyi.gratitude.domain.LateEntryGrace
 import com.moyi.gratitude.domain.StreakCell
 import com.moyi.gratitude.domain.StreakDay
 import com.moyi.gratitude.domain.StreakRules
@@ -22,6 +23,9 @@ internal data class StreakView(
     val strictMode: Boolean,
     val totalCompleteDays: Int,
     val lastCompleteDate: LocalDate?,
+    /** [StreakState.lastRunLength]: the run the latest break ended. Today never changes it. */
+    val lastRunLength: Int?,
+    val lastRunBrokenOn: LocalDate?,
 )
 
 internal data class StreakDetail(
@@ -34,17 +38,37 @@ internal data class StreakDetail(
  * (spec §5.1, §5.2, §6.5).
  *
  * **What is stored is the run through the last day the close job has
- * evaluated; what is shown adds today, when today is complete** (FR-071:
- * consecutive complete days "ending at today or yesterday"). A couple at
- * thirty who have both written today see thirty-one today, not at midnight.
- * Today is added only when it directly follows the last evaluated day — or
- * is the bond's first day as two people, with nothing evaluated yet. If
- * yesterday has not been evaluated, the job is a minute or a run behind, and
- * the stored run is shown as it is until it has caught up.
+ * evaluated; what is shown adds the undecided days that have already
+ * revealed** (FR-071: consecutive complete days "ending at today or
+ * yesterday"). An undecided day is today, or an earlier day still inside its
+ * late-entry grace (BR-3a as amended 2026-11-08), or one the close job has
+ * not yet evaluated: the job settles a day only once the grace
+ * (`moyi.gratitude.days.late-entry-grace`) has run out, on its next run after
+ * that, so until then yesterday is not evaluated either, and it stays
+ * undecided until it is, whatever the clock says (review M1;
+ * [com.moyi.gratitude.domain.LateEntryGrace.undecidedUntil]). A couple at thirty who both wrote yesterday and today see
+ * thirty-two this morning, not thirty until yesterday settles and thirty-one
+ * after. A revealed day is complete whatever the close later decides, so this
+ * is the number the job will store. They are added oldest first, only while
+ * each directly follows the last evaluated day (or the one added before it),
+ * or is the bond's first day as two people with nothing evaluated yet, and
+ * only while each has revealed: the first undecided day that has not stops
+ * the walk, because the run cannot pass a day that is still open. A
+ * day with no row that the job has not yet written stops the walk too: it was
+ * missed by nobody's writing, and nothing past it can be added until the job
+ * says what it was.
  *
  * **Nothing else is worked out at read time.** A run that lapsed reads zero
  * because the close job wrote the missed days and evaluated them, not because
  * a read noticed the date. One place decides the streak.
+ *
+ * **Read in this order: the stored run, the last evaluated date, then the
+ * squares** ([pending]). The reads are separate statements, and the close job
+ * may evaluate a day between them. In this order that can only leave the
+ * number one day short for a moment, never count a day twice: a day evaluated
+ * after the run was read is either already in the last evaluated date, so the
+ * walk starts after it, or not yet, and then it is not in the stored run
+ * either, and the walk adds it once if it is complete.
  *
  * **The calendar starts on the day the bond became two people.** Earlier
  * days have a row only where the creator wrote while waiting, and are
@@ -56,46 +80,117 @@ internal class GetStreak(
     private val streaks: StreakStore,
     private val calendar: StreakCalendar,
     private val clock: Clock,
+    private val grace: LateEntryGrace,
 ) {
+    /**
+     * The run as stored, the last evaluated date, and the undecided days that have revealed
+     * and extend it, oldest first — read in that order (see the class KDoc).
+     */
+    data class Pending(
+        val stored: StreakState,
+        val lastEvaluated: LocalDate?,
+        val complete: List<LocalDate>,
+    )
+
     @Transactional(readOnly = true)
     fun detail(membership: BondMembership): StreakDetail {
-        val today = today(membership)
+        val now = clock.instant()
+        val today = todayOf(membership, now)
+        val undecided = grace.undecidedDaysOf(membership, now)
         // An ended bond's calendar ends where the bond did, and stays: its
         // record is kept "permanently" (doc 04 §8.3), not until it scrolls
         // off the end of a window that follows the clock.
         val last = membership.endedAt?.let(membership.anchorTimeline::dateAt)?.takeIf { it.isBefore(today) } ?: today
         val from = maxOf(last.minusDays(CALENDAR_DAYS - 1), joiningDate(membership) ?: last.plusDays(1))
+        val state = streaks.find(membership.bondId) ?: StreakState.NONE
+        val lastEvaluated = streaks.lastEvaluatedDate(membership.bondId)
         // OPEN is "this day can still be completed". A bond that ended today
-        // with one entry in keeps that day's row unsettled until midnight;
-        // nobody can write on it, so it is not drawn as open in the meantime.
+        // with one entry in keeps that day's row unsettled until its grace has
+        // run out; nobody can write on it, so it is not drawn as open in the meantime.
         val stored =
             calendar
-                .between(membership.bondId, from, last, today)
+                .between(membership.bondId, from, last, undecided)
                 .filter { membership.isOpen || it.cell != StreakCell.OPEN }
-        // Today has a row only once somebody has written. Drawn only then,
-        // the square's presence would say that somebody has; so a bond two
-        // people can write in always has today's square, and it says OPEN.
-        val unwritten = last == today && !from.isAfter(today) && membership.isOpen && stored.lastOrNull()?.date != today
-        val days = if (unwritten) stored + StreakDay(today, StreakCell.OPEN) else stored
-        val todayComplete = days.lastOrNull()?.takeIf { it.date == today }?.cell == StreakCell.COMPLETE
-        return StreakDetail(view(membership, today, todayComplete), days)
+        // An undecided day has a row only once somebody has written. Drawn only
+        // then, the square's presence would say that somebody has; so a bond two
+        // people can write in always has today's square, and yesterday's while
+        // its grace runs, and each says OPEN until it is complete.
+        val drawn = stored.mapTo(mutableSetOf()) { it.date }
+        val unwritten =
+            if (membership.isOpen) {
+                undecided
+                    .filterKeys { !it.isBefore(from) && !it.isAfter(last) && it !in drawn }
+                    .map { (date, settlesAt) -> StreakDay(date, StreakCell.OPEN, settlesAt = settlesAt) }
+            } else {
+                emptyList()
+            }
+        val days = (stored + unwritten).sortedBy { it.date }
+        val pending = Pending(state, lastEvaluated, walk(membership, lastEvaluated, days))
+        return StreakDetail(shown(membership, pending), days)
     }
 
-    /** The streak for [today]. [todayComplete]: both have written today. Reads; the caller owns the transaction. */
-    fun view(
-        membership: BondMembership,
-        today: LocalDate,
-        todayComplete: Boolean,
-    ): StreakView {
-        val stored = streaks.find(membership.bondId) ?: StreakState.NONE
-        // Today, by the same rule the close job will apply to it tonight, so
-        // every number moves together: on a fourteenth day the freeze shows
-        // as earned beside the fourteen, not at midnight.
-        val state =
-            if (countsToday(membership, today, todayComplete)) {
-                StreakRules.step(stored, today, DayOutcome.COMPLETE, membership.strictMode).state
+    /** The streak as `GET /today` shows it: [detail]'s numbers, without the calendar. Reads; the caller owns the transaction. */
+    fun view(membership: BondMembership): StreakView = shown(membership, pending(membership))
+
+    /**
+     * The stored run and the undecided days that extend it: the one rule for what is added,
+     * which [view] applies to the numbers and `GetMilestones` to the milestones (ADR-0041
+     * decision 4), so that the two screens never disagree. A day is added once it has
+     * **revealed** — a day both have written that waits for its reveal time is not complete yet.
+     * Reads; the caller owns the transaction.
+     */
+    fun pending(membership: BondMembership): Pending {
+        val now = clock.instant()
+        val undecided = grace.undecidedDaysOf(membership, now)
+        val state = streaks.find(membership.bondId) ?: StreakState.NONE
+        val lastEvaluated = streaks.lastEvaluatedDate(membership.bondId)
+        // From the first day not in the stored run to today: every day the job has not
+        // evaluated, which is wider than the days the clock calls undecided when the job is
+        // behind (review M1).
+        val first = firstToWalk(membership, lastEvaluated)
+        val today = undecided.keys.lastOrNull()
+        val squares =
+            if (first == null || today == null || first.isAfter(today)) {
+                emptyList()
             } else {
-                stored
+                calendar.between(membership.bondId, first, today, undecided)
+            }
+        return Pending(state, lastEvaluated, walk(membership, lastEvaluated, squares))
+    }
+
+    /** The date of the bond's last evaluated day, read now: what `GetMilestones` trims its pending days by. */
+    fun lastEvaluatedDate(membership: BondMembership): LocalDate? = streaks.lastEvaluatedDate(membership.bondId)
+
+    /** The undecided [squares] that extend the run past [lastEvaluated]: see the class KDoc. */
+    private fun walk(
+        membership: BondMembership,
+        lastEvaluated: LocalDate?,
+        squares: List<StreakDay>,
+    ): List<LocalDate> {
+        val first = firstToWalk(membership, lastEvaluated) ?: return emptyList()
+        // A square before `first` is already in the stored run (a day the job settled by a clock
+        // ahead of this one's), and is skipped; the first that does not extend the run stops it.
+        // A square after `first` is undecided — not evaluated when the last evaluated date was
+        // read — or was evaluated since; either way the stored run, read before that date, does
+        // not hold it, so it is added once, if it is complete.
+        return squares
+            .sortedBy { it.date }
+            .dropWhile { it.date.isBefore(first) }
+            .withIndex()
+            .takeWhile { (index, square) -> square.date == first.plusDays(index.toLong()) && square.cell == StreakCell.COMPLETE }
+            .map { it.value.date }
+    }
+
+    private fun shown(
+        membership: BondMembership,
+        pending: Pending,
+    ): StreakView {
+        // Each added day by the same rule the close job will apply to it once
+        // it settles, so every number moves together: on a fourteenth day the
+        // freeze shows as earned beside the fourteen, not hours later.
+        val state =
+            pending.complete.fold(pending.stored) { run, date ->
+                StreakRules.step(run, date, DayOutcome.COMPLETE, membership.strictMode).state
             }
         return StreakView(
             current = state.current,
@@ -105,34 +200,22 @@ internal class GetStreak(
             strictMode = membership.strictMode,
             totalCompleteDays = state.totalCompleteDays,
             lastCompleteDate = state.lastCompleteDate,
+            lastRunLength = state.lastRunLength,
+            lastRunBrokenOn = state.lastRunBrokenOn,
         )
     }
 
     /**
-     * Whether a complete [today] is added to what is stored: the one rule for it, which [view]
-     * applies to the numbers and `GetMilestones` to the milestones (ADR-0041 decision 4), so that
-     * the two screens never disagree about today. [todayComplete]: today's square is `COMPLETE`,
-     * which is to say the day has **revealed** — a day both have written that waits for its
-     * reveal time is not complete yet. And today must directly follow the last evaluated day:
-     * see the class KDoc.
+     * The first day the stored run does not hold: the day after [lastEvaluated], or the joining
+     * day if later; `null` before the pairing.
      */
-    fun countsToday(
+    private fun firstToWalk(
         membership: BondMembership,
-        today: LocalDate,
-        todayComplete: Boolean,
-    ): Boolean = todayComplete && todayFollows(membership, today)
-
-    /** Whether a complete today extends the stored run: see the class KDoc. An evaluated today is already in it. */
-    private fun todayFollows(
-        membership: BondMembership,
-        today: LocalDate,
-    ): Boolean =
-        when (val last = streaks.lastEvaluatedDate(membership.bondId)) {
-            null -> joiningDate(membership) == today
-            else -> last == today.minusDays(1) || (last.isBefore(today) && joiningDate(membership) == today)
-        }
-
-    private fun today(membership: BondMembership): LocalDate = todayOf(membership, clock)
+        lastEvaluated: LocalDate?,
+    ): LocalDate? {
+        val joining = joiningDate(membership)
+        return if (lastEvaluated == null || (joining != null && joining.isAfter(lastEvaluated))) joining else lastEvaluated.plusDays(1)
+    }
 
     private fun joiningDate(membership: BondMembership): LocalDate? = membership.activeSince?.let(membership.anchorTimeline::dateAt)
 

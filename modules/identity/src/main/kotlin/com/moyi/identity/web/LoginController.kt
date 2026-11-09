@@ -9,7 +9,6 @@ import com.moyi.identity.service.LoginCommand
 import com.moyi.identity.service.LoginUser
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
-import jakarta.validation.constraints.Pattern
 import jakarta.validation.constraints.Size
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -60,13 +59,14 @@ internal data class LoginRequest(
 }
 
 /**
- * Doc 04's device, as the wire sees it. `platform` is a string with a
- * pattern rather than the enum, so that an unknown value is a 422 naming
- * the field (`device.platform`) and not a 400 "could not read the body".
+ * Doc 04's device, as the wire sees it. `platform` is a string that the
+ * domain's enum judges ([ValidDevicePlatform]) rather than the enum itself,
+ * so that an unknown value is a 422 naming the field (`device.platform`) and
+ * not a 400 "could not read the body". The contract lists the enum's names.
  */
 internal data class DeviceRequest(
     @field:NotBlank
-    @field:Pattern(regexp = "ANDROID|IOS|WEAR", message = "must be one of ANDROID, IOS, WEAR")
+    @field:ValidDevicePlatform
     val platform: String,
     @field:NotBlank
     @field:Size(max = Device.MAX_VERSION_LENGTH)

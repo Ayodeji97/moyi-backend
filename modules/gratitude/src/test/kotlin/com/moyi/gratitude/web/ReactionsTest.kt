@@ -1281,8 +1281,8 @@ internal class ReactionsTest(
         /** The bond's date at [NOW]. */
         const val DATE = "2026-09-15"
 
-        /** Two minutes after the 15th ended in Lagos: past the close job's margin. */
-        val MIDNIGHT: Instant = Instant.parse("2026-09-15T23:02:00Z")
+        /** When the 15th settles in Lagos: its twelve-hour late-entry grace and two minutes after it ends, past the close job's margin. */
+        val MIDNIGHT: Instant = Instant.parse("2026-09-16T11:02:00Z")
         const val DAY = 86_400L
         const val MEGABYTE = 1024 * 1024
 

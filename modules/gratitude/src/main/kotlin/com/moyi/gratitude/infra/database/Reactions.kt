@@ -146,6 +146,16 @@ internal class Reactions(
     }
 
     /**
+     * Every reaction [memberIds] left, on the partner's entries (ADR-0058 decision 8, ADR-0037's
+     * Phase 5 item): an account deletion takes the person's acknowledgements with them, where a
+     * withdrawal leaves them (ADR-0037 decision 9), because nothing has to stay discreet here.
+     */
+    fun removeAllBy(memberIds: Collection<UUID>) {
+        if (memberIds.isEmpty()) return
+        jdbc.update("DELETE FROM reactions WHERE member_id = ANY (?)", memberIds.toTypedArray())
+    }
+
+    /**
      * The one reaction on each of [entryIds] that has one. One query, and
      * none at all for an empty collection.
      *

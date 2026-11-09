@@ -52,7 +52,8 @@ import java.util.Base64
  *
  * **What a phone is sent.** Localisation keys chosen by category for both
  * platforms (`title_loc_key`/`body_loc_key` on Android, `title-loc-key`/
- * `loc-key` on iOS), `data: {bondId, kind}`, and a collapse key of category
+ * `loc-key` on iOS), the Android channel of the category ([channelId]),
+ * `data: {bondId, kind}`, and a collapse key of category
  * and Bond, so that a push held back and then sent replaces its predecessor
  * rather than stacking (spec N1, Q6). No text authored here, no name.
  *
@@ -305,9 +306,19 @@ internal class FcmPushSender(
          * string tables (Q6); the server sends only the keys.
          */
         fun locKeys(category: PushCategory): Pair<String, String> {
-            val stem = "push_${category.name.lowercase()}"
+            val stem = "push_${channelId(category)}"
             return "${stem}_title" to "${stem}_body"
         }
+
+        /**
+         * The Android notification channel a push of [category] is shown in: the
+         * category's name in lower case (`reveal`, `reminder`, `on_this_day`…).
+         * The client creates one channel per category with exactly these ids, so a
+         * person can mute one kind and keep another (doc 13 §7, issue #134). A push
+         * naming a channel the phone has not created falls back to the app's default
+         * channel, so a renamed category is a client release, never a silent change.
+         */
+        fun channelId(category: PushCategory): String = category.name.lowercase()
 
         /** The same for every phone of a category and Bond, so a later push replaces an earlier one. */
         fun collapseKey(message: PushMessage): String = "${message.category.name}:${message.bondId}"
@@ -336,7 +347,12 @@ internal class FcmPushSender(
                             mapOf(
                                 "collapse_key" to collapse,
                                 "ttl" to "${remaining}s",
-                                "notification" to mapOf("title_loc_key" to title, "body_loc_key" to body),
+                                "notification" to
+                                    mapOf(
+                                        "title_loc_key" to title,
+                                        "body_loc_key" to body,
+                                        "channel_id" to channelId(message.category),
+                                    ),
                             ),
                         "apns" to
                             mapOf(

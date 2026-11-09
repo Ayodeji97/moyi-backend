@@ -1,6 +1,6 @@
 # ADR-0022 — Password reset: a verification token with a different purpose, and a different page
 
-**Status:** Accepted · **Date:** 2026-09-23
+**Status:** Accepted · **Date:** 2026-09-23 · **Amended:** 2026-11-08 (reset by a six-digit code, #135); 2026-11-09 (a code is refused while Redis is down)
 
 ## Context
 
@@ -37,3 +37,16 @@ This slice arrived a phase early — it was Phase 1's last item and was built al
 ## Revisit when
 
 FR-005 (email change) arrives — a third purpose, a third page, and the first case where the *new* address and the *old* address both need an email. FR-012 lands — bound `forgot-password` per email.
+
+## Amendment — 2026-11-08: reset by a six-digit code (#135)
+
+The reset email carries the same six-digit code as the verification email, on the same row as its link, by ADR-0018's amendment of the same date; everything there applies, with `PASSWORD_RESET` for the purpose and `422 PASSWORD_RESET_TOKEN_INVALID` for every refusal of a code (never 410).
+
+**1. `POST /auth/reset-password` takes `{token, password}` or `{email, code, password}`.** The new password is judged at the edge first (shape and breach corpus, decision 4), so a refused password neither spends the code nor counts against it.
+
+**2. Three steps, where the link has two.** The code is checked, and a wrong one counted and committed, in a short transaction under the row lock; the Argon2id hash is computed outside any transaction, as before; `ApplyPasswordReset` then spends the row by id with the conditional `UPDATE`, and does what decision 4 lists. Between the check and the spend the row is not held, because holding a row lock across an Argon2id hash would hold a connection for it: a link presented in that gap spends the row first, and the code path answers its one 422. `ApplyPasswordReset.apply` now takes the token it was handed and returns `false` when it lost that race, so each path answers in its own terms (410 for the link, 422 for the code).
+
+**3. A reset takes back the code of any later reset email**, since the password it would reset has just changed. Earlier reset *links* still stay live until their hour, as decision 3's consequence said; that is unchanged.
+
+**4. A forgot-password email is a new code.** It retires the previous reset code; three an hour per address (FR-012) bounds how often, and ADR-0023's `auth:code:email` bounds how many codes may be tried. *(Amended 2026-11-09: that bucket fails closed, so with Redis unreachable `{email, code, password}` is `503 CODE_CHECK_UNAVAILABLE` before anything is read or hashed, and `{token, password}` still resets; ADR-0023.)*
+
