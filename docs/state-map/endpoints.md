@@ -20,7 +20,7 @@ Any of these can follow any endpoint below. They are not repeated under each one
 | 429 | `RATE_LIMITED` | A rate-limit bucket is empty; Retry-After says when to try again. The buckets are kept in Redis and fail open: if Redis cannot be reached every request is let through, with no X-RateLimit headers, and nothing is 429 until it is back. |
 | 500 | `INTERNAL_ERROR` | Anything unanticipated. It never carries the underlying message. |
 
-`401 UNAUTHENTICATED` is also a row in the regions `account` and `account.session` and `account.deletion`, where it depends on the state.
+`401 UNAUTHENTICATED` is also a row in the regions `account` and `account.session` and `account.deletion` and `account.export`, where it depends on the state.
 
 `422 VALIDATION_FAILED` is also a row in the regions `media`, where it depends on the state.
 
@@ -511,6 +511,78 @@ curl -X DELETE "$API/me/deletion-request" -H "Authorization: Bearer $TOKEN"
 | `account.deletion` | `PENDING` |  | 204 → `NONE` | Called off. GET /me says null again, and a new request starts new windows. | FR-008, ADR-0058 | smoke |
 | `account.deletion` | `WINDOW_CLOSED` |  | 404 `NOT_FOUND` | Too late: from cancellableUntil on it cannot be cancelled. One 404 for this and for nothing pending, because you can do nothing about either. | FR-008, ADR-0058 | test |
 | `account.deletion` | `DELETED` |  | 401 `UNAUTHENTICATED` | The account is gone, and so is every token of it. | FR-008, ADR-0058, ADR-0019 §4 | test |
+
+### POST /me/export
+
+ask for a copy of your data
+
+**Needs:** an access token.
+
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After). A request that starts a new export also spends account:export:user, three a day (a repeat while one is being prepared spends none): the fourth new one is 429 with Retry-After
+
+**Try it:**
+
+```sh
+curl -X POST "$API/me/export" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `account.export` | `NONE` |  | 202 → `PREPARING` | 202 PREPARING with the export's id and requestedAt. Nothing is built yet; the job builds it, usually within the minute. Allowed whatever your bonds' state, ended or left included (BR-9). | FR-009, FR-094, ADR-0059 | smoke |
+| `account.export` | `PREPARING` |  | 202 stays | The same export: 202 with the same id. A repeat spends none of the three a day. | FR-009, FR-094, ADR-0059 | smoke |
+| `account.export` | `READY` |  | 202 → `PREPARING` | A new export, with a new id: the archive is a copy as of when it is built. The READY one stays downloadable until its expiresAt. | FR-009, FR-094, ADR-0059 | test |
+| `account.export` | `EXPIRED` |  | 202 → `PREPARING` | A new export, with a new id. | FR-009, FR-094, ADR-0059 | never-run |
+| `account.export` | `FAILED` |  | 202 → `PREPARING` | A new export, with a new id. | FR-009, FR-094, ADR-0059 | test |
+
+### GET /me/export
+
+read your latest data export
+
+**Needs:** an access token.
+
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl "$API/me/export" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `account.export` | `NONE` |  | 404 `NOT_FOUND` | You have never asked for one. | FR-009, FR-094, ADR-0059 | smoke |
+| `account.export` | `PREPARING` |  | 200 stays | Your latest export, as GET /me/export/{exportId} answers it: PREPARING, no URL. | FR-009, FR-094, ADR-0059 | smoke |
+| `account.export` | `READY` |  | 200 stays | Your latest export: READY, with its URL, expiresAt and sizeBytes. | FR-009, FR-094, ADR-0059 | test |
+| `account.export` | `EXPIRED` |  | 200 stays | Your latest export: EXPIRED, no URL. | FR-009, FR-094, ADR-0059 | never-run |
+| `account.export` | `FAILED` |  | 200 stays | Your latest export: FAILED, no URL. Ask again. | FR-009, FR-094, ADR-0059 | never-run |
+
+### GET /me/export/{exportId}
+
+read one of your data exports
+
+**Needs:** an access token.
+
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl "$API/me/export/$EXPORT" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `account.export` | `NONE` | the id is someone else's export, or nobody's | 404 `NOT_FOUND` | One 404 for both, byte for byte apart from the path: telling them apart would say the id is real. | FR-009, FR-094, ADR-0059 | smoke |
+| `account.export` | `PREPARING` |  | 200 stays | 200 PREPARING, no URL. GET /me/export answers the same for your latest. | FR-009, FR-094, ADR-0059 | smoke |
+| `account.export` | `READY` |  | 200 stays | 200 READY with downloadUrl, expiresAt (readyAt + 24 h) and sizeBytes. The URL is signed when it became ready, for exactly 24 hours: the same URL every time, and dead at expiresAt. | FR-009, FR-094, ADR-0059 | smoke |
+| `account.export` | `EXPIRED` |  | 200 stays | 200 EXPIRED, no URL: from expiresAt on, whether or not the job has deleted the archive yet. | FR-009, FR-094, ADR-0059 | test |
+| `account.export` | `FAILED` |  | 200 stays | 200 FAILED, no URL. Ask again. | FR-009, FR-094, ADR-0059 | test |
 
 ### GET /meta/legal
 

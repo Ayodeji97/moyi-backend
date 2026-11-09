@@ -184,6 +184,7 @@ class OpenApiConfiguration {
             documentLegal(api)
             documentSupport(api)
             documentAccountDeletion(api)
+            documentDataExport(api)
             documentRequestEnums(api)
             requireOver18(api)
             // After every function above that reads an entry's fields where springdoc put them.
@@ -472,7 +473,7 @@ class OpenApiConfiguration {
          * Every operation with no path parameter that still answers `404`: the two above, and
          * cancelling an account deletion when none can be cancelled (ADR-0058 decision 3).
          */
-        private val PATHLESS_NOT_FOUND_OPERATIONS = CURRENT_DEVICE_OPERATIONS + "cancelAccountDeletion"
+        private val PATHLESS_NOT_FOUND_OPERATIONS = CURRENT_DEVICE_OPERATIONS + "cancelAccountDeletion" + "getLatestDataExport"
 
         /**
          * The operations that answer `409`, by id.

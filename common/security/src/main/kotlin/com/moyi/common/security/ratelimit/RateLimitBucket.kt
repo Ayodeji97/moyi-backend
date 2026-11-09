@@ -144,6 +144,15 @@ enum class RateLimitBucket(
      */
     ACCOUNT_DELETION_USER("account:deletion:user", Subject.USER, 5, Duration.ofHours(1)),
 
+    /**
+     * ADR-0059 addition (doc 06 §4 names no bucket for it): three data-export requests a day per
+     * user, greedy (one back every eight hours). Each one that is not a repeat while one is being
+     * prepared builds a whole archive, reading every day the person has and copying every photo,
+     * so this bounds the work one account can make the server do. A repeat while one is being
+     * prepared spends a token too, as a replay does on `support:create:user`. *Owner may move it.*
+     */
+    ACCOUNT_EXPORT_USER("account:export:user", Subject.USER, 3, Duration.ofDays(1)),
+
     /** Doc 06 §4: "global authenticated 120 / min", per user, on every request that carries a valid token. */
     AUTHENTICATED("authenticated:user", Subject.USER, 120, Duration.ofMinutes(1)),
     ;

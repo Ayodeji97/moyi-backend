@@ -32,6 +32,7 @@ dependencies {
     implementation(projects.modules.ai)
     // In-app support (FR-102, ADR-0057): the support_tickets table (V45) and its route.
     implementation(projects.modules.support)
+    implementation(projects.modules.export)
     implementation(projects.common.web)
     // The filter chain, the JWT encoder/decoder and the current-user resolver.
     // Reachable transitively through identity already; declared so the

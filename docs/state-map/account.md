@@ -372,3 +372,66 @@ stateDiagram-v2
 |---|---|---|---|---|---|---|
 | `PENDING` | the account deletion's 14 days run out | system |  | `WINDOW_CLOSED` | Nothing is written: from cancellableUntil the request is due, which the job and the cancel each ask of the clock. | test |
 | `WINDOW_CLOSED` | the hourly account deletion job runs | system |  | `DELETED` | The job carries it out: the address and name are erased, the password, sessions, devices, push tokens, verification codes and consent records deleted, and AccountDeleted published in the same commit. From it every bond you are still in ends as a leave ends it, and the names you gave your partners are emptied; every entry you wrote becomes a flagged tombstone (BR-10), so your partner's days and streak stand; your bookmarks, reactions, photos, voice notes and report details go; your open support messages are emptied. | smoke |
+
+## Your data export (FR-009, FR-094: asked for, built by a job, downloadable for 24 hours)
+
+```mermaid
+stateDiagram-v2
+    state "none (never asked for)" as account_export__NONE
+    state "asked for the job has not finished building it" as account_export__PREPARING
+    state "built downloadable by its signed URL until expiresAt" as account_export__READY
+    state "its 24 hours are over no URL, the archive deleted" as account_export__EXPIRED
+    state "the job gave up after three tries" as account_export__FAILED
+    account_export__NONE --> account_export__PREPARING: you - ask for a copy of your data
+    account_export__READY --> account_export__PREPARING: you - ask for a copy of your data
+    account_export__EXPIRED --> account_export__PREPARING: you - ask for a copy of your data
+    account_export__FAILED --> account_export__PREPARING: you - ask for a copy of your data
+    account_export__PREPARING --> account_export__READY: system - data export job builds the archive (every minute)
+    account_export__PREPARING --> account_export__FAILED: system - data export job fails to build it a third time
+    account_export__READY --> account_export__EXPIRED: system - 2 actions
+    account_export__READY --> account_export__NONE: system - hourly account deletion job runs
+```
+
+### Every action in every state
+
+| Action | `NONE` | `PREPARING` | `READY` | `EXPIRED` | `FAILED` |
+|---|---|---|---|---|---|
+| ask for a copy of your data<br>`POST /me/export` | 202 → `PREPARING` | 202 stays | 202 → `PREPARING` | 202 → `PREPARING` | 202 → `PREPARING` |
+| read your latest data export<br>`GET /me/export` | 404 `NOT_FOUND` | 200 stays | 200 stays | 200 stays | 200 stays |
+| read one of your data exports<br>`GET /me/export/{exportId}` | 404 `NOT_FOUND` (the id is someone else's export, or nobody's) | 200 stays | 200 stays | 200 stays | 200 stays |
+
+### You can
+
+| In | Action | When | Leads to | Why | Evidence |
+|---|---|---|---|---|---|
+| `NONE` | ask for a copy of your data |  | `PREPARING` | 202 PREPARING with the export's id and requestedAt. Nothing is built yet; the job builds it, usually within the minute. Allowed whatever your bonds' state, ended or left included (BR-9). | smoke |
+| `PREPARING` | ask for a copy of your data |  | stays | The same export: 202 with the same id. A repeat spends none of the three a day. | smoke |
+| `READY` | ask for a copy of your data |  | `PREPARING` | A new export, with a new id: the archive is a copy as of when it is built. The READY one stays downloadable until its expiresAt. | test |
+| `EXPIRED` | ask for a copy of your data |  | `PREPARING` | A new export, with a new id. | never-run |
+| `FAILED` | ask for a copy of your data |  | `PREPARING` | A new export, with a new id. | test |
+| `PREPARING` | read your latest data export |  | stays | Your latest export, as GET /me/export/{exportId} answers it: PREPARING, no URL. | smoke |
+| `READY` | read your latest data export |  | stays | Your latest export: READY, with its URL, expiresAt and sizeBytes. | test |
+| `EXPIRED` | read your latest data export |  | stays | Your latest export: EXPIRED, no URL. | never-run |
+| `FAILED` | read your latest data export |  | stays | Your latest export: FAILED, no URL. Ask again. | never-run |
+| `PREPARING` | read one of your data exports |  | stays | 200 PREPARING, no URL. GET /me/export answers the same for your latest. | smoke |
+| `READY` | read one of your data exports |  | stays | 200 READY with downloadUrl, expiresAt (readyAt + 24 h) and sizeBytes. The URL is signed when it became ready, for exactly 24 hours: the same URL every time, and dead at expiresAt. | smoke |
+| `EXPIRED` | read one of your data exports |  | stays | 200 EXPIRED, no URL: from expiresAt on, whether or not the job has deleted the archive yet. | test |
+| `FAILED` | read one of your data exports |  | stays | 200 FAILED, no URL. Ask again. | test |
+
+### Refused here
+
+| In | Action | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `NONE` | read your latest data export |  | 404 `NOT_FOUND` | You have never asked for one. | FR-009, FR-094, ADR-0059 | smoke |
+| `NONE` | read one of your data exports | the id is someone else's export, or nobody's | 404 `NOT_FOUND` | One 404 for both, byte for byte apart from the path: telling them apart would say the id is real. | FR-009, FR-094, ADR-0059 | smoke |
+
+### Happens without you
+
+| In | What happens | Who | When | Leads to | Why | Evidence |
+|---|---|---|---|---|---|---|
+| `PREPARING` | the data export job builds the archive (every minute) | system |  | `READY` | The archive is built from what each module says you may have: your profile and consents, every bond you are or were in with every day as the app shows it to you (your partner's entries only once revealed to you; a withdrawn entry as a blank placeholder), your bookmarks and the reactions, your support messages, and the administrator-access disclosure; and your photos and voice notes. A confirmed address is emailed, without the link. | smoke |
+| `PREPARING` | the data export job fails to build it a third time | system |  | `FAILED` | Three builds failed (the storage could not be reached, for one): it is given up, and nobody is emailed. | test |
+| `READY` | 24 hours pass after the export became ready | system |  | `EXPIRED` | At expiresAt the route answers EXPIRED; within the hour the job deletes the archive. | test |
+| `READY` | you or your partner withdraw your entries on a leave or a block | system |  | `EXPIRED` | The withdrawn words are gone for both of you, so an archive that may hold them is not honoured: the export is EXPIRED and its archive deleted, yours and your partner's. Ask again for one without them. | smoke |
+| `PREPARING` | you or your partner withdraw your entries on a leave or a block | system |  | `PREPARING` | Built again from what may be read now: a build that read the words before the withdrawal cannot make it READY, and deletes what it stored. | test |
+| `READY` | the hourly account deletion job runs | system |  | `NONE` | Your account's deletion deletes every archive of yours still stored, and every export of yours, whatever its state. | test |

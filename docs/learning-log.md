@@ -3202,3 +3202,29 @@ Reality: it is three files and one guard. The fields must be in the `kamal secre
          Android app `com.moyi.app`; it has been `app.getmoyi.moyi` since moyi-app #51.
 Wrong about: nothing yet; the proof is the deploy's `Push provider: FCM (project: moyi-prod)`
          line and one real push on a phone (runbook steps 5 and 6).
+
+## 2026-11-09 · Feature · The data export: the app's own reading, five modules' answers (FR-009, FR-094, #126, ADR-0059)
+
+Expected: a query per table, joined into one JSON file by a job.
+Reality: what a person may have of their partner's words is not a query's to decide. The archive
+         route already answers it, through the gate that withholds a locked entry and turns a
+         withdrawn one into a tombstone the moment the block commits. So `gratitude`'s share of the
+         export *is* `GetDays.page`, walked to the end; `bond`, `identity`, `media` and `support`
+         each answer for their own rows; and a new `export` module only asks and zips. T-20 then
+         holds by construction rather than by a second copy of the rule.
+Wrong about: Jackson 3's `JsonNode.map`. It is a member function that applies the lambda to the
+         node itself (Optional-style), so in Kotlin it wins over the `Iterable.map` extension and
+         `array.map { it["field"] }` reads a field of the array: null, and an NPE three lines on.
+         `.toList().map` is what was meant.
+Also: the partner's leave and block must look the same in the export as in the app (ADR-0028):
+         the bond export carries the person's own block and withdrawal, and never the partner's.
+Then (review of #162): three things a copy does that a reading does not. An archive built before a
+         withdrawal kept the withdrawn words for a day, so a withdrawal now expires every export in
+         the bond and a build in flight loses its claim (`claimed_until` became the claim's token,
+         which also stopped a failed build from giving back someone else's claim). A build caught
+         only `RuntimeException`, so a checked `IOException` from a cut-off storage stream escaped
+         both its release and its failure: the row stayed PREPARING for ever, past its attempts,
+         and every new request was answered with it. And reading the keys, then deleting the rows,
+         let a build commit READY in between and leave an object nothing named:
+         `DELETE … RETURNING` waits on that row instead. The race was proved by holding the build's
+         UPDATE open and waiting for the delete to block on it in `pg_stat_activity`, not by a sleep.

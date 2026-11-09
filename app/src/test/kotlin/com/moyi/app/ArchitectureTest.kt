@@ -53,6 +53,7 @@ class ArchitectureTest {
                 "analytics",
                 "ai",
                 "support",
+                "export",
             )
 
         /**
@@ -156,6 +157,7 @@ class ArchitectureTest {
                 "audienceOf",
                 "onThisDayDueBetween",
                 "membershipsOfAccount",
+                "accountsInBond",
             )
 
         /**
@@ -176,6 +178,7 @@ class ArchitectureTest {
                 "SendOnThisDayPushes.kt",
                 "EmbedPendingEntries.kt",
                 "EraseDeletedAccount.kt",
+                "ExpireWithdrawnExports.kt",
             )
 
         /**
@@ -440,7 +443,8 @@ class ArchitectureTest {
         assertTrue(
             violations.isEmpty(),
             "Only the close job, the withdrawal's consumer, the reminder sweep, the day's push consumer, the on-this-day " +
-                "sweep, the embedding sweep and the account deletion's erasure may call bond's unguarded reads. Found in: $violations",
+                "sweep, the embedding sweep, the account deletion's erasure and the export's withdrawal consumer may call " +
+                "bond's unguarded reads. Found in: $violations",
         )
     }
 

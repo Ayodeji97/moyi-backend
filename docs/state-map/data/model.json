@@ -111,6 +111,33 @@
               "label": "carried out: the account is anonymised and signs in no more"
             }
           ]
+        },
+        {
+          "id": "account.export",
+          "label": "Your data export (FR-009, FR-094: asked for, built by a job, downloadable for 24 hours)",
+          "states": [
+            {
+              "id": "NONE",
+              "label": "none (never asked for)",
+              "initial": true
+            },
+            {
+              "id": "PREPARING",
+              "label": "asked for; the job has not finished building it"
+            },
+            {
+              "id": "READY",
+              "label": "built: downloadable by its signed URL until expiresAt"
+            },
+            {
+              "id": "EXPIRED",
+              "label": "its 24 hours are over: no URL, the archive deleted"
+            },
+            {
+              "id": "FAILED",
+              "label": "the job gave up after three tries"
+            }
+          ]
         }
       ]
     },
@@ -521,6 +548,26 @@
       "id": "event:account-deletion-runs",
       "label": "the hourly account deletion job runs",
       "actor": "system"
+    },
+    {
+      "id": "event:export-built",
+      "label": "the data export job builds the archive (every minute)",
+      "actor": "system"
+    },
+    {
+      "id": "event:export-fails-thrice",
+      "label": "the data export job fails to build it a third time",
+      "actor": "system"
+    },
+    {
+      "id": "event:export-24h-pass",
+      "label": "24 hours pass after the export became ready",
+      "actor": "system"
+    },
+    {
+      "id": "event:entries-withdrawn",
+      "label": "you or your partner withdraw your entries on a leave or a block",
+      "actor": "system"
     }
   ],
   "everywhere": [
@@ -538,7 +585,8 @@
       "rowsAllowedIn": [
         "account",
         "account.session",
-        "account.deletion"
+        "account.deletion",
+        "account.export"
       ]
     },
     {

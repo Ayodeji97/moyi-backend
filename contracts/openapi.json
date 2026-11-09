@@ -5210,6 +5210,210 @@
         "tags" : [ "push-token-controller" ]
       }
     },
+    "/api/v1/me/export" : {
+      "get" : {
+        "description" : "The caller's most recently requested export, as `GET /me/export/{exportId}` answers it, so that a client can show its state after a restart without keeping the id. `404 NOT_FOUND` if the caller has never asked for one.",
+        "operationId" : "getLatestDataExport",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DataExportResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "data-export-controller" ]
+      },
+      "post" : {
+        "description" : "Asks for a copy of everything the signed-in person is entitled to (FR-009). Nothing is built when this returns: `202` answers `PREPARING` with the export's `id`, a job builds it, usually within minutes, and a confirmed address is emailed when it is `READY` (the email carries no link: the person downloads it in the app). Asking again while one is `PREPARING` is the same export, `202` with the same `id`; asking after it is `READY`, `EXPIRED` or `FAILED` starts a new one. Allowed whatever state the person's bonds are in, ended or left included (BR-9). The archive is a zip of `moyi-export.json` (the account and its consents; every bond the person is or was in, with every day of its archive exactly as the app shows it to them, their partner's entries only once revealed to them, and every entry withdrawn on a block or a leave, theirs or their partner's, as a blank placeholder; their bookmarks and the reactions on each entry; their support messages; and any recorded administrator access), the photos and voice notes it names under `media/`, and a `README.txt`. Three new exports a day per account; a repeat while one is `PREPARING` spends none: the fourth new one is `429` with `Retry-After`.",
+        "operationId" : "requestDataExport",
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DataExportResponse"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "data-export-controller" ]
+      }
+    },
+    "/api/v1/me/export/{exportId}" : {
+      "get" : {
+        "description" : "One of the caller's exports, as it is now. `downloadUrl`, `expiresAt` and `sizeBytes` are present only while it is `READY`. An export past its 24 hours is `EXPIRED` from that moment, and so is a `READY` one when entries are withdrawn in one of the person's bonds (a block or a leave that withdraws): its archive held words that are gone for both people, so it is deleted, and the person asks again. An `exportId` that is someone else's and one that does not exist are the same `404 NOT_FOUND`.",
+        "operationId" : "getDataExport",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "exportId",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DataExportResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "data-export-controller" ]
+      }
+    },
     "/api/v1/me/legal-consent" : {
       "post" : {
         "description" : "The caller accepts the current Terms of Service and Privacy Policy, the versions `GET /meta/legal` names. No body, and none is read: the versions recorded are the server's. `204` whether or not anything was new; a version accepted before keeps the moment it was first accepted. Afterwards `GET /me`'s `legalAccepted` names the current versions.",
@@ -6100,6 +6304,44 @@
           }
         },
         "required" : [ "anchorTimezone", "name", "type" ]
+      },
+      "DataExportResponse" : {
+        "type" : "object",
+        "properties" : {
+          "downloadUrl" : {
+            "type" : [ "string", "null" ],
+            "description" : "Only while `READY`: a signed URL that downloads the zip without a bearer, good until `expiresAt` (FR-094). Treat it as the archive itself: anyone holding it can download it."
+          },
+          "expiresAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time",
+            "description" : "Only while `READY`: when the download URL stops working and the archive is deleted (`readyAt` + 24 h)."
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "readyAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time",
+            "description" : "When it became `READY`; null while `PREPARING`, and for a `FAILED` one."
+          },
+          "requestedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "sizeBytes" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64",
+            "description" : "Only while `READY`: the zip's size in bytes."
+          },
+          "status" : {
+            "type" : "string",
+            "description" : "`PREPARING` until it is built (usually within minutes), then `READY` for 24 hours, then `EXPIRED`; `FAILED` if it could not be built after three tries (ask again).",
+            "enum" : [ "PREPARING", "READY", "EXPIRED", "FAILED" ]
+          }
+        },
+        "required" : [ "downloadUrl", "expiresAt", "id", "readyAt", "requestedAt", "sizeBytes", "status" ]
       },
       "DayResponse" : {
         "type" : "object",

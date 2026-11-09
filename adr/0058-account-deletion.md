@@ -186,6 +186,8 @@ days and streak survive, which is what BR-10 exists for.
   backup it restores (doc 07 §8), and `deletion_requests.executed_at` is the list.
 - Not built and not in scope: FR-009 export before deletion (no export exists); the admin console's
   view of deletions.
+  *(Amended 2026-11-09, ADR-0059: the export exists, and a consumer `export.account-deletion` of
+  the same event deletes the person's stored archives and export rows.)*
 
 **Neutral:** `scheduling` now depends on `identity`'s `api`. `users.status` `PENDING_DELETION` stays
 in the CHECK and the enum, unused. The contract gains two routes and one nullable field; oasdiff

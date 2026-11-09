@@ -1313,6 +1313,39 @@
     "curl": "curl -X DELETE \"$API/me/deletion-request\" -H \"Authorization: Bearer $TOKEN\""
   },
   {
+    "id": "POST /api/v1/me/export",
+    "summary": "ask for a copy of your data",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After). A request that starts a new export also spends account:export:user, three a day (a repeat while one is being prepared spends none): the fourth new one is 429 with Retry-After"
+    ],
+    "requestErrors": [],
+    "curl": "curl -X POST \"$API/me/export\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/me/export",
+    "summary": "read your latest data export",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl \"$API/me/export\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/me/export/{exportId}",
+    "summary": "read one of your data exports",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl \"$API/me/export/$EXPORT\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
     "id": "GET /api/v1/meta/legal",
     "summary": "read the current legal documents",
     "machine": "account",
