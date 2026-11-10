@@ -630,7 +630,7 @@ curl -X POST "$API/support/messages" -H "Authorization: Bearer $TOKEN" -H "Idemp
 | Region | In | When | Answer | Why | Rule | Evidence |
 |---|---|---|---|---|---|---|
 | `account.session` | `NO_SESSION` |  | 401 `UNAUTHENTICATED` | No access token is sent, or one that names no session. Support is reached from inside the app, signed in; a signed-out person writes to the published support address instead (ADR-0057 decision 1). Nothing is filed. | ADR-0057 §1 | smoke |
-| `account.session` | `ACCESS_VALID` |  | 201 stays | The message is a ticket a person reads: 201 with its id and when it arrived, never its words. Once it is stored an acknowledgement email is attempted once, to the account's address if that address is confirmed, with the id as a reference and without the subject or body; it is best effort, not retried if the provider fails. Five a day: the sixth is 429 with Retry-After. | ADR-0057 §2, §5 | smoke |
+| `account.session` | `ACCESS_VALID` |  | 201 stays | The message is a ticket a person reads: 201 with its id and when it arrived, never its words. Once it is stored an acknowledgement email is attempted once, to the account's address if that address is confirmed, with the id as a reference and without the subject or body; it is best effort, not retried if the provider fails. An optional reference (the error that led here, usually its traceId) is stored with the ticket for the operator and never put in the email (ADR-0057 decision 11). Five a day: the sixth is 429 with Retry-After. | ADR-0057 §2, §5 | smoke |
 | `account.session` | `ACCESS_EXPIRED` |  | 401 `UNAUTHENTICATED` | The access token is past its 15 minutes. Exchange the refresh token at POST /auth/refresh, then send it again; nothing was filed, so a key sent with it is still unused. | ADR-0019 §5 | never-run |
 | `account.session` | `ENDED` | its access token is still accepted: the session ended by logout, by being removed from the sessions list or by a reuse, and the token has not yet expired | 201 stays | Ending one session does not cancel its access token: until its 15 minutes run out the message is filed as from a live session. | ADR-0021 §6, ADR-0025 §5 | never-run |
 | `account.session` | `ENDED` | its access token is no longer accepted: logout-all or a password reset ended it, or the token has expired | 401 `UNAUTHENTICATED` | After logout-all or a password reset, a token issued before that second is refused whatever its remaining life. Nothing is filed. | ADR-0019 §4 | never-run |
@@ -1580,13 +1580,6 @@ curl -X POST "$API/bonds/$BOND/members/other/report" -H "Authorization: Bearer $
 | 409 | `IDEMPOTENCY_KEY_IN_FLIGHT` | A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued. | never-run |
 | 413 | `MALFORMED_REQUEST` | The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is filed. | never-run |
 | 429 | `RATE_LIMITED` | reports:create:user, ten a day, shared with the entry report route: one queue, one person reading it. Refused attempts count. | test |
-
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 409 | IDEMPOTENCY_KEY_IN_FLIGHT, when a request with the same Idempotency-Key is still being processed: the shared idempotency interceptor's answer, which springdoc does not read off this route. |
-| 413 | MALFORMED_REQUEST, for a body over one mebibyte: the shared idempotency interceptor refuses it before it is read, which springdoc does not read off this route. |
 
 ## Day
 

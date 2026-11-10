@@ -8,12 +8,13 @@ import java.sql.ResultSet
 import java.sql.Time
 import java.sql.Timestamp
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
-/** The `notifications` ledger (V29, V30). */
+/** The `notifications` ledger (V29, V30, V58). */
 @Component
 internal class NotificationStore(
     private val jdbc: JdbcTemplate,
@@ -30,8 +31,8 @@ internal class NotificationStore(
         jdbc.update(
             """
             INSERT INTO notifications (id, user_id, bond_id, category, dedupe_key, not_before, stale_after, status, created_at,
-                                       zone, quiet_hours_start, quiet_hours_end, wanted)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'REQUESTED', ?, ?, ?, ?, ?)
+                                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'REQUESTED', ?, ?, ?, ?, ?, ?)
             ON CONFLICT (dedupe_key) DO NOTHING
             """.trimIndent(),
             push.id,
@@ -46,6 +47,7 @@ internal class NotificationStore(
             push.quietHoursStart?.let(Time::valueOf),
             push.quietHoursEnd?.let(Time::valueOf),
             push.wanted,
+            push.bondDate?.let(java.sql.Date::valueOf),
         ) == 1
 
     /**
@@ -59,7 +61,7 @@ internal class NotificationStore(
             .query(
                 """
                 SELECT id, user_id, bond_id, category, not_before, stale_after, status,
-                       zone, quiet_hours_start, quiet_hours_end, wanted
+                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date
                   FROM notifications WHERE id = ? FOR UPDATE
                 """.trimIndent(),
                 { row, _ -> storedPush(row) },
@@ -192,6 +194,7 @@ internal class NotificationStore(
             zone = ZoneId.of(row.getString("zone")),
             quietHours = if (quietStart != null && quietEnd != null) QuietWindow(quietStart, quietEnd) else null,
             wanted = row.getBoolean("wanted"),
+            bondDate = row.getDate("bond_date")?.toLocalDate(),
         )
     }
 
@@ -211,6 +214,8 @@ internal data class NewPush(
     val zone: ZoneId,
     val quietHours: QuietWindow?,
     val wanted: Boolean,
+    /** The Bond-day the push is about; `null` for a push about no day. */
+    val bondDate: LocalDate?,
 ) {
     val quietHoursStart: LocalTime? get() = quietHours?.start
     val quietHoursEnd: LocalTime? get() = quietHours?.end
@@ -230,6 +235,8 @@ internal data class StoredPush(
     val quietHours: QuietWindow?,
     /** Whether the member wanted this category when the push was asked for. */
     val wanted: Boolean,
+    /** The Bond-day the push is about: `null` for a push about no day, and for a row written before V58. */
+    val bondDate: LocalDate?,
 )
 
 /** Quiet hours as two columns hold them. */

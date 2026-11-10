@@ -5,7 +5,6 @@ import com.moyi.common.events.EventConsumer
 import com.moyi.common.events.ReceivedEvent
 import com.moyi.common.events.StartFrom
 import com.moyi.export.infra.database.DataExports
-import com.moyi.media.api.ExportStorage
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
@@ -25,14 +24,15 @@ import java.time.temporal.ChronoUnit
  *
  * The person asks again for a READY one that went; the app shows EXPIRED. Delivered at least once,
  * and idempotent: a second delivery finds nothing READY, and restarts what is PREPARING once more.
- * Inside the delivery's transaction: if the storage cannot be reached, the rows come back and the
- * outbox delivers it again.
+ * The keys are owed in the delivery's transaction and the objects deleted once it commits
+ * ([ArchiveDisposal], ADR-0059 decision 13): a delivery that rolls back deletes nothing, and an
+ * object the storage refuses stays owed and is deleted by the next build run.
  */
 @Component
 internal class ExpireWithdrawnExports(
     private val bonds: BondExports,
     private val exports: DataExports,
-    private val storage: ExportStorage,
+    private val archives: ArchiveDisposal,
     private val clock: Clock,
 ) : EventConsumer {
     override val id = "export.withdrawal"
@@ -43,6 +43,6 @@ internal class ExpireWithdrawnExports(
     override fun handle(event: ReceivedEvent) {
         val bondId = checkNotNull(event.references[BondExports.BOND_ID]) { "An ${BondExports.ENTRIES_WITHDRAWN} event carries no bond." }
         val accounts = bonds.accountsInBond(bondId)
-        exports.invalidateFor(accounts, clock.instant().truncatedTo(ChronoUnit.MICROS)).forEach(storage::deleteArchive)
+        archives.deleteAfterCommit(exports.invalidateFor(accounts, clock.instant().truncatedTo(ChronoUnit.MICROS)))
     }
 }

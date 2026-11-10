@@ -107,6 +107,8 @@ internal class OnThisDayPushesTest(
         row["category"] shouldBe "ON_THIS_DAY"
         row["dedupe_key"] shouldBe "on-this-day:${memberIdOf(ada)}:2026-09-01"
         row["stale_after"] shouldBe Timestamp.from(Instant.parse("2026-09-01T23:00:00Z"))
+        // Issue #146: the day remembered, a year back, which the app opens; not today.
+        row["bond_date"] shouldBe java.sql.Date.valueOf("2025-09-01")
     }
 
     @Test

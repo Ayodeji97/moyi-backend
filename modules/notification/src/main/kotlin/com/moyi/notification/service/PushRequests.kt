@@ -61,6 +61,7 @@ internal class PushRequests(
                     // Kept as the answer, not the toggles: the toggle that governs a category is
                     // NotificationPreferences' rule, asked once, here.
                     wanted = request.recipient.preferences.allows(request.category),
+                    bondDate = request.bondDate,
                 ),
             )
         if (recorded) {

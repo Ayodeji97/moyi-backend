@@ -7,6 +7,7 @@ import com.moyi.common.web.idempotency.IdempotentRequest
 import com.moyi.common.web.idempotency.IdempotentResult
 import com.moyi.common.web.idempotency.ResultKind
 import com.moyi.support.domain.SupportBody
+import com.moyi.support.domain.SupportReference
 import com.moyi.support.domain.SupportSubject
 import com.moyi.support.domain.SupportTicket
 import com.moyi.support.domain.SupportTicketFiled
@@ -35,7 +36,7 @@ internal data class FiledTicket(
  * **A replay re-reads; it never files a second ticket or sends a second email**, and answers the
  * ticket the key names, if the caller sent it.
  *
- * Nothing of the request is logged here: not the subject, not the body.
+ * Nothing of the request is logged here: not the subject, not the body, not the reference.
  */
 @Service
 @Suppress("LongParameterList") // A service's collaborators, each injected by Spring.
@@ -56,6 +57,7 @@ internal class FileSupportTicket(
         userId: UUID,
         subject: SupportSubject,
         body: SupportBody,
+        reference: SupportReference?,
         idempotency: IdempotentRequest?,
     ): FiledTicket {
         require(idempotency == null || idempotency.userId == userId) {
@@ -66,11 +68,11 @@ internal class FileSupportTicket(
         val filed =
             transactions.execute {
                 if (idempotency == null) {
-                    FiledTicket(create(userId, subject, body, now), replayed = false)
+                    FiledTicket(create(userId, subject, body, reference, now), replayed = false)
                 } else {
                     val outcome =
                         execution.once(idempotency) {
-                            val ticket = create(userId, subject, body, now)
+                            val ticket = create(userId, subject, body, reference, now)
                             IdempotentResult(ticket, ticket.id, ResultKind.SUPPORT_TICKET, HttpStatus.CREATED.value())
                         }
                     FiledTicket(outcome.value ?: replay(userId, outcome.resultId), outcome.wasReplayed)
@@ -83,10 +85,11 @@ internal class FileSupportTicket(
         userId: UUID,
         subject: SupportSubject,
         body: SupportBody,
+        reference: SupportReference?,
         now: Instant,
     ): SupportTicket {
         val ticket = SupportTicket(ids.timeOrdered(), userId, now)
-        tickets.insert(ticket, subject, body)
+        tickets.insert(ticket, subject, body, reference)
         events.publishEvent(SupportTicketFiled(ticket.id, userId))
         return ticket
     }

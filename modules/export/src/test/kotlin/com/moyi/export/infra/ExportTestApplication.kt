@@ -123,6 +123,10 @@ internal class FakeStorage : ExportStorage {
     @Volatile
     var failingWith: Exception? = null
 
+    /** Makes [deleteArchive] throw when set, deleting nothing: the storage unreachable when an archive is to go. */
+    @Volatile
+    var failingDeletes = false
+
     /** Media whose bytes cannot be read: the stream throws an `IOException` part-way, as a storage cut off does. */
     val unreadable: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
 
@@ -155,6 +159,7 @@ internal class FakeStorage : ExportStorage {
     ): URI = URI.create("https://storage.test/$key?signed=${signedAt.epochSecond}&expires=${expiresIn.seconds}")
 
     override fun deleteArchive(key: String) {
+        check(!failingDeletes) { "the storage is down (made to by the test)" }
         archives.remove(key)
         deleted += key
     }
@@ -165,6 +170,7 @@ internal class FakeStorage : ExportStorage {
         deleted.clear()
         failing = false
         failingWith = null
+        failingDeletes = false
         unreadable.clear()
     }
 
@@ -183,10 +189,15 @@ internal class BrokenStream : java.io.InputStream() {
 internal class RecordingMail : AccountMail {
     val sent: MutableList<Pair<UUID, AccountMessage>> = Collections.synchronizedList(mutableListOf())
 
+    /** Makes a send throw when set, recording nothing: the mail provider's client failing outright. */
+    @Volatile
+    var failing = false
+
     override fun sendToAccountHolder(
         userId: UUID,
         message: AccountMessage,
     ): AccountMailOutcome {
+        check(!failing) { "the mail provider is down (made to by the test)" }
         sent.add(userId to message)
         return AccountMailOutcome.ACCEPTED
     }

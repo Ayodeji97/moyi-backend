@@ -1,6 +1,7 @@
 package com.moyi.notification.api
 
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -27,6 +28,10 @@ interface PushSender {
  * offline when the push was accepted is not shown it after its day: the
  * consumer's own expiry bounds only when the provider takes it (review of #96).
  *
+ * [bondDate] is the Bond-day the push is about, as the caller resolved it
+ * ([PushRequest.bondDate]); `null` for a push about no day, and for one
+ * recorded before the ledger kept it (V58). A calendar label, not content.
+ *
  * [token] redacts itself; this class's [toString] is the generated one and is
  * safe for that reason alone.
  */
@@ -35,6 +40,7 @@ data class PushMessage(
     val category: PushCategory,
     val bondId: UUID,
     val staleAfter: Instant,
+    val bondDate: LocalDate? = null,
 )
 
 /**

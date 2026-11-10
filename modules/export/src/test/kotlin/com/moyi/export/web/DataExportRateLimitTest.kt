@@ -29,7 +29,7 @@ internal class DataExportRateLimitTest(
     @AfterEach
     fun clear() {
         redis.execInContainer("valkey-cli", "FLUSHALL")
-        jdbc.execute("TRUNCATE TABLE data_exports")
+        jdbc.execute("TRUNCATE TABLE data_exports, export_archive_deletions")
     }
 
     @Test

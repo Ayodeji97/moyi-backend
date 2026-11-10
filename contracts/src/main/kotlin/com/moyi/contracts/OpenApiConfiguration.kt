@@ -287,8 +287,17 @@ class OpenApiConfiguration {
             // (a multipart one is 415). Final whole-branch review, A5.
             if (operation.operationId in IDEMPOTENT_OPERATIONS) {
                 // 422 for a missing or malformed Idempotency-Key, which a route
-                // with no body (completeMediaUpload) would otherwise not list.
-                addAll(listOf(HttpStatus.CONTENT_TOO_LARGE, HttpStatus.UNSUPPORTED_MEDIA_TYPE, HttpStatus.UNPROCESSABLE_ENTITY))
+                // with no body (completeMediaUpload) would otherwise not list;
+                // 409 IDEMPOTENCY_KEY_IN_FLIGHT for the same key while the first
+                // attempt runs, on every one of them (#167: reportMember lacked it).
+                addAll(
+                    listOf(
+                        HttpStatus.CONFLICT,
+                        HttpStatus.CONTENT_TOO_LARGE,
+                        HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                        HttpStatus.UNPROCESSABLE_ENTITY,
+                    ),
+                )
             }
             addAll(statusesOf(operation.operationId))
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER && it.name == "code" }) {
@@ -556,9 +565,11 @@ class OpenApiConfiguration {
          * Operations carrying `@Idempotent` (doc 06 §1), by id — the reason
          * [requireIdempotencyKey] exists at all: springdoc cannot read this
          * off the controller the way it reads an actual `@RequestHeader`.
+         * `OpenApiContractTest` holds this set against every `@Idempotent`
+         * handler, both ways: `reportMember` was once missing from it (#167).
          */
         private val IDEMPOTENT_OPERATIONS =
-            setOf("submitEntry", "patchEntry", "completeMediaUpload", "reportEntry", "sendSupportMessage")
+            setOf("submitEntry", "patchEntry", "completeMediaUpload", "reportEntry", "reportMember", "sendSupportMessage")
 
         /**
          * The [IDEMPOTENT_OPERATIONS] declared `@Idempotent(required = false)`:

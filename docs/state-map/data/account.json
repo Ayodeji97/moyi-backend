@@ -2239,7 +2239,7 @@
     "to": "ACCESS_VALID",
     "status": 201,
     "code": null,
-    "reason": "The message is a ticket a person reads: 201 with its id and when it arrived, never its words. Once it is stored an acknowledgement email is attempted once, to the account's address if that address is confirmed, with the id as a reference and without the subject or body; it is best effort, not retried if the provider fails. Five a day: the sixth is 429 with Retry-After.",
+    "reason": "The message is a ticket a person reads: 201 with its id and when it arrived, never its words. Once it is stored an acknowledgement email is attempted once, to the account's address if that address is confirmed, with the id as a reference and without the subject or body; it is best effort, not retried if the provider fails. An optional reference (the error that led here, usually its traceId) is stored with the ticket for the operator and never put in the email (ADR-0057 decision 11). Five a day: the sixth is 429 with Retry-After.",
     "rule": "ADR-0057 §2, §5",
     "evidence": "smoke",
     "evidenceRef": "a support message is 201 with its id and time",
@@ -4017,7 +4017,7 @@
     "rule": "FR-029a, BR-10a, T-20, ADR-0059 decision 12",
     "evidence": "smoke",
     "evidenceRef": "the withdrawal expires the READY export that holds the words",
-    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/ExpireWithdrawnExports.kt#exports.invalidateFor(accounts, clock.instant().truncatedTo(ChronoUnit.MICROS)).forEach(storage::deleteArchive)"
+    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/ExpireWithdrawnExports.kt#archives.deleteAfterCommit(exports.invalidateFor(accounts, clock.instant().truncatedTo(ChronoUnit.MICROS)))"
   },
   {
     "id": "export-preparing-withdrawn",
@@ -4035,7 +4035,7 @@
     "rule": "FR-029a, BR-10a, T-20, ADR-0059 decision 12",
     "evidence": "test",
     "evidenceRef": "ExportErasuresTest#a build that read the words before the withdrawal cannot make them READY, and the export is built again",
-    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/ExpireWithdrawnExports.kt#exports.invalidateFor(accounts, clock.instant().truncatedTo(ChronoUnit.MICROS)).forEach(storage::deleteArchive)"
+    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/ExpireWithdrawnExports.kt#archives.deleteAfterCommit(exports.invalidateFor(accounts, clock.instant().truncatedTo(ChronoUnit.MICROS)))"
   },
   {
     "id": "export-any-account-deleted",
@@ -4053,6 +4053,6 @@
     "rule": "FR-009, FR-094, ADR-0059",
     "evidence": "test",
     "evidenceRef": "ArchiveContentsTest#an account deletion deletes every archive of the person and every export row, and a second delivery changes nothing",
-    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/EraseDeletedAccountExports.kt#exports.deleteAllOf(userId).forEach(storage::deleteArchive)"
+    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/EraseDeletedAccountExports.kt#archives.deleteAfterCommit(exports.deleteAllOf(userId))"
   }
 ]

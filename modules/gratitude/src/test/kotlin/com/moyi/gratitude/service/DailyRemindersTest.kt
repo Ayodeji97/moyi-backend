@@ -136,6 +136,8 @@ internal class DailyRemindersTest(
         row["dedupe_key"] shouldBe "reminder:${memberIdOf(ada)}:2026-09-01"
         row["stale_after"] shouldBe Timestamp.from(Instant.parse("2026-09-01T23:00:00Z"))
         row["zone"] shouldBe "Africa/Lagos"
+        // Issue #146: the Bond-day it reminds of, for the phone to open.
+        row["bond_date"] shouldBe java.sql.Date.valueOf("2026-09-01")
         row["quiet_hours_start"].toString() shouldBe "23:00:00"
         row["wanted"] shouldBe true
         // Bea turned reminders off: asked for all the same, and recorded unwanted, so the push consumer suppresses it.
@@ -189,6 +191,19 @@ internal class DailyRemindersTest(
 
         jdbc.queryForObject("SELECT count(*) FROM notifications WHERE category = 'REMINDER'", Int::class.java) shouldBe 2
         jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'PushRequested'", Int::class.java) shouldBe 2
+    }
+
+    @Test
+    fun `a reminder names the bond's day, not the member's - 23-30 in Reykjavik is already tomorrow in Lagos`() {
+        // The bond's midnight is 23:00Z (Lagos, UTC+1); Ada's reminder is at 23:30 in her own zone,
+        // Reykjavik's, which is UTC (a reminder zone is a region zone, never `UTC` itself).
+        settings(ada, """{"reminderTimeLocal":"23:30","reminderTimezone":"Atlantic/Reykjavik"}""")
+        clock.set(Instant.parse("2026-09-01T23:30:00Z"))
+
+        reminders.remindDue(Instant.parse("2026-09-01T23:25:00Z"), Instant.parse("2026-09-01T23:30:00Z")).requested shouldBe 1
+
+        rowOf(ada)["bond_date"] shouldBe java.sql.Date.valueOf("2026-09-02")
+        rowOf(ada)["dedupe_key"] shouldBe "reminder:${memberIdOf(ada)}:2026-09-02"
     }
 
     @Test

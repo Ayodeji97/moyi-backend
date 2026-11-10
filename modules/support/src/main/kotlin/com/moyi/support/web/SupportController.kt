@@ -44,7 +44,14 @@ internal class SupportController(
         @Valid @RequestBody request: SupportMessageRequest,
         http: HttpServletRequest,
     ): ResponseEntity<SupportMessageResponse> {
-        val filed = filing.file(caller.id, request.supportSubject(), request.supportBody(), IdempotencyInterceptor.requestOrNull(http))
+        val filed =
+            filing.file(
+                caller.id,
+                request.supportSubject(),
+                request.supportBody(),
+                request.supportReference(),
+                IdempotencyInterceptor.requestOrNull(http),
+            )
         val response = ResponseEntity.status(HttpStatus.CREATED)
         if (filed.replayed) response.header(IdempotencyInterceptor.REPLAYED_HEADER, "true")
         return response.body(SupportMessageResponse(filed.ticket.id, filed.ticket.createdAt))
