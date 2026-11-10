@@ -50,10 +50,40 @@ In Bitwarden, open the secure note `moyi-prod` and add three hidden fields, copi
 | Field | From the JSON | Note |
 |---|---|---|
 | `FCM_CLIENT_EMAIL` | `client_email` | |
-| `FCM_PRIVATE_KEY_PEM` | `private_key` | Paste it as it stands, with its `\n`. `FcmPushSender` reads both real and escaped line breaks. |
+| `FCM_PRIVATE_KEY_PEM` | `private_key` | On **one line, with no `\n` at all**: made by the command below, not pasted from the JSON. |
 | `FCM_PRIVATE_KEY_ID` | `private_key_id` | It names the key in Google's audit log. Step 4 fetches it, so it **must exist**: Kamal stops every deploy on a listed field the note lacks. To go without it, leave it out of the fetch list, the extract line and the `secret:` list too. |
 
 The project id (`project_id`) is not a secret. It goes in `config/deploy.yml` in step 4.
+
+Type each field name exactly, with nothing before or after it: Kamal fetches by name, and a
+field called ` FCM_PRIVATE_KEY_PEM` (a leading space) is not found, so every deploy stops at
+`kamal secrets fetch`. That stopped the first attempt on 2026-11-10.
+
+**The private key goes in on one line, with no `\n`.** Kamal writes the container's env file
+with Ruby's `String#dump`, which doubles every backslash, so a `\n` in the vault reaches the
+API as `\\n`. Convert the key without printing it; it goes to the clipboard, not the screen:
+
+```sh
+python3 -c 'import json,sys; sys.stdout.write(json.load(open(sys.argv[1]))["private_key"].replace("\n", "").strip())' \
+  ~/Downloads/<the key file>.json | pbcopy
+```
+
+Paste it into `FCM_PRIVATE_KEY_PEM`, then clear the clipboard with `pbcopy < /dev/null`. The
+result is `-----BEGIN PRIVATE KEY-----`, the base64, `-----END PRIVATE KEY-----`, run together.
+`FcmPushSender` has read the other shapes too since 2026-11-10 (real newlines, `\n`, `\\n`:
+`com.moyi.common.core.Pem`), but one line has no escapes for anything on the way to double.
+
+**Before the deploy, check the field as Kamal will read it.** This prints four flags, never the
+key. Expect `backslash-n: False | real newline: False | starts: True | ends: True`:
+
+```sh
+SECRETS=$(kamal secrets fetch --adapter bitwarden --account $BITWARDEN_ACCOUNT --from moyi-prod FCM_PRIVATE_KEY_PEM)
+kamal secrets extract FCM_PRIVATE_KEY_PEM "$SECRETS" | python3 -c 'import sys; k = sys.stdin.read().rstrip("\n"); print("backslash-n:", "\\n" in k, "| real newline:", "\n" in k, "| starts:", k.startswith("-----BEGIN PRIVATE KEY-----"), "| ends:", k.endswith("-----END PRIVATE KEY-----"))'
+unset SECRETS
+```
+
+The same check reads `JWT_PRIVATE_KEY_PEM` with the field name changed in both places; for
+`JWT_PUBLIC_KEY_PEM`, change `PRIVATE` to `PUBLIC` in the two armour lines as well.
 
 Then delete the JSON file and empty the bin. The vault is the only copy. If the key is lost,
 make a new one and delete the old one in the console.
@@ -127,5 +157,23 @@ With a release build of the app on a phone, signed in with a production test acc
 | WARN `Push rejected by provider: FCM refused the message (HTTP 403, PERMISSION_DENIED)` | The role is missing, or the FCM API is not enabled. See step 2. |
 | WARN `Push rejected by provider: FCM refused the message (HTTP 401, THIRD_PARTY_AUTH_ERROR)` | The APNs key is not uploaded to `moyi-prod`. See step 1.3. |
 | The API refuses to start: `private-key-pem is not a PEM block` or `not a PKCS#8 RSA private key` | The field holds something other than the JSON's `private_key`. |
+| The API refuses to start: `private-key-pem is not valid base64` | Something other than line breaks is in the body: a quote, a truncated paste. Run step 3's check. Before 2026-11-10 a `\n` in the vault caused this too (below). |
 
 Wipe the test accounts afterwards, as with the other production checks.
+
+## 2026-11-10: the first FCM deploy, and what stopped it
+
+No outage: the new container refused to start and the old one kept serving throughout.
+
+- The first attempt stopped at `kamal secrets fetch`: the vault field was named
+  ` FCM_PRIVATE_KEY_PEM`, with a leading space, so the name in `.kamal/secrets` was not found.
+- The second deployed `e273a41`. Its migrations ran first, so the database went to **V53 under
+  the old application**, which kept serving on it. The new API then crash-looped with
+  `moyi.notification.push.fcm.private-key-pem is not valid base64`. Cause: this runbook said to
+  paste `private_key` with its `\n`. Kamal 2.12's env file (`Kamal::EnvFile`, through
+  `String#dump`) doubled the backslash, docker read the file literally, and the container got
+  `\\n`. The parser turned `\n` into a newline and left the extra backslash in the base64.
+- The owner stored the key on one line with no `\n`, and the deploy went through.
+- Since then the parser reads all four shapes (`com.moyi.common.core.Pem`, shared with the JWT
+  keys, which had the same weakness and worse: they read no `\n` at all), and step 3 says one
+  line and gives a check that runs before the deploy.

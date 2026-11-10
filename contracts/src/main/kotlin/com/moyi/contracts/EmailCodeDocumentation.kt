@@ -26,3 +26,33 @@ internal fun documentEmailCodes(api: OpenAPI) {
             "`422 VALIDATION_FAILED` with the field's code `VALID_VERIFICATION_CODE`, and counts as no try."
     }
 }
+
+private const val CHECK_OPERATION = "checkResetCode"
+private const val CHECK_REQUEST = "ResetCodeCheckRequest"
+
+/**
+ * `POST /auth/reset-password/check` (#169, ADR-0022 amended 2026-11-10): what a check is, and
+ * what it is not. A right code is answered and left live; the reset still takes the code.
+ */
+internal fun documentResetCodeCheck(api: OpenAPI) {
+    api.paths.values
+        .flatMap { it.readOperations() }
+        .filter { it.operationId == CHECK_OPERATION }
+        .forEach { it.description = CHECK_DESCRIPTION }
+    val schema = api.components.schemas[CHECK_REQUEST] ?: return
+    schema.description = "The address the reset email was sent to, and the six digits in it. No `token`: a link needs no check."
+    schema.properties?.get("email")?.description =
+        "The address the reset email was sent to, as typed (case and surrounding space do not matter)."
+    schema.properties?.get("code")?.description =
+        "The six ASCII digits from the reset email (surrounding space is trimmed). Another shape is " +
+        "`422 VALIDATION_FAILED` with the field's code `VALID_VERIFICATION_CODE`, and counts as no try."
+}
+
+private const val CHECK_DESCRIPTION =
+    "Says whether a typed password-reset code is right, so the app can say \"wrong code\" before the new password " +
+        "is typed. A check, not a grant: `204` means the code is right now, and nothing about it changes; the reset " +
+        "itself (`POST /auth/reset-password` with `email`, `code` and `password`) still takes the same code, and may " +
+        "still refuse it if it expires (15 minutes), is spent by the link, or is replaced by a newer email in " +
+        "between. A wrong check is a wrong try at that code: checks and resets share its 5 tries, and its ten typed " +
+        "codes a day per address, so checking first gains a guesser nothing. Every refusal is the reset's one " +
+        "answer, `422 PASSWORD_RESET_TOKEN_INVALID`."

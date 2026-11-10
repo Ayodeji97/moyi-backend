@@ -23,7 +23,7 @@ internal fun documentAccountDeletion(api: OpenAPI) {
     api.components.schemas[REQUEST_BODY]?.properties?.get("password")?.let { field ->
         field.types = setOf("string")
         field.minLength = 1
-        field.description = "The account's current password, typed again. Absent, null or blank is `422`; wrong is `401`."
+        field.description = "The account's current password, typed again. Absent, null or blank is `422`; wrong is `403`."
     }
     api.components.schemas[PROFILE]
         ?.properties
@@ -42,8 +42,9 @@ private const val REQUEST_DESCRIPTION =
         "a blank placeholder in each shared archive, so the other person's days and streak stay as they were; their " +
         "bookmarks, reactions, photos and voice notes, devices and sessions are deleted, their open support messages " +
         "emptied, and every bond they are still in ends as if they had left it. Asking again while one is pending " +
-        "is the same `202` with the same dates. The current `password` is required: wrong is `401 " +
-        "INVALID_CREDENTIALS` (the session is fine; do not sign out), absent or blank is `422`. A confirmed address " +
+        "is the same `202` with the same dates. The current `password` is required: wrong is `403 " +
+        "INVALID_CREDENTIALS`, without `WWW-Authenticate` (the session is fine; do not refresh or sign out), " +
+        "absent or blank is `422`. `401` here is only ever the access token refused. A confirmed address " +
         "is emailed once per request, saying when and how to cancel. Five an hour per account, wrong passwords " +
         "included: the sixth is `429` with `Retry-After`."
 

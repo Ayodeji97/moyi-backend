@@ -198,6 +198,31 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `a bond declares the date its time zone may change again, always sent, null when it may change now`() {
+        // #170: the same date as the refusal's allowedFrom, on the resource, so the screen can name it up front.
+        val bond = api.components.schemas["BondResponse"]!!
+        val allowedFrom = bond.properties["timezoneChangeAllowedFrom"]!!
+        allowedFrom.format shouldBe "date"
+        allowedFrom.types shouldBe setOf("string", "null")
+        bond.required shouldContain "timezoneChangeAllowedFrom"
+        allowedFrom.description shouldContain "allowedFrom"
+        allowedFrom.description shouldContain "anchorTimezone"
+    }
+
+    @Test
+    fun `a wrong password typed again while signed in is documented as 403, and 401 as the token's alone`() {
+        // #166: a client's bearer provider refreshes on a 401 from a signed-in route. The
+        // deletion request's wrong password is 403 INVALID_CREDENTIALS; sign-in keeps its 401.
+        val deletion = api.paths["/api/v1/me/deletion-request"]!!.post.responses
+        deletion["403"]!!.description shouldContain "INVALID_CREDENTIALS"
+        deletion["401"]!!.description shouldNotContain "INVALID_CREDENTIALS"
+        deletion["401"]!!.description shouldContain "UNAUTHENTICATED"
+        api.paths["/api/v1/auth/login"]!!
+            .post.responses["401"]!!
+            .description shouldContain "INVALID_CREDENTIALS"
+    }
+
+    @Test
     fun `the auth endpoints declare the 401, 410 and 503 they answer, with the codes each carries`() {
         // #137, and the state map's contractGaps, which listed each of these as a status the code answers and the
         // document did not declare. `scripts/state-map-check` now fails if one is undeclared again.
@@ -524,6 +549,51 @@ class OpenApiContractTest(
         submit.parameters.map { it.name } shouldContain IdempotencyInterceptor.HEADER
         submit.parameters.first { it.name == IdempotencyInterceptor.HEADER }.`in` shouldBe "header"
         submit.parameters.first { it.name == IdempotencyInterceptor.HEADER }.required shouldBe true
+    }
+
+    @Test
+    fun `every @Idempotent handler declares Idempotency-Key, required exactly when the annotation says so`() {
+        // #167: OpenApiConfiguration adds the header from a hand-kept list of
+        // operation ids, because springdoc cannot see `@Idempotent`. The list
+        // missed `reportMember`, and a client generated from the document sent
+        // no key and was refused 422 on every call. The controllers' own
+        // annotations are the authority; this holds the document to them.
+        val idempotent =
+            handlerMapping.handlerMethods.values
+                .mapNotNull { handler -> handler.getMethodAnnotation(Idempotent::class.java)?.let { handler.method.name to it } }
+        idempotent.shouldNotBeEmpty()
+
+        val byId = operations().associate { (_, op) -> op.operationId to op }
+        val wrong =
+            idempotent.mapNotNull { (operationId, annotation) ->
+                val key =
+                    byId[operationId]
+                        ?.parameters
+                        .orEmpty()
+                        .firstOrNull { it.name == IdempotencyInterceptor.HEADER && it.`in` == "header" }
+                val statuses = byId[operationId]?.responses?.keys.orEmpty()
+                when {
+                    byId[operationId] == null -> "$operationId: not in the document"
+
+                    key == null -> "$operationId: no ${IdempotencyInterceptor.HEADER} header"
+
+                    key.required != annotation.required -> "$operationId: required=${key.required}, annotation says ${annotation.required}"
+
+                    // The interceptor's own answers: a key in flight, a body past its bound.
+                    !statuses.containsAll(listOf("409", "413", "422")) -> "$operationId: answers 409, 413 and 422, declares $statuses"
+
+                    else -> null
+                }
+            }
+        wrong.shouldBeEmpty()
+
+        // And the reverse: no operation declares the key without the annotation behind it.
+        val annotated = idempotent.map { it.first }.toSet()
+        operations()
+            .filter { (_, op) -> op.parameters.orEmpty().any { it.name == IdempotencyInterceptor.HEADER } }
+            .map { (_, op) -> op.operationId }
+            .filterNot { it in annotated }
+            .shouldBeEmpty()
     }
 
     @Test

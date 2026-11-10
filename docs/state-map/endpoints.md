@@ -482,11 +482,11 @@ curl -X POST "$API/me/deletion-request" -H "Authorization: Bearer $TOKEN" -H 'Co
 | Region | In | When | Answer | Why | Rule | Evidence |
 |---|---|---|---|---|---|---|
 | `account.deletion` | `NONE` | the password is right | 202 → `PENDING` | With your current password: the request is recorded and 202 answers requestedAt, cancellableUntil (14 days on) and deleteBy (30 days on). Nothing is destroyed now. Your status, your sign-in and your other sessions are as they were. A confirmed address is emailed once, saying when it will happen and how to cancel. | FR-008, ADR-0058 | smoke |
-| `account.deletion` | `NONE` | the password sent is not the account's | 401 `INVALID_CREDENTIALS` | The password is checked again, and this one is wrong. Nothing is recorded, and it is not counted towards the sign-in lock. No WWW-Authenticate: your session is fine, do not sign out. Five tries an hour, then 429. | FR-008, ADR-0058 | smoke |
+| `account.deletion` | `NONE` | the password sent is not the account's | 403 `INVALID_CREDENTIALS` | The password is checked again, and this one is wrong. Nothing is recorded, and it is not counted towards the sign-in lock. 403, not 401, and no WWW-Authenticate: your session is fine, do not refresh or sign out (#166). Five tries an hour, then 429. | FR-008, ADR-0058 | smoke |
 | `account.deletion` | `PENDING` | the password is right | 202 stays | The same request: 202 with the same three dates, byte for byte, and no second email. | FR-008, ADR-0058 | smoke |
-| `account.deletion` | `PENDING` | the password sent is not the account's | 401 `INVALID_CREDENTIALS` | The password is checked before the pending request is looked at; nothing changes. | FR-008, ADR-0058 | never-run |
+| `account.deletion` | `PENDING` | the password sent is not the account's | 403 `INVALID_CREDENTIALS` | The password is checked before the pending request is looked at; nothing changes. | FR-008, ADR-0058 | never-run |
 | `account.deletion` | `WINDOW_CLOSED` | the password is right | 202 stays | Still the same pending request until the job has run: 202 with the same dates. It can no longer be cancelled. | FR-008, ADR-0058 | never-run |
-| `account.deletion` | `WINDOW_CLOSED` | the password sent is not the account's | 401 `INVALID_CREDENTIALS` | The password is wrong; nothing changes. | FR-008, ADR-0058 | never-run |
+| `account.deletion` | `WINDOW_CLOSED` | the password sent is not the account's | 403 `INVALID_CREDENTIALS` | The password is wrong; nothing changes. | FR-008, ADR-0058 | never-run |
 | `account.deletion` | `DELETED` |  | 401 `UNAUTHENTICATED` | The account is gone: every access token issued before it was deleted is refused, and it cannot sign in for a new one. | FR-008, ADR-0058, ADR-0019 §4 | never-run |
 
 ### DELETE /me/deletion-request
@@ -724,6 +724,40 @@ curl -X POST "$API/auth/reset-password" -H 'Content-Type: application/json' -d "
 | 422 | `VALIDATION_FAILED` | The body is not exactly one of a token, or an email and a code (one violation on tokenOrEmailAndCode); or the token is over 256 characters, the email is not shaped like an address, or the code is not six ASCII digits (VALID_VERIFICATION_CODE); or password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED). This is checked before the link or code is looked at, so a refused password spends neither and counts against no code. (the tests and the smoke script assert the status and the field's code, NOT_BREACHED, not VALIDATION_FAILED) | never-run |
 | 503 | `HASHING_CAPACITY_EXCEEDED` | Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. The link or the code is not spent. (the test of this answer drives register, not a reset) | never-run |
 | 503 | `CODE_CHECK_UNAVAILABLE` | An email, a code and a password only, while the store that counts typed codes (Redis) cannot be reached: no code is checked until it is back (owner's ruling 2026-11-09, ADR-0023 amended). Retry-After: 60. Answered before the address is looked up or the password hashed, the same bytes for every address; the code is neither counted nor spent. A token is never answered this: the reset link still works. | test |
+
+### POST /auth/reset-password/check
+
+check a typed reset code before the new password is typed
+
+**Needs:** no access token.
+
+- Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)
+- Content-Type (application/json. The email address and the six-digit code from the reset email, in the body, are what is checked)
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. The reset's own two buckets, not new ones: twenty an hour per client address, shared with verify-email and reset-password, spent before the body is checked; and ten typed codes a day per email address as typed, shared with the code forms of verify-email and reset-password, spent by every check, right or wrong, counted for every address whether or not it has an account: the eleventh is 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl -X POST "$API/auth/reset-password/check" -H 'Content-Type: application/json' -d "{\"email\": \"$EMAIL\", \"code\": \"$CODE\"}"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `account.reset` | `NONE` |  | 422 `PASSWORD_RESET_TOKEN_INVALID` | No reset code is held for the address (no account, or none asked for). The same bytes as a wrong code for an account that holds one, and the same answer reset-password gives. | #169, ADR-0022 (amended 2026-11-10) | smoke |
+| `account.reset` | `REQUESTED` | the code is the one in the newest reset email: under 15 minutes old, fewer than 5 wrong codes tried, and neither it nor its link used | 204 stays | A check, not a grant: the code is right now, and nothing about it changes. It is not spent, its tries are not reset, and the reset still needs the address, the code and the new password. It spends one of the address's ten typed codes today, as the reset will. | #169, ADR-0022 (amended 2026-11-10) | smoke |
+| `account.reset` | `REQUESTED` | the code is wrong, older than the newest reset email's, expired (15 minutes) or burned (5 wrong tries) | 422 `PASSWORD_RESET_TOKEN_INVALID` | The one answer for every refused code. A wrong check is a wrong try at the reset code: checks and resets share its five, so three wrong checks and two wrong resets burn it for both. The link beside it still works. | #169, ADR-0022 (amended 2026-11-10) | smoke |
+| `account.reset` | `USED` |  | 422 `PASSWORD_RESET_TOKEN_INVALID` | The code was spent with the reset (by the code or by the link beside it). The same 422 as a wrong code, never 410. | #169, ADR-0022 (amended 2026-11-10) | smoke |
+| `account.reset` | `EXPIRED` |  | 422 `PASSWORD_RESET_TOKEN_INVALID` | The link's hour has passed, and the code's fifteen minutes before it. The same 422 as a wrong code; ask for a new email. | #169, ADR-0022 (amended 2026-11-10) | test |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 400 | `MALFORMED_REQUEST` | The email or the code is missing (both are required), or the body is not JSON. Nothing is looked up and no try is counted. | smoke |
+| 422 | `VALIDATION_FAILED` | The email is blank or not shaped like an address, or the code is not six ASCII digits (VALID_VERIFICATION_CODE). Checked before the address is looked up, so it counts against no code. | test |
+| 503 | `CODE_CHECK_UNAVAILABLE` | The store that counts typed codes (Redis) cannot be reached: no code is checked until it is back (owner's ruling 2026-11-09, ADR-0023 amended; #169 put the check under the same ruling). Retry-After: 60. Answered before the address is looked up, the same bytes for every address; the code is neither counted nor spent. The reset link in the same email still works. | test |
 
 ## Bond
 
@@ -1581,13 +1615,6 @@ curl -X POST "$API/bonds/$BOND/members/other/report" -H "Authorization: Bearer $
 | 413 | `MALFORMED_REQUEST` | The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is filed. | never-run |
 | 429 | `RATE_LIMITED` | reports:create:user, ten a day, shared with the entry report route: one queue, one person reading it. Refused attempts count. | test |
 
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 409 | IDEMPOTENCY_KEY_IN_FLIGHT, when a request with the same Idempotency-Key is still being processed: the shared idempotency interceptor's answer, which springdoc does not read off this route. |
-| 413 | MALFORMED_REQUEST, for a body over one mebibyte: the shared idempotency interceptor refuses it before it is read, which springdoc does not read off this route. |
-
 ## Day
 
 ### POST /bonds/{bondId}/entries
@@ -1653,16 +1680,16 @@ curl -X POST "$API/bonds/$BOND/entries" -H "Authorization: Bearer $TOKEN" -H "Id
 | `day.partnerEntry` | `LOCKED` | a new request, the bond takes entries, and you have a live entry for today | 409 `ENTRY_ALREADY_EXISTS` | Both of you have written and the day is waiting for its reveal time, so a write from you is a second entry: it is refused, and your partner's entry stays locked. (the probe that shows this answer runs before the partner has written; nothing runs it here) On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-2 | never-run |
 | `day.partnerEntry` | `VISIBLE` | a new request, and the bond takes entries | 409 `DAY_CLOSED` | You can read your partner's words only on a revealed day, and a revealed day takes no new entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-10 | test |
 | `day.partnerEntry` | `DELETED` | a new request, and the bond takes entries | 409 `DAY_CLOSED` | A tombstone with its id and dates is shown only for an entry you could once read, so the day was revealed, and a revealed day takes no new entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-10 | never-run |
-| `media` | `NONE` |  | 422 `VALIDATION_FAILED` | No photo or voice note of yours has this id: another user's, a v7 id, or nothing at all. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | smoke |
-| `media` | `PENDING_UPLOAD` |  | 422 `VALIDATION_FAILED` | Not READY. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | never-run |
-| `media` | `UPLOADED` |  | 422 `VALIDATION_FAILED` | Not READY: still to be processed. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | never-run |
-| `media` | `PROCESSING` |  | 422 `VALIDATION_FAILED` | Not READY yet. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | test |
+| `media` | `NONE` |  | 422 `VALIDATION_FAILED` | No photo or voice note of yours has this id: another user's, a v7 id, or nothing at all. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY (or held back by moderation) and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | smoke |
+| `media` | `PENDING_UPLOAD` |  | 422 `VALIDATION_FAILED` | Not READY. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY (or held back by moderation) and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | never-run |
+| `media` | `UPLOADED` |  | 422 `VALIDATION_FAILED` | Not READY: still to be processed. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY (or held back by moderation) and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | never-run |
+| `media` | `PROCESSING` |  | 422 `VALIDATION_FAILED` | Not READY yet. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY (or held back by moderation) and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | test |
 | `media` | `READY` | your email is verified | 201 → `READY_ATTACHED` | The entry is written with the photo, which is claimed for it in the entry's own transaction by one conditional update: two entries racing for one photo have one winner. The author sees it READY with its URL; the partner, once the day reveals, sees it PROCESSING until it has passed moderation (D4). A voice note is claimed the same way, on voiceMediaId, after the photo, and shown the same way: READY to its author, PROCESSING to the partner until it has passed moderation (FR-061, ADR-0049). | FR-044a, FR-101, spec §4 D2, ADR-0048 §4-5, spec §4 D3 | smoke |
 | `media` | `READY` | your email is not verified | 403 `EMAIL_NOT_VERIFIED` | media's claim refuses an unverified owner, and the entry is not written; an entry with no photo or voice note is not refused. No route reaches this today: FR-002 lets only a verified account into a bond, nothing un-verifies one, and an unverified account cannot make an asset to attach. The claim holds the rule anyway, so that whatever later lets one in meets it. PATCH /entries/{entryId} claims the same way. | the owner's ruling of 2026-10-29, ADR-0049 | test |
-| `media` | `READY_ATTACHED` |  | 422 `VALIDATION_FAILED` | Already on another entry. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | test |
-| `media` | `QUARANTINED` |  | 422 `VALIDATION_FAILED` | Only a READY asset is claimed (FR-044a), so one moderation held back before it was attached is refused on imageMediaId or voiceMediaId, with the same one refusal as every other cause; the entry is not written. Its GET /media/{id} says QUARANTINED, so a client can say it will not be shared before it is sent. | FR-044a, ADR-0048 §4, ADR-0051 | test |
-| `media` | `FAILED` |  | 422 `VALIDATION_FAILED` | Not READY: the pipeline refused it. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | smoke |
-| `media` | `DELETED` |  | 422 `VALIDATION_FAILED` | Deleted. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | never-run |
+| `media` | `READY_ATTACHED` |  | 422 `VALIDATION_FAILED` | Already on another entry. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY (or held back by moderation) and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | test |
+| `media` | `QUARANTINED` | your email is verified | 201 stays | Attached, and the entry written, exactly as if moderation had held it back a moment after the POST (#149): one outcome whatever the timing, so the answer does not tell the author when moderation ran, and their entry is not lost. The claim changes only the attachment; the verdict, the status and a blocked one's evidence hold stay. The author is shown it NOT_SHARED (with its URL unless it was blocked) on the POST's answer and every read after; the partner, once the day reveals, PROCESSING with nothing of it. A voice note on voiceMediaId the same. PATCH /entries/{entryId} claims the same way. | FR-044a, ADR-0051 §4 and §8 (amended for #149), ADR-0048 §4 | test |
+| `media` | `FAILED` |  | 422 `VALIDATION_FAILED` | Not READY: the pipeline refused it. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY (or held back by moderation) and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | smoke |
+| `media` | `DELETED` |  | 422 `VALIDATION_FAILED` | Deleted. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY (or held back by moderation) and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | never-run |
 
 #### Whatever the state
 
@@ -1764,7 +1791,8 @@ curl -X PATCH "$API/entries/$ENTRY" -H "Authorization: Bearer $TOKEN" -H 'Conten
 | 413 | `MALFORMED_REQUEST` | The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is written. The limit holds whether or not a key is sent. | never-run |
 | 422 | `VALIDATION_FAILED` | The text is missing, blank or only invisible characters (zero-width spaces, joiners and the like), is over 500 graphemes counted as sent or 8192 bytes, or holds a NUL character or an unpaired surrogate; or an Idempotency-Key was sent and is not valid. (a test asserts the status, not the code) | never-run |
 | 422 | `IDEMPOTENCY_KEY_REUSED` | This Idempotency-Key was already used by you for a different request: another body, or another path. Only when the optional key is sent. | never-run |
-| 422 | `VALIDATION_FAILED` | imageMediaId names no photo, or voiceMediaId no voice note, media will attach to this entry: not yours, not READY, of the other kind, or on another entry; one answer on the field it names. Asked under the entry's lock, after ENTRY_IMMUTABLE, the photo first; nothing changes. A new one in place of the entry's lets the old one go; an absent field leaves the entry's as it is. | test |
+| 422 | `VALIDATION_FAILED` | imageMediaId names no photo, or voiceMediaId no voice note, media will attach to this entry: not yours, not READY, of the other kind, or on another entry; one answer on the field it names. Asked under the entry's lock, after ENTRY_IMMUTABLE, the photo first; nothing changes. A new one in place of the entry's lets the old one go; an absent field leaves the entry's as it is. removeImage or removeVoice takes the entry's off instead, letting it go the same way (ADR-0048 decision 7); removing one that is not there is 200 and changes nothing. | test |
+| 422 | `VALIDATION_FAILED` | removeImage is true and imageMediaId is given too, or removeVoice and voiceMediaId: take it off, or attach one in its place, not both. One answer on removeImageWithoutImageMediaId or removeVoiceWithoutVoiceMediaId; nothing changes (ADR-0048 decision 7). | smoke |
 
 ### DELETE /entries/{entryId}
 

@@ -50,6 +50,7 @@ internal class LiveOrSentTest(
                     dedupeKey = "on-this-day:probe",
                     staleAfter = asked.plus(Duration.ofHours(12)),
                     recipient = PushRecipient(ZoneId.of("Africa/Lagos"), null, NotificationPreferences(onThisDay = true)),
+                    bondDate = null,
                 ),
             )
         }

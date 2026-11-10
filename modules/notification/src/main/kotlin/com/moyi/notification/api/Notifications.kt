@@ -1,6 +1,7 @@
 package com.moyi.notification.api
 
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.util.UUID
@@ -82,6 +83,13 @@ interface Notifications {
  * @property recipient The member's settings in this Bond, resolved by the
  *   caller: this module cannot read them (spec §2.1). Required, with no
  *   default, so that no caller can forget a member's mute or quiet hours.
+ * @property bondDate The Bond-day the push is about: that day's own calendar
+ *   date in the bond's anchor zone (`bond_days.date`), never the date of the
+ *   instant it was asked for in some other zone. `null` for a push about no
+ *   day (a partner joining, a proposal). It reaches the phone as `data.date`
+ *   so that a tap opens that day (issue #146). It directs and authorises
+ *   nothing: the app still loads the day from the server. Required, with no
+ *   default, so that every caller decides whether its push concerns a day.
  */
 data class PushRequest(
     val userId: UUID,
@@ -90,6 +98,7 @@ data class PushRequest(
     val dedupeKey: String,
     val staleAfter: Instant,
     val recipient: PushRecipient,
+    val bondDate: LocalDate?,
 ) {
     init {
         require(dedupeKey.length in 1..MAX_DEDUPE_KEY_LENGTH) { "a dedupe key must be 1 to $MAX_DEDUPE_KEY_LENGTH characters" }

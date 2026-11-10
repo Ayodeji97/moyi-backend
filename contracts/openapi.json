@@ -695,6 +695,99 @@
         "tags" : [ "password-reset-controller" ]
       }
     },
+    "/api/v1/auth/reset-password/check" : {
+      "post" : {
+        "description" : "Says whether a typed password-reset code is right, so the app can say \"wrong code\" before the new password is typed. A check, not a grant: `204` means the code is right now, and nothing about it changes; the reset itself (`POST /auth/reset-password` with `email`, `code` and `password`) still takes the same code, and may still refuse it if it expires (15 minutes), is spent by the link, or is replaced by a newer email in between. A wrong check is a wrong try at that code: checks and resets share its 5 tries, and its ten typed codes a day per address, so checking first gains a guesser nothing. Every refusal is the reset's one answer, `422 PASSWORD_RESET_TOKEN_INVALID`.",
+        "operationId" : "checkResetCode",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ResetCodeCheckRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized: `UNAUTHENTICATED`. This route needs no access token, but one that is sent is checked, and an expired or unaccepted one is refused. Send no `Authorization` header here."
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unprocessable: `VALIDATION_FAILED` for an `email` or `code` of the wrong shape; that spends no try. `PASSWORD_RESET_TOKEN_INVALID` for every refused code: no such account, a wrong code, or one expired (15 minutes), burned (5 wrong tries) or spent. One answer for all of them, on purpose, and the same one `reset-password` gives; a wrong code here is one of the code's 5 tries."
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Service Unavailable: `CODE_CHECK_UNAVAILABLE`, with `Retry-After: 60`, for an `email` and `code` only: the limit on typed codes cannot be read just now, so no code is checked. The code is not spent or counted, and the answer is the same whether the address has an account. The link in the same email still works; offer it, or try the code again after the wait."
+          }
+        },
+        "security" : [ ],
+        "tags" : [ "password-reset-controller" ]
+      }
+    },
     "/api/v1/auth/sessions" : {
       "get" : {
         "operationId" : "list",
@@ -2752,6 +2845,17 @@
           "schema" : {
             "type" : "string"
           }
+        }, {
+          "description" : "A client-chosen key, unique per retried request (doc 06 §1). A replay of the same key with the same request returns the first attempt's status and the same resource, re-read and rendered from its current state — never a stored copy. A replay is authorised as a read of the result: a caller who may still read it gets it back even if a new write would now be refused, a caller who may no longer read it gets the read's refusal, and a resource erased since is returned as its tombstone. Only a success is recorded; a request that was refused may be corrected and retried under the same key. The same key with a different method, path or body is 422; the same key while the first attempt is still in flight is 409. The key itself is 1 to 255 visible ASCII characters (a UUID is the usual choice); a malformed one is 422 VALIDATION_FAILED with an `errors` entry naming this header, and so is a missing one wherever this parameter is marked required. Where it is optional, leaving it out makes an ordinary, unrecorded request.",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 255,
+            "minLength" : 1,
+            "pattern" : "^[\\x21-\\x7E]+$"
+          }
         } ],
         "requestBody" : {
           "content" : {
@@ -2772,7 +2876,15 @@
                 }
               }
             },
-            "description" : "Created"
+            "description" : "Created",
+            "headers" : {
+              "Idempotency-Replayed" : {
+                "description" : "`true` when this response answers a replay of an earlier request under the same Idempotency-Key (doc 06 §1): nothing was written again, and the body is the resource as it stands now. Absent on a fresh response.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
           },
           "400" : {
             "content" : {
@@ -2813,6 +2925,26 @@
               }
             },
             "description" : "Not Found"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Conflict"
+          },
+          "413" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Content Too Large"
           },
           "415" : {
             "content" : {
@@ -4953,7 +5085,7 @@
         "tags" : [ "deletion-request-controller" ]
       },
       "post" : {
-        "description" : "Asks for the signed-in account to be deleted (FR-008). Nothing is destroyed now: `202` answers with `requestedAt`, `cancellableUntil` (14 days later) and `deleteBy` (30 days later, FR-008's bound). Until `cancellableUntil` the person can still sign in and use the app, and `DELETE` calls it off; other sessions are not ended. From `cancellableUntil` it cannot be cancelled, and within the hour the account is deleted: the address and name are erased and the account can no longer sign in; every entry its owner wrote becomes a blank placeholder in each shared archive, so the other person's days and streak stay as they were; their bookmarks, reactions, photos and voice notes, devices and sessions are deleted, their open support messages emptied, and every bond they are still in ends as if they had left it. Asking again while one is pending is the same `202` with the same dates. The current `password` is required: wrong is `401 INVALID_CREDENTIALS` (the session is fine; do not sign out), absent or blank is `422`. A confirmed address is emailed once per request, saying when and how to cancel. Five an hour per account, wrong passwords included: the sixth is `429` with `Retry-After`.",
+        "description" : "Asks for the signed-in account to be deleted (FR-008). Nothing is destroyed now: `202` answers with `requestedAt`, `cancellableUntil` (14 days later) and `deleteBy` (30 days later, FR-008's bound). Until `cancellableUntil` the person can still sign in and use the app, and `DELETE` calls it off; other sessions are not ended. From `cancellableUntil` it cannot be cancelled, and within the hour the account is deleted: the address and name are erased and the account can no longer sign in; every entry its owner wrote becomes a blank placeholder in each shared archive, so the other person's days and streak stay as they were; their bookmarks, reactions, photos and voice notes, devices and sessions are deleted, their open support messages emptied, and every bond they are still in ends as if they had left it. Asking again while one is pending is the same `202` with the same dates. The current `password` is required: wrong is `403 INVALID_CREDENTIALS`, without `WWW-Authenticate` (the session is fine; do not refresh or sign out), absent or blank is `422`. `401` here is only ever the access token refused. A confirmed address is emailed once per request, saying when and how to cancel. Five an hour per account, wrong passwords included: the sixth is `429` with `Retry-After`.",
         "operationId" : "requestAccountDeletion",
         "requestBody" : {
           "content" : {
@@ -4994,7 +5126,7 @@
                 }
               }
             },
-            "description" : "Unauthorized"
+            "description" : "Unauthorized: `UNAUTHENTICATED`, with a `WWW-Authenticate: Bearer` challenge: the access token was refused. Never a wrong password, which is 403."
           },
           "403" : {
             "content" : {
@@ -5004,7 +5136,7 @@
                 }
               }
             },
-            "description" : "Forbidden"
+            "description" : "Forbidden: `INVALID_CREDENTIALS`, the password sent is not the account's. No `WWW-Authenticate`: the access token was accepted, so do not refresh or sign out; ask for the password again. Nothing is recorded, and the try is not counted towards the sign-in lock."
           },
           "415" : {
             "content" : {
@@ -6239,12 +6371,17 @@
           "strictMode" : {
             "type" : "boolean"
           },
+          "timezoneChangeAllowedFrom" : {
+            "type" : [ "string", "null" ],
+            "format" : "date",
+            "description" : "The first date (`YYYY-MM-DD`, in the bond's shared time zone, `anchorTimezone`) from whose start the shared time zone can be changed again (FR-027: once every 30 days); null when it can be changed now. It is the date a `409 TIMEZONE_CHANGE_TOO_SOON` would give as `allowedFrom`, so a client can name it before the attempt. It goes from the representation, and the ETag changes, when that moment passes, with no write to the bond."
+          },
           "type" : {
             "type" : "string",
             "enum" : [ "COUPLE", "FRIENDS", "FAMILY", "PARENT_CHILD" ]
           }
         },
-        "required" : [ "anchorTimezone", "archivedAt", "createdAt", "deletionScheduledFor", "id", "invite", "maxMembers", "me", "members", "name", "pendingDeletionRequest", "pendingSemanticSearchRequest", "pendingTimezoneChange", "revealTimeLocal", "semanticSearchEnabled", "status", "strictMode", "type" ]
+        "required" : [ "anchorTimezone", "archivedAt", "createdAt", "deletionScheduledFor", "id", "invite", "maxMembers", "me", "members", "name", "pendingDeletionRequest", "pendingSemanticSearchRequest", "pendingTimezoneChange", "revealTimeLocal", "semanticSearchEnabled", "status", "strictMode", "timezoneChangeAllowedFrom", "type" ]
       },
       "BondsResponse" : {
         "type" : "object",
@@ -6456,7 +6593,7 @@
         "properties" : {
           "password" : {
             "type" : "string",
-            "description" : "The account's current password, typed again. Absent, null or blank is `422`; wrong is `401`.",
+            "description" : "The account's current password, typed again. Absent, null or blank is `422`; wrong is `403`.",
             "maxLength" : 512,
             "minLength" : 1
           }
@@ -6529,7 +6666,7 @@
       },
       "EntryImageResponse" : {
         "type" : "object",
-        "description" : "An entry's photo as the caller is shown it. url, width and height are present when status is READY: to its author once it is ready, to the other member only once it has also passed moderation; until then it is PROCESSING to them, whatever the reason. NOT_SHARED is its author's alone: the photo is held back, for review, from the other member, who is shown PROCESSING and never told it was removed; url, width and height are still given, unless it was blocked outright, when they are null. sensitive is true when the photo passed moderation with adult nudity found: show it blurred, behind a tap to view; it is false otherwise, and always false unless status is READY. The url is a signed GET, valid for at least 24 hours, ending on the hour and the same all hour, so it may be cached by; it is a credential for the photo.",
+        "description" : "An entry's photo as the caller is shown it. url, width and height are present when status is READY: to its author once it is ready, to the other member only once it has also passed moderation; until then it is PROCESSING to them, whatever the reason. NOT_SHARED is its author's alone: the photo is held back, for review, from the other member, who is shown PROCESSING and never told it was removed; url, width and height are still given, unless it was blocked outright, when they are null. A photo held back before the entry was sent is attached all the same and is NOT_SHARED from the entry's first answer, exactly as one held back after: the outcome does not depend on when moderation ran. sensitive is true when the photo passed moderation with adult nudity found: show it blurred, behind a tap to view; it is false otherwise, and always false unless status is READY. The url is a signed GET, valid for at least 24 hours, ending on the hour and the same all hour, so it may be cached by; it is a credential for the photo.",
         "properties" : {
           "height" : {
             "type" : [ "integer", "null" ],
@@ -6620,7 +6757,7 @@
       },
       "EntryVoiceResponse" : {
         "type" : "object",
-        "description" : "An entry's voice note as the caller is played it. url and durationMs are present when status is READY, to its author once it is transcoded, to the other member only once it has passed moderation; until then it is PROCESSING to them, whatever the reason. NOT_SHARED is its author's alone, as a photo's: held back from the other member for review; url and durationMs are still given unless it was blocked outright. sensitive as a photo's. The url is a signed GET of an Ogg Opus file (mono, 24 kbit/s), valid for at least 24 hours, ending on the hour and the same all hour, so it may be cached by; it is a credential for the voice note. durationMs is the length of what was transcoded, at most 61.1 seconds. urlAac is the same note as AAC-LC in MP4 (.m4a, mono, about 32 kbit/s, its index first), which iOS can stream: given to exactly whoever is given url, signed at the same moment and valid as long, and a credential as url is. It is null whenever url is, and also for a note processed before it existed or whose AAC copy could not be made; play url then.",
+        "description" : "An entry's voice note as the caller is played it. url and durationMs are present when status is READY, to its author once it is transcoded, to the other member only once it has passed moderation; until then it is PROCESSING to them, whatever the reason. NOT_SHARED is its author's alone, as a photo's: held back from the other member for review, whether before or after the entry was sent; url and durationMs are still given unless it was blocked outright. sensitive as a photo's. The url is a signed GET of an Ogg Opus file (mono, 24 kbit/s), valid for at least 24 hours, ending on the hour and the same all hour, so it may be cached by; it is a credential for the voice note. durationMs is the length of what was transcoded, at most 61.1 seconds. urlAac is the same note as AAC-LC in MP4 (.m4a, mono, about 32 kbit/s, its index first), which iOS can stream: given to exactly whoever is given url, signed at the same moment and valid as long, and a credential as url is. It is null whenever url is, and also for a note processed before it existed or whose AAC copy could not be made; play url then.",
         "properties" : {
           "durationMs" : {
             "type" : [ "integer", "null" ],
@@ -7166,6 +7303,16 @@
             "type" : [ "string", "null" ],
             "format" : "uuid"
           },
+          "removeImage" : {
+            "type" : "boolean",
+            "default" : false,
+            "description" : "`true` takes the entry's photo off; it is then attached to nothing and deleted a day later unless attached again, as a replaced one is. Removing a photo the entry does not have changes nothing (`200`). `true` together with `imageMediaId` is `422 VALIDATION_FAILED`. Before the reveal only, as every edit."
+          },
+          "removeVoice" : {
+            "type" : "boolean",
+            "default" : false,
+            "description" : "`true` takes the entry's voice note off; it is then attached to nothing and deleted a day later unless attached again, as a replaced one is. Removing a voice note the entry does not have changes nothing (`200`). `true` together with `voiceMediaId` is `422 VALIDATION_FAILED`. Before the reveal only, as every edit."
+          },
           "text" : {
             "type" : "string",
             "description" : "FR-041: at least one character that is neither whitespace (Unicode-aware, so a lone non-breaking space does not count either) nor invisible (Unicode's Default_Ignorable_Code_Point: a text of only zero-width spaces, joiners, variation selectors and the like is refused as empty; the published `pattern` does not express this, and matches such a text), at most 8192 UTF-8 octets and at most 500 user-perceived characters (graphemes, not UTF-16 code units — an emoji sequence can be one grapheme and several of those). `maxLength` here states the octet cap in UTF-16 characters, which is not the same unit as either real limit and both are wider than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a guarantee. The server enforces both limits exactly and is the only authority on whether a given body is accepted. The text is stored and returned exactly as sent — not normalised, not trimmed. The 500 are counted as typed, on the text as sent, untrimmed (so a typographic ellipsis counts as one, and a leading or trailing space counts too), and so are the octets. U+0000 is refused.",
@@ -7456,6 +7603,23 @@
           }
         },
         "required" : [ "email" ]
+      },
+      "ResetCodeCheckRequest" : {
+        "type" : "object",
+        "description" : "The address the reset email was sent to, and the six digits in it. No `token`: a link needs no check.",
+        "properties" : {
+          "code" : {
+            "type" : "string",
+            "description" : "The six ASCII digits from the reset email (surrounding space is trimmed). Another shape is `422 VALIDATION_FAILED` with the field's code `VALID_VERIFICATION_CODE`, and counts as no try.",
+            "minLength" : 1
+          },
+          "email" : {
+            "type" : "string",
+            "description" : "The address the reset email was sent to, as typed (case and surrounding space do not matter).",
+            "minLength" : 1
+          }
+        },
+        "required" : [ "code", "email" ]
       },
       "ResetPasswordRequest" : {
         "type" : "object",

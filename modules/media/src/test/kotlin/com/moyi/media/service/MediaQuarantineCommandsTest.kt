@@ -290,14 +290,20 @@ internal class MediaQuarantineCommandsTest(
         purgedAt(reported) shouldBe false
     }
 
-    /** FR-044a: only a READY asset is claimed, so what was held back before it was attached is refused with the one refusal. */
+    /**
+     * #149: what was held back before it was attached is attached, as it would have been had moderation been a
+     * moment slower, and stays held back: its verdict, its status and a blocked one's evidence hold are untouched.
+     */
     @Test
-    fun `a held-back asset is not attached to an entry`() {
+    fun `a held-back asset is attached to an entry and stays held back`() {
         val violent = held("QUARANTINED", "EXTREME_VIOLENCE")
         val blocked = held("BLOCKED", "KNOWN_IMAGE")
         for (id in listOf(violent, blocked)) {
-            transactions.execute { attachments.claim(ada, id, AttachableKind.IMAGE, UUID.randomUUID()) } shouldBe false
+            transactions.execute { attachments.claim(ada, id, AttachableKind.IMAGE, UUID.randomUUID()) } shouldBe true
         }
+        status(violent) shouldBe "QUARANTINED|QUARANTINED"
+        status(blocked) shouldBe "QUARANTINED|BLOCKED"
+        evidenceHeld(blocked) shouldBe true
     }
 
     // The four ways a person at psql could undo a hold (review of #113), each refused by the database itself.

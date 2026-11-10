@@ -8,6 +8,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -48,6 +49,34 @@ internal class SigningKeysTest {
         val flattened = pem("PRIVATE KEY", pair.private.encoded).replace("\n", " ")
 
         SigningKeys.from(configured(flattened, pem("PUBLIC KEY", pair.public.encoded))).publicKey shouldBe pair.public
+    }
+
+    @Test
+    fun `line breaks spelt out, or doubled by Kamal's env file, or gone, read as the same keys`() {
+        val pair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
+        val private = pem("PRIVATE KEY", pair.private.encoded)
+        val public = pem("PUBLIC KEY", pair.public.encoded)
+
+        listOf<(String) -> String>(
+            { it.replace("\n", "\\n") },
+            { it.replace("\n", "\\\\n") },
+            { it.replace("\n", "") },
+        ).forEach { form ->
+            // The modulus check would refuse a private key that read differently.
+            SigningKeys.from(configured(form(private), form(public))).publicKey shouldBe pair.public
+        }
+    }
+
+    @Test
+    fun `a PEM that is not base64 names its property and not its contents`() {
+        val pair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
+        val broken = "-----BEGIN PRIVATE KEY-----\nMIIE%%%secretish\n-----END PRIVATE KEY-----"
+
+        val failure =
+            shouldThrow<IllegalStateException> { SigningKeys.from(configured(broken, pem("PUBLIC KEY", pair.public.encoded))) }
+
+        failure.message shouldContain "moyi.security.jwt.private-key-pem is not valid base64"
+        generateSequence<Throwable>(failure) { it.cause }.forEach { (it.message ?: "") shouldNotContain "secretish" }
     }
 
     @Test
