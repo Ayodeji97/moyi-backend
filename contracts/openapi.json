@@ -6639,9 +6639,21 @@
           },
           "url" : {
             "type" : [ "string", "null" ]
+          },
+          "waveform" : {
+            "type" : [ "array", "null" ],
+            "description" : "The voice note's loudness over time, to draw: 64 levels, each 0 to 255, one per equal slice of its length in order, the RMS of that slice scaled so that the loudest is 255 (all 0 for a silent note). Measured by the server from the note it keeps, never sent by a client. Given exactly when url is; null when url is, and for a note processed before levels were measured, when the client draws its own stand-in.",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32",
+              "maximum" : 255,
+              "minimum" : 0
+            },
+            "maxItems" : 64,
+            "minItems" : 64
           }
         },
-        "required" : [ "durationMs", "id", "sensitive", "status", "url" ]
+        "required" : [ "durationMs", "id", "sensitive", "status", "url", "waveform" ]
       },
       "FieldViolation" : {
         "type" : "object",

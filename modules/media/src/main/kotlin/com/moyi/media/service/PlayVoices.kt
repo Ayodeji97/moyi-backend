@@ -48,12 +48,19 @@ internal class PlayVoices(
             is MediaAsset.Heard.Ready -> {
                 // No storage configured: nothing a URL could reach, so still processing (as a photo).
                 val url = urls.sign(heard.key, signedAt) ?: return processing(asset)
-                VoiceView(asset.id, VoiceViewStatus.READY, url, heard.durationMs, heard.sensitive)
+                VoiceView(asset.id, VoiceViewStatus.READY, url, heard.durationMs, heard.waveform?.levels, heard.sensitive)
             }
 
             is MediaAsset.Heard.NotShared -> {
                 val url = heard.key?.let { urls.sign(it, signedAt) }
-                VoiceView(asset.id, VoiceViewStatus.NOT_SHARED, url, heard.durationMs?.takeIf { url != null })
+                // The length and the waveform go with the URL: none without it (blocked, or no storage).
+                VoiceView(
+                    asset.id,
+                    VoiceViewStatus.NOT_SHARED,
+                    url,
+                    heard.durationMs?.takeIf { url != null },
+                    heard.waveform?.levels?.takeIf { url != null },
+                )
             }
         }
 

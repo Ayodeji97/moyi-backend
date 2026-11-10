@@ -26,9 +26,10 @@ interface VoiceViews {
 }
 
 /**
- * A voice note as one person is played it: `{id, status, url?, durationMs?, sensitive}`.
+ * A voice note as one person is played it: `{id, status, url?, durationMs?, waveform?, sensitive}`.
  * [url] and [durationMs] are present when [status] is [VoiceViewStatus.READY],
- * and on [VoiceViewStatus.NOT_SHARED] unless it was blocked.
+ * and on [VoiceViewStatus.NOT_SHARED] unless it was blocked. [waveform] is
+ * given exactly when [url] is, and only if the note has one (ADR-0061).
  *
  * [url] is a signed GET of an Ogg Opus file, valid for at least 24 hours,
  * ending on the hour and the same for every request in that hour, as a
@@ -40,11 +41,18 @@ class VoiceView(
     val status: VoiceViewStatus,
     val url: URI?,
     val durationMs: Int?,
+    /**
+     * 64 levels, each 0 to 255, of the note's loudness over equal slices of
+     * its length, the loudest 255 unless it is silent (ADR-0061). Null when
+     * there is no [url], and for a note processed before it was measured.
+     */
+    val waveform: List<Int>? = null,
     /** Passed moderation with something found that the client blurs (Q16); false otherwise. */
     val sensitive: Boolean = false,
 ) {
     override fun toString(): String =
-        "VoiceView(id=$id, status=$status, url=${url?.let { "<redacted>" }}, durationMs=$durationMs, sensitive=$sensitive)"
+        "VoiceView(id=$id, status=$status, url=${url?.let { "<redacted>" }}, durationMs=$durationMs, " +
+            "waveform=${waveform?.let { "<${it.size} levels>" }}, sensitive=$sensitive)"
 }
 
 enum class VoiceViewStatus {

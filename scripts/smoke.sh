@@ -11,6 +11,16 @@
 # 1 skipped (the tag across the erasure, the poller having won the race); export_archive_deletions
 # empty after it.
 #
+# Issue #165 adds four voice-note probes and three for a deleted one: the waveform media.process
+# measured (ADR-0061), 64 levels of 0-255 with the loudest 255 on the author's entry, 64 bytes on the
+# asset, the same levels to the listener once the note has passed, none on the locked day; and a
+# loose voice note deleted by its owner keeps no waveform on its row. Last run on 2026-11-10, on
+# feat/voice-waveform (main e273a416), from a jar of the branch's tree, on a fresh database that
+# applied 49 migrations to V57, against its own compose project (moyi-42f: Postgres 55660, Valkey
+# 56660, MinIO 57660), the jar booted by hand (local profile, the five crons at */5) and --attach:
+# 1610 passed, 0 failed, 0 skipped. A run before it stopped in the media section when Colima
+# killed that project's MinIO (exit 137, memory shared with four other sessions), not the code.
+#
 # Issue #126 adds the data-export section: 401 without a token, 404 for a latest never asked for,
 # 202 PREPARING and the same export again, one 404 for someone else's id and a missing one, the job
 # (on a five-second cron) making it READY with a URL good for exactly 24 hours, the zip downloaded
@@ -3235,12 +3245,17 @@ expect "voice: another user's voice note on an entry is 422 on voiceMediaId" 422
 expect "voice: a photo named as a voice note is 422 on voiceMediaId" 422 '"field":"voiceMediaId"' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"wrong kind\",\"voiceMediaId\":\"$VO_PHOTO\"}"
 expect "voice: M4 - an entry with a photo and a voice note is 201, both READY to the author" 201 '"durationMs":' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"hear the rain\",\"imageMediaId\":\"$VO_PHOTO\",\"voiceMediaId\":\"$VO_NOTE\"}"
 VO_ENTRY="$(printf '%s' "$LAST_BODY")"
+# Issue #165 (ADR-0061): the waveform media.process measured from the Opus it kept, 64 levels of
+# 0-255, the loudest 255; a steady tone, so every slice away from the ends is loud.
+is "voice: …with its waveform, 64 levels of 0-255, the loudest 255 (ADR-0061)" "$(python3 -c "import json,sys; w=json.load(sys.stdin)['voice']['waveform']; print(len(w), all(type(x) is int and 0 <= x <= 255 for x in w), max(w), min(w[4:60]) >= 200)" <<<"$VO_ENTRY")" "64 True 255 True"
+db_is "voice: …kept on the asset as 64 bytes" "$(sql "SELECT octet_length(waveform) FROM media_assets WHERE id='$VO_NOTE'")" "64"
+VO_LEVELS="$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['waveform'])" <<<"$VO_ENTRY")"
 is "voice: …the photo READY to its author" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['image']['status'])" <<<"$VO_ENTRY")" "READY"
 is "voice: …the voice note READY to its author" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['status'])" <<<"$VO_ENTRY")" "READY"
 db_is "voice: …the voice note is attached to that entry" "$(sql "SELECT (m.attached_entry_id = e.id) FROM media_assets m JOIN entries e ON e.voice_media_id = m.id WHERE m.id='$VO_NOTE'")" "t"
 db_is "voice: …and its length is the asset's, not the entry's (spec D-10)" "$(sql "SELECT voice_duration_ms IS NULL FROM entries WHERE voice_media_id='$VO_NOTE'")" "t"
 expect "voice: the listener's locked entry says nothing of the voice note" 200 '"status":"LOCKED"' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_B"
-if printf '%s' "$LAST_BODY" | grep -q -e "$VO_NOTE" -e '"voice"' -e 'durationMs' -e 'X-Amz'; then fail "voice: …no id, no voice field, no length, no URL" "the locked day carries something of the voice note"; else pass "voice: …no id, no voice field, no length, no URL"; fi
+if printf '%s' "$LAST_BODY" | grep -q -e "$VO_NOTE" -e '"voice"' -e 'durationMs' -e 'waveform' -e 'X-Amz'; then fail "voice: …no id, no voice field, no length, no waveform, no URL" "the locked day carries something of the voice note"; else pass "voice: …no id, no voice field, no length, no waveform, no URL"; fi
 expect "voice: deleting a voice note on an entry is 409 MEDIA_ATTACHED" 409 '"code":"MEDIA_ATTACHED"' -- -X DELETE "$API/media/$VO_NOTE" -H "Authorization: Bearer $VO_A"
 expect "voice: the listener writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_B" -H "Idempotency-Key: $(uuidgen)" -d '{"text":"and mine, in words"}'
 # The listener hears it only once it has passed moderation (FR-061, ADR-0049 decision 7); the local
@@ -3250,12 +3265,19 @@ is "voice: …and the photo too" "$(await_verdict "$VO_PHOTO")" "PASSED"
 expect "voice: once revealed and passed, the listener is played the voice note" 200 '"partnerEntry"' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_B"
 VO_PARTNER="$(python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['partnerEntry']))" <<<"$LAST_BODY")"
 is "voice: …READY to the listener, with a URL and its length" "$(python3 -c "import json,sys; v=json.load(sys.stdin)['voice']; print(v['status'], v['url'] is not None, v['durationMs'] is not None)" <<<"$VO_PARTNER")" "READY True True"
+is "voice: …and the speaker's waveform, the same 64 levels (ADR-0061)" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['waveform'])" <<<"$VO_PARTNER")" "$VO_LEVELS"
 is "voice: …and the photo READY to the listener (FR-101)" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['image']['status'])" <<<"$VO_PARTNER")" "READY"
 expect "voice: the speaker still plays it READY on the revealed day" 200 '"durationMs":' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_A"
 expect "voice: an outsider reaches neither the voice note nor the day" 404 '"code":"NOT_FOUND"' -- "$API/media/$VO_NOTE" -H "Authorization: Bearer $VO_O"
 if grep -q "$(printf '%s' "$VO_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then
   fail "voice: the voice note's URL is in no log line" "its signature is in $MOYI_LOG"
 else pass "voice: the voice note's URL is in no log line"; fi
+# A deleted voice note keeps no waveform (ADR-0061 decision 8): its owner deletes one never attached.
+upload_photo "$VO_A" "$VOICE_DIR/short.wav" audio/wav VOICE; VO_LOOSE="$PHOTO_ID"
+is "voice: a WAV voice note to delete becomes READY" "$(await_photo "$VO_A" "$VO_LOOSE")" "READY"
+db_is "voice: …with a waveform of 64 bytes" "$(sql "SELECT octet_length(waveform) FROM media_assets WHERE id='$VO_LOOSE'")" "64"
+expect "voice: …which its owner deletes, 204" 204 '' -- -X DELETE "$API/media/$VO_LOOSE" -H "Authorization: Bearer $VO_A"
+db_is "voice: …and the deleted row keeps no waveform" "$(sql "SELECT status || '|' || (waveform IS NULL) FROM media_assets WHERE id='$VO_LOOSE'")" "DELETED|true"
 rm -rf "$VOICE_DIR"
 flush_buckets
 

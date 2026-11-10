@@ -13,6 +13,7 @@ import com.moyi.media.domain.StorageKey
 import com.moyi.media.domain.StoredVariant
 import com.moyi.media.domain.VoiceFormat
 import com.moyi.media.domain.VoiceRules
+import com.moyi.media.domain.Waveform
 import com.moyi.media.infra.database.MediaAssetStore
 import com.moyi.media.infra.processing.Encoding
 import com.moyi.media.infra.processing.ImageProcessor
@@ -232,7 +233,7 @@ internal class ProcessUploads(
 
             is Transcoding.Transcoded -> {
                 storage.put(StorageKey.forVoice(asset.storageKey), transcoding.file, VoiceRules.KEPT_CONTENT_TYPE)
-                Result.VoiceReady(transcoding.durationMs)
+                Result.VoiceReady(transcoding.durationMs, transcoding.waveform)
             }
         }
     }
@@ -327,10 +328,12 @@ internal class ProcessUploads(
                 }
 
                 is Result.VoiceReady -> {
-                    check(assets.markVoiceReady(asset.id, result.durationMs, now)) {
+                    check(assets.markVoiceReady(asset.id, result.durationMs, result.waveform, now)) {
                         "a voice note under its row lock, PROCESSING, becomes READY"
                     }
                     log.info("Media {} is ready ({} ms)", asset.id, result.durationMs)
+                    // Kept without it: the client draws its stand-in (ADR-0061). Nothing of the note in the line.
+                    if (result.waveform == null) log.warn("Media {} is ready without its waveform: it could not be measured", asset.id)
                     releases.ready(asset.id, now)
                     OUTCOME_READY
                 }
@@ -382,6 +385,7 @@ internal class ProcessUploads(
 
         data class VoiceReady(
             val durationMs: Int,
+            val waveform: Waveform?,
         ) : Result
 
         data class Refused(

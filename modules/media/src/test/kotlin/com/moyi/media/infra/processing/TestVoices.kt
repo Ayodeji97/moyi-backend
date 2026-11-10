@@ -22,10 +22,22 @@ internal object TestVoices {
     fun wav(
         seconds: Double,
         sampleRate: Int = 8_000,
+    ): ByteArray = wavOf(seconds, sampleRate) { AMPLITUDE }
+
+    /**
+     * A tone, as [wav], whose amplitude at each moment is [amplitude] of the
+     * seconds elapsed: a note whose loudness over time is known.
+     */
+    fun wavOf(
+        seconds: Double,
+        sampleRate: Int = 8_000,
+        amplitude: (Double) -> Double,
     ): ByteArray {
         val samples = (seconds * sampleRate).toInt()
         val pcm = ByteBuffer.allocate(samples * 2).order(ByteOrder.LITTLE_ENDIAN)
-        for (i in 0 until samples) pcm.putShort((sin(2 * PI * TONE_HZ * i / sampleRate) * AMPLITUDE).toInt().toShort())
+        for (i in 0 until samples) {
+            pcm.putShort((sin(2 * PI * TONE_HZ * i / sampleRate) * amplitude(i.toDouble() / sampleRate)).toInt().toShort())
+        }
         val header =
             ByteBuffer
                 .allocate(WAV_HEADER)
