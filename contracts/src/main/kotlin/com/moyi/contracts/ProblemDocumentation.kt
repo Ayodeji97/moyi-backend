@@ -1,5 +1,6 @@
 package com.moyi.contracts
 
+import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.media.DateSchema
 import io.swagger.v3.oas.models.media.Schema
 import io.swagger.v3.oas.models.media.StringSchema
@@ -158,3 +159,19 @@ internal fun allowedFromSchema(): Schema<*> =
             "`anchorTimezone`) on which the shared time zone can be changed again, from its start. Absent on every " +
             "other code.",
     )
+
+/**
+ * `BondResponse.timezoneChangeAllowedFrom` (#170): the refusal's [ALLOWED_FROM] date, on the resource, so that
+ * states.md §8 can name it before the person picks a city. Both are `Bond.timezoneChangeAllowedFrom` in the bond
+ * module, one rule; this says so, so that a client does not compute the date a second way.
+ */
+internal fun documentTimezoneChangeAllowedFrom(api: OpenAPI) {
+    api.components.schemas["BondResponse"]
+        ?.properties
+        ?.get("timezoneChangeAllowedFrom")
+        ?.description =
+        "The first date (`YYYY-MM-DD`, in the bond's shared time zone, `anchorTimezone`) from whose start the shared " +
+        "time zone can be changed again (FR-027: once every 30 days); null when it can be changed now. It is the date " +
+        "a `409 TIMEZONE_CHANGE_TOO_SOON` would give as `allowedFrom`, so a client can name it before the attempt. " +
+        "It goes from the representation, and the ETag changes, when that moment passes, with no write to the bond."
+}

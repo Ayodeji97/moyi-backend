@@ -241,3 +241,22 @@ under the lifecycle lock. `Membership.left` is a guard-time snapshot: a leave ca
 commit before the cancellation obtains its lock. The deterministic interleaving
 test captures that snapshot, commits leave, then verifies cancellation cannot
 clear the existing deletion countdown.
+
+## Amendment 2026-11-10: the date is on the bond as well (#170)
+
+Decision 7's date reached a client only on the refusal (`allowedFrom`, #142), so the app could
+show it only after the person had picked a city and been refused; `states.md` §8 wants the
+constraint in front of them first. `BondResponse.timezoneChangeAllowedFrom` now carries the same
+date: `YYYY-MM-DD` in `anchorTimezone`, always sent, `null` when a change is allowed now.
+
+**One rule, one place.** `Bond.timezoneChangeAllowedFrom(now)` is the only computation of the
+date, rounding up to the first whole day included; the `409` is thrown from its answer and the
+response reads it, so the date shown before an attempt is the date the refusal would give, at
+any instant. On the last day the date is the next one until the instant itself, then `null`.
+
+**It moves with time, not with a write**, like the live invite and the proposals the bond's
+ETag already digests: the date goes when the thirty days pass, and the row's version does not
+change. So the ETag digests it too, or a conditional GET would answer `304` and the client
+would keep naming a date that is no longer true. A consequence: an `If-Match` taken before
+that moment no longer matches after it, and a `PATCH` sent across it is `412`; the client
+re-reads and resends, as it already must across an invite's expiry.

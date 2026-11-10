@@ -99,6 +99,9 @@
 # Retry-After, 179 for 180, a second boundary in a probe this change does not touch; it did not
 # recur.
 #
+# Issue #170 adds two probes: BondResponse.timezoneChangeAllowedFrom null on a bond whose zone never
+# moved, and equal to the 409's allowedFrom once it has.
+#
 # The contract-precision PR (#137 to #140, #142) adds five probes: an error body's traceId (32 hex
 # digits, a new one per request) and a TIMEZONE_CHANGE_TOO_SOON refusal's typed allowedFrom, equal to
 # the date its detail names, with its traceId on the log line for that refusal. Every "identical
@@ -1345,6 +1348,8 @@ expect "a bond for two is 201" 201 '"anchorTimezone":"Africa/Lagos"' -- -X POST 
 CONSENT_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
 CONSENT_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
 expect "the other member joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$CONSENT_CODE/accept" -H "Authorization: Bearer $AGREER_ACCESS"
+# #170: a zone never moved may move now, so the bond names no date.
+[[ "$LAST_BODY" == *'"timezoneChangeAllowedFrom":null'* ]] && pass "…and timezoneChangeAllowedFrom is null: a change is allowed now" || fail "timezoneChangeAllowedFrom" "${LAST_BODY:0:300}"
 
 # states.md §8's three steps, on the wire.
 expect "proposing a zone is 200 and moves nothing yet" 200 '"proposedTimezone":"Europe/London"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Europe/London"}'
@@ -1372,6 +1377,9 @@ if [ "${#TOO_SOON_TRACE}" = 32 ] && grep "TIMEZONE_CHANGE_TOO_SOON -> 409" "$MOY
 else
   fail "traceId in the log" "'$TOO_SOON_TRACE' not on a TIMEZONE_CHANGE_TOO_SOON line of $MOYI_LOG"
 fi
+# #170: the bond names the same date before any attempt, to both members.
+TOO_SOON_DATE="${TOO_SOON:5:10}"
+expect "the bond names the date the zone may change again" 200 "\"timezoneChangeAllowedFrom\":\"$TOO_SOON_DATE\"" -- "$API/bonds/$CONSENT_BOND" -H "Authorization: Bearer $AGREER_ACCESS"
 expect "a fixed-offset zone is 422 on the field" 422 '"field":"anchorTimezone"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Etc/GMT+3"}'
 expect "a zone of one non-breaking space is 422, not 500" 422 '"field":"anchorTimezone"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"\u00a0"}'
 

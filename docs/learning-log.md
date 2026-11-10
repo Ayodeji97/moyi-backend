@@ -3342,3 +3342,16 @@ Wrong about: what a body without a field answers. A Kotlin non-null field that i
          body Jackson cannot build, so `400 MALFORMED_REQUEST`, not the 422 the two-form routes
          give (their fields are nullable because either form may be absent). Kept: the contract
          now says both fields are required, which is what the generated client should see.
+
+## 2026-11-10 · Feature · The date the time zone may change again, on the bond (#170, ADR-0030 amended)
+
+Expected: copy the `409`'s date onto `BondResponse`.
+Reality: the date was computed inside the exception's constructor, from an instant and a zone,
+         with its rounding to a whole day private to it. A second caller would have had to
+         repeat the rounding, and PR #41's review had already found that rounding wrong once.
+         It moved to `Bond.timezoneChangeAllowedFrom(now)`; the refusal is now thrown from that
+         answer and the response reads it, so the two cannot name different days.
+Also: a field that changes with the clock and not with a write must be in the ETag, or a
+         conditional GET answers `304` with a date that has passed. The endpoint test moves
+         `timezone_changed_at` back by SQL, so the row's version stays put, and was red (`304`)
+         with the date taken out of the digest.

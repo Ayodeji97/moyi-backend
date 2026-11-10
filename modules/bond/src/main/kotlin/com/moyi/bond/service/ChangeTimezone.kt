@@ -61,9 +61,7 @@ internal class ChangeTimezone(
         val now = support.clock.instant().truncatedTo(ChronoUnit.MICROS)
         val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
         if (!bond.isOpen) throw BondArchivedException()
-        if (!bond.mayChangeTimezoneAt(now)) {
-            throw TimezoneChangeTooSoonException(requireNotNull(bond.nextTimezoneChangeAt), bond.anchorTimezone)
-        }
+        bond.timezoneChangeAllowedFrom(now)?.let { throw TimezoneChangeTooSoonException(it) }
 
         if (bond.status == BondStatus.PENDING_MEMBER) {
             bonds.update(bond.withAnchorTimezone(zone, now))
@@ -125,9 +123,7 @@ internal class ChangeTimezone(
             proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()
         if (proposal.id != expectedProposalId) throw ProposalNotFoundException()
         if (proposal.proposedByMemberId == membership.memberId) throw ProposalNeedsOtherMemberException()
-        if (!bond.mayChangeTimezoneAt(now)) {
-            throw TimezoneChangeTooSoonException(requireNotNull(bond.nextTimezoneChangeAt), bond.anchorTimezone)
-        }
+        bond.timezoneChangeAllowedFrom(now)?.let { throw TimezoneChangeTooSoonException(it) }
 
         // Compare-and-set: losing this race means somebody else answered it,
         // which from here is indistinguishable from it never having been live.
