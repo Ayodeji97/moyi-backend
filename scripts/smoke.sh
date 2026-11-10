@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# The follow-up to #162 (ADR-0059 decision 13: an archive's object deleted after the commit that
+# forgets it, from a debt V54 holds) adds no probe; the data-export section's "its URL no longer
+# downloads it" after a withdrawal is the one that would show the deletion moved too late. Last run
+# on 2026-11-10, on fix/export-followups, from a jar of the branch's tree on e273a41, on a fresh
+# database that applied 49 migrations to V54, against its own compose project (moyi-41k: Postgres
+# 55491, Valkey 56411, MinIO 59491), the jar booted by hand (local profile, the close, reminders,
+# held-pushes, account-deletion and data-export crons at */5) and --attach: 1602 passed, 0 failed,
+# 1 skipped (the tag across the erasure, the poller having won the race); export_archive_deletions
+# empty after it.
+#
 # Issue #126 adds the data-export section: 401 without a token, 404 for a latest never asked for,
 # 202 PREPARING and the same export again, one 404 for someone else's id and a missing one, the job
 # (on a five-second cron) making it READY with a URL good for exactly 24 hours, the zip downloaded

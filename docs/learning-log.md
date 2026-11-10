@@ -3228,3 +3228,23 @@ Then (review of #162): three things a copy does that a reading does not. An arch
          let a build commit READY in between and leave an object nothing named:
          `DELETE … RETURNING` waits on that row instead. The race was proved by holding the build's
          UPDATE open and waiting for the delete to block on it in `pg_stat_activity`, not by a sleep.
+
+## 2026-11-10 · Fix · An object store outside the transaction: neither order is safe alone (#162's three minors, ADR-0059 decision 13)
+
+Expected: the reviewer's word for the third minor, "delete after commit", would be the whole fix:
+         register an `afterCommit`, as `media.process` already does.
+Reality: `media` can afford a best-effort delete after commit because its `in/` prefix has a
+         lifecycle rule behind it. The archive prefix `x/` has none, and a URL signed before a
+         withdrawal stays good for its 24 hours. Before the commit, a rollback leaves a READY row
+         naming nothing; after it, a storage refusal leaves the words stored with nothing naming
+         them, for ever. What makes either safe is writing the debt down in the same transaction
+         (V54's `export_archive_deletions`), deleting after the commit, and paying the debt once the
+         object is gone, with the build job's run sweeping whatever the storage refused. The first
+         minor (a build's `deleteArchive` throwing after its row went) is the same debt, owed
+         before the delete. The second (a ready email that throws counted as a failed build) was a
+         try/catch drawn round too much.
+Wrong about: thinking the third minor was the safe direction to move in. On its own it trades a
+         transient, self-healing inconsistency for a permanent leak of the one thing this product
+         must not leak. A rollback test also has to ask what the *next* run does: owing the keys in
+         a transaction of their own passed every assertion about the delivery itself, and deleted
+         two live archives on the following sweep (mutation run, red, restored).
