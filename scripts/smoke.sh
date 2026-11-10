@@ -4,7 +4,12 @@
 # Issue #165 adds four voice-note probes and three for a deleted one: the waveform media.process
 # measured (ADR-0061), 64 levels of 0-255 with the loudest 255 on the author's entry, 64 bytes on the
 # asset, the same levels to the listener once the note has passed, none on the locked day; and a
-# loose voice note deleted by its owner keeps no waveform on its row.
+# loose voice note deleted by its owner keeps no waveform on its row. Last run on 2026-11-10, on
+# feat/voice-waveform (main e273a416), from a jar of the branch's tree, on a fresh database that
+# applied 49 migrations to V57, against its own compose project (moyi-42f: Postgres 55660, Valkey
+# 56660, MinIO 57660), the jar booted by hand (local profile, the five crons at */5) and --attach:
+# 1610 passed, 0 failed, 0 skipped. A run before it stopped in the media section when Colima
+# killed that project's MinIO (exit 137, memory shared with four other sessions), not the code.
 #
 # Issue #126 adds the data-export section: 401 without a token, 404 for a latest never asked for,
 # 202 PREPARING and the same export again, one 404 for someone else's id and a missing one, the job
