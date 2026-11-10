@@ -60,7 +60,11 @@ private const val ENTRY_VOICE_DESCRIPTION =
         "other member for review; url and durationMs are still given unless it was blocked outright. sensitive " +
         "as a photo's. The url is a signed GET of an Ogg Opus file (mono, 24 kbit/s), " +
         "valid for at least 24 hours, ending on the hour and the same all hour, so it may be cached by; it is a " +
-        "credential for the voice note. durationMs is the length of what was transcoded, at most 61.1 seconds."
+        "credential for the voice note. durationMs is the length of what was transcoded, at most 61.1 seconds. " +
+        "urlAac is the same note as AAC-LC in MP4 (.m4a, mono, about 32 kbit/s, its index first), which iOS can " +
+        "stream: given to exactly whoever is given url, signed at the same moment and valid as long, and a " +
+        "credential as url is. It is null whenever url is, and also for a note processed before it existed or whose " +
+        "AAC copy could not be made; play url then."
 
 private const val IMAGE_PROPERTY_DESCRIPTION =
     "The entry's photo, or null when it has none. Always null on an erased entry; a locked entry has no such field."

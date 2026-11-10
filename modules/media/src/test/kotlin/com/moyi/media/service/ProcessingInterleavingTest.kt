@@ -223,6 +223,8 @@ internal class ProcessingInterleavingTest(
 
         statusOf(mediaId) shouldBe "DELETED"
         stored("v/${upload.removePrefix("in/")}/voice.ogg") shouldBe false
+        // ADR-0060: and the AAC variant it made.
+        stored("v/${upload.removePrefix("in/")}/voice.m4a") shouldBe false
         stored(upload) shouldBe false
     }
 

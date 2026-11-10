@@ -210,6 +210,9 @@ voice note where they hold for both. CI installs `ffmpeg` beside libvips.
   24 kbit/s constrained VBR (`smoke.sh`'s voice section leaves one at a URL). If iOS will not play
   it, Q4 says AAC-LC 48 kbit/s for both; the container may be the cause rather than the codec (CAF
   holds Opus on iOS).
+  **Answered in part by ADR-0060** (issue #152): iOS cannot open Ogg, so a second copy, AAC-LC in
+  MP4 at about 32 kbit/s made of the kept Opus, is served as `urlAac` beside `url`; the Opus stays.
+  The playback test is still owed, now against `urlAac`.
 - **GATE: the media worker (provider `native`) is not deployed before D5's purge (#110, ADR-0050)
   is live in production**, so that no URL handed out before an erasure outlives it (ADR-0048 Owed).
   The FR-061 condition this gate carried is met: the owner ruled on 2026-10-29 that voice notes are

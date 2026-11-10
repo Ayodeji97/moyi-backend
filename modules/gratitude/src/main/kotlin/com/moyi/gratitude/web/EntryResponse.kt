@@ -220,7 +220,14 @@ internal data class EntryImageResponse(
  * never logged and [toString] leaves it out. [durationMs] is the length of what
  * was transcoded, at most 61,000.
  *
+ * [urlAac] is the same note as AAC-LC in MP4 (`.m4a`, mono, about 32 kbps, its
+ * index first), which iOS's AVPlayer can stream and Ogg it cannot (ADR-0060).
+ * Given to exactly whoever is given [url], signed at the same moment and valid
+ * as long; null whenever [url] is, and also for a note processed before it
+ * existed or whose AAC variant could not be made: then play [url].
+ *
  * @property url keep it out of logs and analytics; fetch it again after it expires
+ * @property urlAac as [url]: keep it out of logs and analytics; null means play [url]
  */
 internal data class EntryVoiceResponse(
     val id: UUID,
@@ -228,12 +235,14 @@ internal data class EntryVoiceResponse(
     val url: String?,
     val durationMs: Int?,
     val sensitive: Boolean,
+    val urlAac: String?,
 ) {
     override fun toString(): String =
-        "EntryVoiceResponse(id=$id, status=$status, url=${url?.let { "<redacted>" }}, durationMs=$durationMs, sensitive=$sensitive)"
+        "EntryVoiceResponse(id=$id, status=$status, url=${url?.let { "<redacted>" }}, urlAac=${urlAac?.let { "<redacted>" }}, " +
+            "durationMs=$durationMs, sensitive=$sensitive)"
 
     companion object {
         fun from(voice: EntryVoice): EntryVoiceResponse =
-            EntryVoiceResponse(voice.id, voice.status, voice.url?.toString(), voice.durationMs, voice.sensitive)
+            EntryVoiceResponse(voice.id, voice.status, voice.url?.toString(), voice.durationMs, voice.sensitive, voice.urlAac?.toString())
     }
 }

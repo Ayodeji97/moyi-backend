@@ -75,9 +75,12 @@ internal data class EntryVoice(
     val url: URI?,
     val durationMs: Int?,
     val sensitive: Boolean,
+    /** The same note as AAC in MP4, for iOS (ADR-0060); a bearer credential, as [url] is. */
+    val urlAac: URI? = null,
 ) {
     override fun toString(): String =
-        "EntryVoice(id=$id, status=$status, url=${url?.let { "<redacted>" }}, durationMs=$durationMs, sensitive=$sensitive)"
+        "EntryVoice(id=$id, status=$status, url=${url?.let { "<redacted>" }}, urlAac=${urlAac?.let { "<redacted>" }}, " +
+            "durationMs=$durationMs, sensitive=$sensitive)"
 }
 
 /** An entry's photo and voice note as one reader is shown them; either may be absent. */
@@ -160,5 +163,6 @@ internal class EntryMedia(
             url = view.url,
             durationMs = view.durationMs,
             sensitive = view.sensitive,
+            urlAac = view.urlAac,
         )
 }

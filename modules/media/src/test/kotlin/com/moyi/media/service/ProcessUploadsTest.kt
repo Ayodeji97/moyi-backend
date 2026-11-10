@@ -285,6 +285,9 @@ internal class ProcessUploadsTest(
         // The original bytes, tags and all, are not kept (spec §4 D3).
         stored(upload) shouldBe false
         stored(voiceOf(upload)) shouldBe true
+        // ADR-0060: and its AAC variant, recorded, under the key derived beside the Opus's.
+        stored(aacOf(upload)) shouldBe true
+        jdbc.queryForObject("SELECT aac_key FROM media_assets WHERE id = ?::uuid", String::class.java, mediaId) shouldBe aacOf(upload)
 
         val view = json.readTree(client.get(ada, mediaId).contentAsString)
         view["status"].asString() shouldBe "READY"
@@ -333,10 +336,12 @@ internal class ProcessUploadsTest(
 
         processAll()
 
-        jdbc.queryForMap("SELECT status, duration_ms FROM media_assets WHERE id = ?::uuid", mediaId) shouldBe
-            mapOf("status" to "FAILED", "duration_ms" to null)
+        jdbc.queryForMap("SELECT status, duration_ms, aac_key FROM media_assets WHERE id = ?::uuid", mediaId) shouldBe
+            mapOf("status" to "FAILED", "duration_ms" to null, "aac_key" to null)
         stored(upload) shouldBe false
         stored(voiceOf(upload)) shouldBe false
+        // The limit is the Opus step's, once: a refused note never reaches the AAC step.
+        stored(aacOf(upload)) shouldBe false
         output.out shouldContain "Media $mediaId failed: TOO_LONG"
     }
 
@@ -359,10 +364,12 @@ internal class ProcessUploadsTest(
         val upload = storageKeyOf(mediaId)
         processAll()
         stored(voiceOf(upload)) shouldBe true
+        stored(aacOf(upload)) shouldBe true
 
         client.delete(ada, mediaId).status shouldBe 204
 
         stored(voiceOf(upload)) shouldBe false
+        stored(aacOf(upload)) shouldBe false
     }
 
     @Test
@@ -420,6 +427,8 @@ internal class ProcessUploadsTest(
     ) = "v/${upload.removePrefix("in/")}/$label.webp"
 
     private fun voiceOf(upload: String) = "v/${upload.removePrefix("in/")}/voice.ogg"
+
+    private fun aacOf(upload: String) = "v/${upload.removePrefix("in/")}/voice.m4a"
 
     private companion object {
         const val BUDGET = 20

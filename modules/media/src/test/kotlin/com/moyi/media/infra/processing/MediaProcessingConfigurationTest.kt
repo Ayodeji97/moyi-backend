@@ -91,6 +91,30 @@ internal class MediaProcessingConfigurationTest {
             }
     }
 
+    /**
+     * ADR-0060: ffmpeg's own AAC encoder makes the variant iOS streams. Its absence would not fail a
+     * note (the variant is best effort) but would silently give no iOS user a stream, so it never starts.
+     */
+    @Test
+    fun `NATIVE refuses to start with an ffmpeg that has no AAC encoder`() {
+        Ffmpegs.fake(
+            fakes,
+            ffprobe = "exit 0",
+            ffmpeg =
+                """case "$*" in *encoder=libopus*) echo "Encoder libopus [libopus Opus]:";; """ +
+                    """*encoder=aac*) echo "Codec 'aac' is not recognized."; exit 0;; """ +
+                    """*) echo "ffmpeg version fake";; esac""",
+        )
+        runner
+            .withPropertyValues(
+                "moyi.media.processing.vips.bin-dir=${Vipses.binDir}",
+                "moyi.media.processing.ffmpeg.bin-dir=$fakes",
+                "moyi.media.processing.allow-unlimited-memory=true",
+            ).run { context ->
+                failure(context) shouldContain "-h encoder=aac` did not succeed in the sandbox"
+            }
+    }
+
     @Test
     fun `NATIVE starts where libvips and ffmpeg run within their limits`() {
         runner

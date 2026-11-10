@@ -42,9 +42,16 @@ class VoiceView(
     val durationMs: Int?,
     /** Passed moderation with something found that the client blurs (Q16); false otherwise. */
     val sensitive: Boolean = false,
+    /**
+     * A signed GET of the same note as AAC-LC in MP4 (`.m4a`), which iOS can stream (ADR-0060):
+     * present exactly when [url] is and one was made, signed at the same instant for the same
+     * time. A bearer credential, as [url] is.
+     */
+    val urlAac: URI? = null,
 ) {
     override fun toString(): String =
-        "VoiceView(id=$id, status=$status, url=${url?.let { "<redacted>" }}, durationMs=$durationMs, sensitive=$sensitive)"
+        "VoiceView(id=$id, status=$status, url=${url?.let { "<redacted>" }}, urlAac=${urlAac?.let { "<redacted>" }}, " +
+            "durationMs=$durationMs, sensitive=$sensitive)"
 }
 
 enum class VoiceViewStatus {

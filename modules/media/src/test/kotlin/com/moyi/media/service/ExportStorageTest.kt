@@ -40,7 +40,8 @@ internal class ExportStorageTest(
     @Autowired private val exports: ExportStorage,
     @Autowired dataSource: DataSource,
 ) : MediaIntegrationTest() {
-    private val rows = AssetRows(JdbcTemplate(dataSource))
+    private val jdbc = JdbcTemplate(dataSource)
+    private val rows = AssetRows(jdbc)
     private val ada = UUID.randomUUID()
     private val bea = UUID.randomUUID()
 
@@ -84,6 +85,26 @@ internal class ExportStorageTest(
         exports.copyOf(ada, UUID.randomUUID()).shouldBeNull()
     }
 
+    /**
+     * ADR-0060 decision 5: a voice note is exported once, as its Ogg Opus, the copy that was judged and is the
+     * note; its AAC variant is the same sound in a second container for iOS, and is not put in the archive.
+     */
+    @Test
+    fun `a voice note with an AAC variant is exported as its Opus alone`() {
+        val upload = "in/${UUID.randomUUID()}"
+        val random = upload.removePrefix("in/")
+        val voice = rows.insert(owner = ada, kind = "VOICE", createdAt = MediaTestApplication.START, upload = upload, withVariants = false)
+        jdbc.update("UPDATE media_assets SET duration_ms = 2000, aac_key = ? WHERE id = ?", "v/$random/voice.m4a", voice)
+        putBehindTheApi("v/$random/voice.ogg", OPUS)
+        putBehindTheApi("v/$random/voice.m4a", AAC)
+
+        val adas = exports.copyOf(ada, voice).shouldNotBeNull()
+
+        adas.extension shouldBe "ogg"
+        adas.contentType shouldBe "audio/ogg"
+        adas.open()!!.use { it.readAllBytes() } shouldBe OPUS
+    }
+
     @Test
     fun `an archive is kept under a random key, downloads by its signed URL, and is gone once deleted`() {
         val file = Files.createTempFile("export", ".zip")
@@ -122,6 +143,8 @@ internal class ExportStorageTest(
 
     private companion object {
         val FULL = "the full variant".toByteArray()
+        val OPUS = "OggS the Opus".toByteArray()
+        val AAC = "ftyp the AAC".toByteArray()
         val ARCHIVE = "PK an archive".toByteArray()
     }
 }

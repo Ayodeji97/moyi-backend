@@ -3228,3 +3228,21 @@ Then (review of #162): three things a copy does that a reading does not. An arch
          let a build commit READY in between and leave an object nothing named:
          `DELETE … RETURNING` waits on that row instead. The race was proved by holding the build's
          UPDATE open and waiting for the delete to block on it in `pg_stat_activity`, not by a sleep.
+
+## 2026-11-10 · Feature · Voice notes also kept as AAC in MP4, so that iOS can stream them (#152, ADR-0060)
+
+Expected: a second ffmpeg output and a second URL; the work is in the encoder flags.
+Reality: the encoder was one function. The work was finding every place a voice object is deleted
+         or copied, and the answer was mostly already right: every deletion ends in `media.purge`,
+         which deletes `MediaAsset.objectKeys`, *derived* from the upload's key rather than read
+         from the row. Adding `voice.m4a` to that one list covered the owner's delete, the reaper,
+         erasure, account deletion and the operator's SQL functions at once; the row's `aac_key`
+         only says what is *played*. The mirror copies the prefix `v/`, so it needed nothing either.
+Wrong about: the restore runbook (ops/media-mirror/README.md). Its "re-apply the erasures" SQL listed
+         `full.webp` and `display.webp` for every deleted asset, so a restore would have brought back
+         every deleted voice note's `voice.ogg` since D3, before this change added a second one. A
+         hand-written copy of `objectKeys` had drifted from it, as CLAUDE.md says copies do.
+Also: the AAC is made from the kept Opus, never from the upload, so the hostile bytes are decoded
+         once and the 61 s limit is judged once; the AAC is checked only to be the same note (its
+         length within 200 ms of the Opus's). `+faststart` was mutation-tested: without it the `moov`
+         box sat at byte 8382, after `mdat` at 40, and the test that iOS can start early went red.

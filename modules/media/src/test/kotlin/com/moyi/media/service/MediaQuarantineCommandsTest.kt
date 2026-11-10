@@ -162,6 +162,21 @@ internal class MediaQuarantineCommandsTest(
         audit(blocked) shouldContainExactly listOf("DELETED|op-fake-ada|reported: ref FAKE-0001")
     }
 
+    /** ADR-0060: the operator's delete of a voice note takes its AAC variant too, as every deletion does, through media.purge. */
+    @Test
+    fun `delete takes a held voice note's upload, Opus and AAC out of the storage`() {
+        val upload = "in/${UUID.randomUUID()}"
+        val blocked = held("BLOCKED", "KNOWN_AUDIO", upload, kind = "VOICE")
+        val keys = listOf(upload) + listOf("voice.ogg", "voice.m4a").map { "v/${upload.removePrefix("in/")}/$it" }
+        keys.forEach { putBehindTheApi(it, byteArrayOf(1, 2, 3)) }
+
+        moyi("delete", blocked.toString(), "reported: ref FAKE-0002").code shouldBe 0
+        dispatcher.dispatchDue(Instant.now().plus(Duration.ofSeconds(5)), BUDGET)
+
+        keys.forEach { stored(it) shouldBe false }
+        jdbc.queryForObject("SELECT purged_at IS NOT NULL FROM media_assets WHERE id = ?", Boolean::class.java, blocked) shouldBe true
+    }
+
     @Test
     fun `a command refuses an id that is held back by nothing, and one that is not an id at all`() {
         val passed = rows.insert(owner = ada, createdAt = clock.instant())
@@ -458,8 +473,9 @@ internal class MediaQuarantineCommandsTest(
         reason: String,
         upload: String = "in/${UUID.randomUUID()}",
         attachedTo: UUID? = null,
+        kind: String = "IMAGE",
     ): UUID {
-        val id = rows.insert(owner = ada, createdAt = clock.instant(), upload = upload, attachedTo = attachedTo)
+        val id = rows.insert(owner = ada, kind = kind, createdAt = clock.instant(), upload = upload, attachedTo = attachedTo)
         jdbc.update(
             "UPDATE media_assets SET status = 'QUARANTINED', moderation_verdict = ?, moderated_at = ?, " +
                 "moderation_scores = jsonb_build_object('reason', ?::text), evidence_held = (? = 'BLOCKED') WHERE id = ?",

@@ -3014,7 +3014,7 @@ expect "media: an unverified account's read is not refused for it: an unknown id
 expect "media: …nor its delete: 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/media/$(uuidgen | tr 'A-Z' 'a-z')" -H "Authorization: Bearer $UNVERIFIED_ACCESS"
 expect "media: the owner deletes it, 204" 204 "" -- -X DELETE "$API/media/$MEDIA_ID" -H "Authorization: Bearer $MEDIA_ACCESS"
 if [ "$MINIO_OK" = 0 ]; then skip "media: …and the object is gone from MinIO"
-elif minio_has "$MEDIA_OBJECT" || minio_has "v/${MEDIA_OBJECT#in/}/voice.ogg"; then fail "media: object after delete" "MinIO still holds an object of the deleted asset"; else pass "media: …and the object is gone from MinIO"; fi
+elif minio_has "$MEDIA_OBJECT" || minio_has "v/${MEDIA_OBJECT#in/}/voice.ogg" || minio_has "v/${MEDIA_OBJECT#in/}/voice.m4a"; then fail "media: object after delete" "MinIO still holds an object of the deleted asset"; else pass "media: …and the object is gone from MinIO"; fi
 db_is "media: …the row says DELETED" "$(sql "SELECT status FROM media_assets WHERE id='$MEDIA_ID'")" "DELETED"
 expect "media: a deleted asset is 404 to its owner" 404 '"code":"NOT_FOUND"' -- "$API/media/$MEDIA_ID" -H "Authorization: Bearer $MEDIA_ACCESS"
 if grep -q "X-Amz-Signature=$(printf '%s' "$MEDIA_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then
@@ -3241,6 +3241,24 @@ expect "voice: once revealed and passed, the listener is played the voice note" 
 VO_PARTNER="$(python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['partnerEntry']))" <<<"$LAST_BODY")"
 is "voice: …READY to the listener, with a URL and its length" "$(python3 -c "import json,sys; v=json.load(sys.stdin)['voice']; print(v['status'], v['url'] is not None, v['durationMs'] is not None)" <<<"$VO_PARTNER")" "READY True True"
 is "voice: …and the photo READY to the listener (FR-101)" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['image']['status'])" <<<"$VO_PARTNER")" "READY"
+# Issue #152, ADR-0060: the same note as AAC-LC in MP4 (.m4a), which iOS's AVPlayer can stream: given
+# to the author with the Opus, and to the listener under the same rule; it downloads, and is an MP4
+# (an `ftyp` box first) with its `moov` index before the audio, one channel of AAC.
+VO_AAC_URL="$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice'].get('urlAac') or '')" <<<"$VO_ENTRY")"
+[ -n "$VO_AAC_URL" ] && pass "voice: the author is given urlAac with the Opus's url" || fail "voice: urlAac" "the author's voice note has no urlAac"
+is "voice: …and the listener too, once passed" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice'].get('urlAac') is not None)" <<<"$VO_PARTNER")" "True"
+VO_AAC_TYPE="$(curl -s -o "$VOICE_DIR/served.m4a" -w '%{http_code} %{content_type}' "$VO_AAC_URL")"
+is "voice: …urlAac downloads, served as audio/mp4" "$VO_AAC_TYPE" "200 audio/mp4"
+is "voice: …and starts with an MP4 ftyp box" "$(dd if="$VOICE_DIR/served.m4a" bs=1 skip=4 count=4 2>/dev/null)" "ftyp"
+is "voice: …its moov index before its audio (+faststart), so it streams" \
+  "$(python3 -c "import sys; b=open(sys.argv[1],'rb').read(); print(0 <= b.find(b'moov') < b.find(b'mdat'))" "$VOICE_DIR/served.m4a")" "True"
+is "voice: …one channel of AAC-LC, by ffprobe" "$(ffprobe -v error -show_entries stream=codec_name,profile,channels -of csv=p=0 "$VOICE_DIR/served.m4a")" "aac,LC,1"
+if has_bytes "$VOICE_DIR/served.m4a" "$(printf '%s' "$VOICE_TAG" | xxd -p | tr -d '\n')"; then
+  fail "voice: …with nothing of the upload's title in it either" "the m4a still holds the title"
+else pass "voice: …with nothing of the upload's title in it either"; fi
+if grep -q "$(printf '%s' "$VO_AAC_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then
+  fail "voice: urlAac is in no log line" "its signature is in $MOYI_LOG"
+else pass "voice: urlAac is in no log line"; fi
 expect "voice: the speaker still plays it READY on the revealed day" 200 '"durationMs":' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_A"
 expect "voice: an outsider reaches neither the voice note nor the day" 404 '"code":"NOT_FOUND"' -- "$API/media/$VO_NOTE" -H "Authorization: Bearer $VO_O"
 if grep -q "$(printf '%s' "$VO_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then

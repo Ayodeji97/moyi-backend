@@ -87,10 +87,52 @@ internal class MediaAssetTest {
         val photo = pending(MediaStatus.PROCESSING)
         photo.objectKeys shouldBe listOf(photo.storageKey) + ImageVariant.entries.map { StorageKey.forVariant(photo.storageKey, it) }
         val voice = pending(MediaStatus.UPLOADED, kind = MediaKind.VOICE)
-        voice.objectKeys shouldBe listOf(voice.storageKey, StorageKey.forVoice(voice.storageKey))
+        // ADR-0060: and its AAC variant, whether or not the row records one, so every deletion finds it.
+        voice.objectKeys shouldBe listOf(voice.storageKey, StorageKey.forVoice(voice.storageKey), StorageKey.forVoiceAac(voice.storageKey))
         // Derived from the upload's random part, as a photo's variants are: nothing of the asset's id or owner.
         StorageKey.forVoice(StorageKey("in/0b6e6a37-1b1e-4c55-9d4e-8a1c7b0e2f11")).value shouldBe
             "v/0b6e6a37-1b1e-4c55-9d4e-8a1c7b0e2f11/voice.ogg"
+        StorageKey.forVoiceAac(StorageKey("in/0b6e6a37-1b1e-4c55-9d4e-8a1c7b0e2f11")).value shouldBe
+            "v/0b6e6a37-1b1e-4c55-9d4e-8a1c7b0e2f11/voice.m4a"
+    }
+
+    /**
+     * ADR-0060: the AAC variant is heard by exactly whoever hears the Opus, by the one rule of
+     * [MediaAsset.heardBy]; and only once the row records it (none for a note made before it).
+     */
+    @Test
+    fun `the AAC variant is heard by whoever hears the Opus, and only once it is recorded`() {
+        val aac = { asset: MediaAsset -> StorageKey.forVoiceAac(asset.storageKey) }
+        val ready = pending(MediaStatus.READY, kind = MediaKind.VOICE, durationMs = 4_200, aacRecorded = true)
+        ready.heardBy(owner = true) shouldBe MediaAsset.Heard.Ready(StorageKey.forVoice(ready.storageKey), 4_200, aacKey = aac(ready))
+        ready.heardBy(owner = false) shouldBe MediaAsset.Heard.Processing
+        val passed =
+            pending(MediaStatus.READY, kind = MediaKind.VOICE, durationMs = 4_200, verdict = ModerationVerdict.PASSED, aacRecorded = true)
+        passed.heardBy(owner = false) shouldBe MediaAsset.Heard.Ready(StorageKey.forVoice(passed.storageKey), 4_200, aacKey = aac(passed))
+        val held =
+            pending(
+                MediaStatus.QUARANTINED,
+                kind = MediaKind.VOICE,
+                durationMs = 4_200,
+                verdict = ModerationVerdict.QUARANTINED,
+                aacRecorded = true,
+            )
+        held.heardBy(owner = true) shouldBe MediaAsset.Heard.NotShared(StorageKey.forVoice(held.storageKey), 4_200, aac(held))
+        held.heardBy(owner = false) shouldBe MediaAsset.Heard.Processing
+        val blocked =
+            pending(
+                MediaStatus.QUARANTINED,
+                kind = MediaKind.VOICE,
+                durationMs = 4_200,
+                verdict = ModerationVerdict.BLOCKED,
+                aacRecorded = true,
+            )
+        blocked.heardBy(owner = true) shouldBe MediaAsset.Heard.NotShared(null, null, null)
+        // A note made before the variant existed, or whose variant could not be made: the Opus alone.
+        val older = pending(MediaStatus.READY, kind = MediaKind.VOICE, durationMs = 4_200, verdict = ModerationVerdict.PASSED)
+        older.heardBy(owner = false) shouldBe MediaAsset.Heard.Ready(StorageKey.forVoice(older.storageKey), 4_200, aacKey = null)
+        // Moderation reads the Opus alone: the variant is never moderated a second time.
+        passed.moderatedKey shouldBe StorageKey.forVoice(passed.storageKey)
     }
 
     /** Spec §4 D3, review of #111: its owner hears a ready voice note, with its length. */
@@ -240,16 +282,19 @@ internal class MediaAssetTest {
         sensitive: Boolean = false,
         attempts: Int = 0,
         durationMs: Int? = null,
+        aacRecorded: Boolean = false,
+        upload: StorageKey = StorageKey.forUpload(UUID.randomUUID()),
     ) = MediaAsset(
         processingAttempts = attempts,
         durationMs = durationMs,
+        aacKey = if (aacRecorded) StorageKey.forVoiceAac(upload) else null,
         id = UUID.randomUUID(),
         ownerUserId = UUID.randomUUID(),
         kind = kind,
         variants = variants,
         moderationVerdict = verdict,
         sensitive = sensitive,
-        storageKey = StorageKey.forUpload(UUID.randomUUID()),
+        storageKey = upload,
         contentType = "image/png",
         sizeBytes = 1234,
         checksumSha256 = declared,

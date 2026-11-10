@@ -237,7 +237,7 @@ jobs:
       # What the media worker needs from the image, on each architecture,
       # checked as the worker's own start-up checks will check it (ADR-0048,
       # ADR-0049): libvips with its HEIC loader, ffmpeg with the libopus
-      # encoder, Java 25, a user who is not root, and Kamal's label. A HEIC
+      # encoder and its own AAC encoder (ADR-0060), Java 25, a user who is not root, and Kamal's label. A HEIC
       # is decoded, not just looked for: the loader can be listed and still
       # lack the libde265 plugin that decodes HEVC (Ubuntu's packages cannot
       # write a HEIC, so the media module's test sample is handed in).
@@ -252,6 +252,7 @@ jobs:
             vips --version | grep -q "^vips-8\."
             vips -l | grep -q heifload
             ffmpeg -hide_banner -h encoder=libopus | grep -q "Encoder libopus"
+            ffmpeg -hide_banner -h encoder=aac | grep -q "Encoder aac"
             command -v ffprobe
             command -v vipsheader
           '
