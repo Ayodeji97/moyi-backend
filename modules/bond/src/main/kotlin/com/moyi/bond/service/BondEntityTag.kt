@@ -25,6 +25,8 @@ internal fun BondView.entityTag(): String {
                     bond.createdAt,
                     bond.archivedAt,
                     bond.deletionScheduledFor,
+                    // #170: leaves with the passing of time, the row's version unmoved.
+                    timezoneChangeAllowedFrom,
                 ),
             )
             members.forEach { view ->

@@ -8,6 +8,7 @@ import com.moyi.media.domain.ModerationVerdict
 import com.moyi.media.domain.Retention
 import com.moyi.media.domain.StorageKey
 import com.moyi.media.domain.StoredVariant
+import com.moyi.media.domain.Waveform
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.stereotype.Repository
@@ -144,19 +145,22 @@ internal class MediaAssetStore(
 
     /**
      * A voice note, PROCESSING to READY, with its length (spec D-10: on the
-     * asset only). Only a voice note, and only from PROCESSING. Its Opus is at
+     * asset only) and its [waveform] (ADR-0061; null when it could not be
+     * measured). Only a voice note, and only from PROCESSING. Its Opus is at
      * the key derived from its upload's (`StorageKey.forVoice`), so there is
      * nothing else to record.
      */
     fun markVoiceReady(
         id: UUID,
         durationMs: Int,
+        waveform: Waveform?,
         at: Instant,
     ): Boolean =
         jdbc.update(
-            "UPDATE media_assets SET status = 'READY', duration_ms = ?, ready_at = ? " +
+            "UPDATE media_assets SET status = 'READY', duration_ms = ?, waveform = ?, ready_at = ? " +
                 "WHERE id = ? AND kind = 'VOICE' AND status = 'PROCESSING'",
             durationMs,
+            waveform?.toBytes(),
             Timestamp.from(at),
             id,
         ) == 1
@@ -167,10 +171,17 @@ internal class MediaAssetStore(
 
     /**
      * FR-044a, in one statement (spec §4 D2): the asset is attached to
-     * [entryId] only if it is [owner]'s, of [kind], `READY`, and attached to
-     * nothing. Two entries racing for one asset are serialised on its row, and
-     * the second finds `attached_entry_id` set and matches nothing: one winner.
-     * Returns whether this call attached it.
+     * [entryId] only if it is [owner]'s, of [kind], `READY` or `QUARANTINED`,
+     * and attached to nothing. Two entries racing for one asset are serialised
+     * on its row, and the second finds `attached_entry_id` set and matches
+     * nothing: one winner. Returns whether this call attached it.
+     *
+     * **`QUARANTINED` is claimed as `READY` is** (#149, ADR-0051 decision 8 as
+     * amended): moderation runs after `READY`, so whether a held-back asset
+     * reached its entry would otherwise depend on which came first, the verdict
+     * or the entry's POST. Claimed, it is shown as one held back after it was
+     * attached ([com.moyi.media.domain.MediaAsset.shownTo]); the claim changes
+     * nothing but the attachment, so its verdict, status and evidence hold stay.
      */
     fun claim(
         owner: UUID,
@@ -180,7 +191,7 @@ internal class MediaAssetStore(
     ): Boolean =
         jdbc.update(
             "UPDATE media_assets SET attached_entry_id = ? " +
-                "WHERE id = ? AND owner_user_id = ? AND kind = ? AND status = 'READY' AND attached_entry_id IS NULL",
+                "WHERE id = ? AND owner_user_id = ? AND kind = ? AND status IN ('READY', 'QUARANTINED') AND attached_entry_id IS NULL",
             entryId,
             id,
             owner,
@@ -412,7 +423,7 @@ internal class MediaAssetStore(
         const val SELECT =
             "SELECT id, owner_user_id, kind, storage_key, content_type, size_bytes, checksum, status, " +
                 "attached_entry_id, created_at, expires_at, variants::text AS variants, moderation_verdict, processing_attempts, tier, " +
-                "duration_ms, sensitive, evidence_held, " +
+                "duration_ms, waveform, sensitive, evidence_held, " +
                 "EXISTS (SELECT 1 FROM media_report_holds h WHERE h.media_id = media_assets.id) AS report_held " +
                 "FROM media_assets"
 
@@ -440,6 +451,7 @@ internal class MediaAssetStore(
                     processingAttempts = rs.getInt("processing_attempts"),
                     tier = rs.getInt("tier"),
                     durationMs = rs.getInt("duration_ms").takeUnless { rs.wasNull() },
+                    waveform = rs.getBytes("waveform")?.let(Waveform::ofStored),
                     sensitive = rs.getBoolean("sensitive"),
                     evidenceHeld = rs.getBoolean("evidence_held"),
                     reportHeld = rs.getBoolean("report_held"),

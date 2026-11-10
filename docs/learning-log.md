@@ -3229,6 +3229,164 @@ Then (review of #162): three things a copy does that a reading does not. An arch
          `DELETE … RETURNING` waits on that row instead. The race was proved by holding the build's
          UPDATE open and waiting for the delete to block on it in `pg_stat_activity`, not by a sleep.
 
+## 2026-11-10 · Fix · An object store outside the transaction: neither order is safe alone (#162's three minors, ADR-0059 decision 13)
+
+Expected: the reviewer's word for the third minor, "delete after commit", would be the whole fix:
+         register an `afterCommit`, as `media.process` already does.
+Reality: `media` can afford a best-effort delete after commit because its `in/` prefix has a
+         lifecycle rule behind it. The archive prefix `x/` has none, and a URL signed before a
+         withdrawal stays good for its 24 hours. Before the commit, a rollback leaves a READY row
+         naming nothing; after it, a storage refusal leaves the words stored with nothing naming
+         them, for ever. What makes either safe is writing the debt down in the same transaction
+         (V54's `export_archive_deletions`), deleting after the commit, and paying the debt once the
+         object is gone, with the build job's run sweeping whatever the storage refused. The first
+         minor (a build's `deleteArchive` throwing after its row went) is the same debt, owed
+         before the delete. The second (a ready email that throws counted as a failed build) was a
+         try/catch drawn round too much.
+Wrong about: thinking the third minor was the safe direction to move in. On its own it trades a
+         transient, self-healing inconsistency for a permanent leak of the one thing this product
+         must not leak. A rollback test also has to ask what the *next* run does: owing the keys in
+         a transaction of their own passed every assertion about the delivery itself, and deleted
+         two live archives on the following sweep (mutation run, red, restored).
+
+## 2026-11-10 · Feature · A support message carries the error that led to it (#168, ADR-0057 decision 11)
+
+Expected: one optional field and one column.
+Reality: the field reaches four places besides the insert, and each had to be decided: the
+         operator's read (a function whose result gains a column, so V55 drops and recreates it;
+         `CREATE OR REPLACE` cannot), the close and the account deletion (both empty it, and V55's
+         widened `CHECK` refuses a closed ticket that keeps one), the person's export (it already
+         carries their tickets, so it carries this too), and the acknowledgement (which cannot reach
+         it: the event is ids only). The rule is visible ASCII, 0x21 to 0x7E, stated once in the
+         domain and once as the table's `CHECK`; seven mutants (validator off, a space let in by the
+         domain or by the `CHECK`, the deletion or the close keeping it, the `CHECK` alone, the export
+         dropping it) each turned the right test red.
+Wrong about: a JSON number being refused. Jackson's default coercion files `"reference": 12345` as
+         the string "12345", as it would for `subject`; the test that assumed otherwise was dropped
+         and the ADR says so.
+
+## 2026-11-10 · Feature · A voice note's waveform, measured by the server (#165, ADR-0061)
+Expected: the work was the 64 levels: RMS or peak, the scale, silence. And that clearing the
+         levels on deletion meant adding `waveform = NULL` to the statements that delete.
+Reality: there were five such statements, one of them a plpgsql function the operator runs
+         (`media_quarantine_delete`, which a report's takedown also calls), merged and not
+         editable; a CHECK alone would have made the operator's delete of a held-back note
+         fail. A BEFORE trigger clears it on every path, the CHECK stays as its backstop, and a
+         test disables the trigger in a rolled-back transaction to see the CHECK refuse. Two
+         test tools lied first: a fake ffmpeg told to fail on `*s16le*` also failed the
+         transcode, because a WAV's decoder allow-list names `pcm_s16le`; and a mutation script
+         that restored by replacing the mutant's text once restored the wrong line of
+         PlayVoices, since the mutant was a prefix of a line it did not touch.
+Wrong about: "add it to each statement" as the way to make a rule hold on every path. The
+         paths that matter most were the ones not in the Kotlin. And about restoring a
+         mutation by inverse replacement: restore the file's saved text instead.
+
+## 2026-11-10 · Feature · The Bond-day's date in a push's data (#146, ADR-0044 amended, V58)
+
+Expected: one more key in `FcmPushSender.payloadOf`.
+Reality: the sender never sees the request. The consumer builds the message from the ledger
+         row, and a push held by quiet hours is published again with its id alone. So the date
+         had to go on the row (`notifications.bond_date`, V58), and every caller had to resolve it,
+         because `notification` cannot read a day. `PushRequest.bondDate` is required and nullable,
+         so a new caller cannot forget to decide whether its push concerns a day.
+Wrong about: the first brief said no migration, and the work stopped until V58 was given. The
+         milestone date was asked to travel in `MilestoneReached`. The outbox's references are
+         `Map<String, UUID>` (ADR-0035), so the consumer reads it from the `bondDayId` the event
+         already names, in the module that holds days. And a test's "UTC" bond was refused with a
+         422: anchors and reminder zones are region zones, so `Atlantic/Reykjavik` stands in for UTC.
+Also: the boundary is the point. At 18:00Z a bond in Auckland is already on the next day. A
+         mutant that read the reveal's date in UTC passed the Lagos test and failed only the
+         Auckland one.
+
+## 2026-11-10 · Fix · The member report's `Idempotency-Key`, missing from the contract (#167)
+
+Expected: a route marked `@Idempotent` shows its required header in the contract.
+Reality: springdoc cannot see `@Idempotent`, so `OpenApiConfiguration` adds the header from a
+         hand-kept list of operation ids, and ADR-0053's `reportMember` was never added to it.
+         The server demanded the key; the generated client had no way to send it, and every call
+         was `422`. The list was the second copy of a fact the annotations already hold.
+Now: `OpenApiContractTest` reads every `@Idempotent` handler from the handler mapping and holds
+         the document to it both ways: each one declares the header, `required` exactly as the
+         annotation says, and no operation declares it without the annotation. It was red on
+         `reportMember` alone; no other route had the gap. The operation also gained the `413` and
+         `Idempotency-Replayed` that every `@Idempotent` operation documents, and the `409`
+         (`IDEMPOTENCY_KEY_IN_FLIGHT`) is now added for every `@Idempotent` operation by rule
+         rather than by its own entry in the conflict list. The state map had already listed
+         that route's `409` and `413` as contract gaps; both are closed.
+
+## 2026-11-10 · Feature · PATCH takes a photo or a voice note off, with a flag (issue #164, ADR-0048 decision 7)
+
+Expected: a JSON `null` on `imageMediaId` would mean "remove", as the issue's second option says.
+Reality: the generated Kotlin client cannot send a `null` it means, any more than the server can
+         read one: both treat it as absent. So `removeImage` and `removeVoice`, and below the edge
+         a `MediaSlot` per medium (keep, attach, remove) that cannot hold "attach and remove" at
+         once. A removed asset takes the one road a replaced one does, `MediaAttachments.release`,
+         and the test runs the reaper over both side by side.
+Wrong about: where the no-op lived. The first cut checked "is there a photo?" in the service
+         before calling a new `Entry.withoutImage`, so deleting that function's own "nothing to
+         remove" guard broke no test: the guard was dead. Now removal is `withImage(null)`, whose
+         one equality check is the no-op for attach and remove alike (and kept `Entry` under
+         detekt's function limit), and that mutation goes red.
+
+## 2026-11-10 · Feature · A check for a reset code is the reset's own gate, called alone (issue #169, ADR-0022 amended)
+
+Expected: a new endpoint with its own lookup of the code, and a test that it counts.
+Reality: the reset already had the whole gate in two lines (the daily limit, then the counted,
+         committed check); the check is those two lines and nothing else, so the reset and the
+         check now share one private `accept` and cannot count apart. The tests that matter are
+         the cross ones: three wrong checks and two wrong resets burn the code for both, and the
+         eleventh typed code of any mix is 429. Mutation-tested by making the check's count roll
+         back (the shared-counter tests went red), by dropping its daily limit (the 429 and the
+         Redis-outage 503 tests went red) and by dropping its per-address bucket.
+Wrong about: what a body without a field answers. A Kotlin non-null field that is absent is a
+         body Jackson cannot build, so `400 MALFORMED_REQUEST`, not the 422 the two-form routes
+         give (their fields are nullable because either form may be absent). Kept: the contract
+         now says both fields are required, which is what the generated client should see.
+
+## 2026-11-10 · Feature · The date the time zone may change again, on the bond (#170, ADR-0030 amended)
+
+Expected: copy the `409`'s date onto `BondResponse`.
+Reality: the date was computed inside the exception's constructor, from an instant and a zone,
+         with its rounding to a whole day private to it. A second caller would have had to
+         repeat the rounding, and PR #41's review had already found that rounding wrong once.
+         It moved to `Bond.timezoneChangeAllowedFrom(now)`; the refusal is now thrown from that
+         answer and the response reads it, so the two cannot name different days.
+Also: a field that changes with the clock and not with a write must be in the ETag, or a
+         conditional GET answers `304` with a date that has passed. The endpoint test moves
+         `timezone_changed_at` back by SQL, so the row's version stays put, and was red (`304`)
+         with the date taken out of the digest.
+
+## 2026-11-10 · Ops · The first FCM deploy: a backslash doubled on the way in
+
+Expected: steps 3 to 5 of the FCM runbook to put the key in the container as the vault held it.
+Reality: two stops, no outage (the old container served throughout). The first attempt stopped
+         at `kamal secrets fetch`: the vault field was ` FCM_PRIVATE_KEY_PEM`, a leading space.
+         The second ran `e273a41`'s migrations, so the database went to V53 under the old app,
+         and the new API crash-looped: `private-key-pem is not valid base64`. The runbook had
+         said to paste Google's `private_key` with its `\n`; Kamal 2.12 writes its env file with
+         `String#dump`, which doubles each backslash, docker reads the file literally, and the
+         container got `\\n`. The parser turned `\n` into a newline and left a `\` in the base64.
+         The owner stored the key on one line with no `\n`, and the deploy went through.
+Wrong about: "reads both real and escaped line breaks" being enough. It was tested against the
+         JSON's spelling, not against what arrives after the vault and the env file; nothing
+         between the two had been run. Now `Pem` reads all four shapes for FCM and the JWT keys
+         (which read no `\n` at all, and were safe only because they were stored on one line),
+         and the runbook checks the field as Kamal reads it, printing flags, never the key.
+
+## 2026-11-10 · Fix · A photo held back before its entry is attached all the same (#149, ADR-0051 amended)
+
+Expected: a photo moderation holds back should not be attachable; the claim's `READY`-only rule
+         was the conservative one.
+Reality: moderation runs *after* `READY`, so the rule only decided whether a held-back photo
+         reached its entry by which came first, the verdict or the POST. Refusing leaked when
+         moderation had run and lost the person's entry; it protected nothing, because what keeps
+         a held-back photo from the partner is `shownTo`, not the claim. The claim now takes
+         `READY` or `QUARANTINED` and changes only the attachment. A race is tested by recording
+         the verdict before the claim in one case and after it in another, and comparing what
+         each reader is shown: no thread, no sleep.
+Also: taking `QUARANTINED` but refusing `BLOCKED` would have told the uploader, by a 422, which of
+         the two it was: the tipping-off ADR-0051's question 2 is about.
+
 ## 2026-11-10 · Fix · A wrong password on a signed-in route is 403 (#166, ADR-0058 amended)
 
 Expected: `401` is the status for a wrong password, wherever it is typed.

@@ -24,16 +24,28 @@ import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
- * What a `PATCH` asks of an entry's media (spec §4 D2, D3): a photo to attach,
- * if [image] is given, and a voice note, if [voice] is. Either absent leaves
- * the entry's as it is.
+ * What a `PATCH` asks of one of an entry's media (spec §4 D2, D3; issue #164):
+ * to leave it as it is, to attach [Attach.id] in place of whatever is there, or
+ * to take it off. One of the three, never two: a body that asks for both an
+ * attachment and a removal is refused at the edge before it gets here.
  */
+internal sealed interface MediaSlot {
+    data object Keep : MediaSlot
+
+    data object Remove : MediaSlot
+
+    data class Attach(
+        val id: UUID,
+    ) : MediaSlot
+}
+
+/** What a `PATCH` asks of an entry's photo and of its voice note; [MediaSlot.Keep] for both unless it says otherwise. */
 internal data class MediaChange(
-    val image: UUID?,
-    val voice: UUID?,
+    val image: MediaSlot = MediaSlot.Keep,
+    val voice: MediaSlot = MediaSlot.Keep,
 ) {
     companion object {
-        val NONE = MediaChange(image = null, voice = null)
+        val NONE = MediaChange()
     }
 }
 
@@ -101,8 +113,11 @@ internal class ChangeEntry(
      * an entry that was revealed meanwhile. A new photo or voice note in place
      * of another lets the old one go: it is its owner's alone again, as an
      * upload never attached is, which D5's reaper is to delete after 24 hours.
-     * The same one again changes nothing. `PATCH` cannot remove either: an
-     * absent `imageMediaId` or `voiceMediaId` leaves the entry's as it is.
+     * The same one again changes nothing. A removal (issue #164) lets the
+     * entry's go the same way, and asks for nothing to be claimed; removing
+     * what is not there changes nothing and is not an error. An absent
+     * `imageMediaId` or `voiceMediaId`, with no removal, leaves the entry's as
+     * it is.
      *
      * **Both paths lock through [lockDays] first**, which is what orders the
      * entry's day against the joining day. For a delete [EraseEntry] then
@@ -144,7 +159,9 @@ internal class ChangeEntry(
     /**
      * Under the day's lock, which the caller took. The entry is read again under
      * its own before BR-7 is asked, and only then is a new photo or voice note
-     * claimed, the photo first.
+     * claimed, or one taken off, the photo first. A removal is the release a
+     * replacement makes, with nothing claimed in its place: one path to the
+     * reaper, not two (ADR-0048).
      */
     private fun edit(
         userId: UUID,
@@ -155,20 +172,43 @@ internal class ChangeEntry(
     ): Entry {
         val entry = entries.lockAndFind(entryId)
         if (!entry.isEditable) throw EntryImmutableException()
-        var changed = entry.edit(replacement, now)
-        val image = media.image
-        if (image != null && image != entry.imageMediaId) {
-            swap(userId, entryId, AttachableKind.IMAGE, claimed = image, replaced = entry.imageMediaId)
-            changed = changed.withImage(image, now)
-        }
-        val voice = media.voice
-        if (voice != null && voice != entry.voiceMediaId) {
-            swap(userId, entryId, AttachableKind.VOICE, claimed = voice, replaced = entry.voiceMediaId)
-            changed = changed.withVoice(voice, now)
-        }
+        // The photo's claim before the voice note's, as before: arguments are evaluated in order.
+        val changed =
+            entry
+                .edit(replacement, now)
+                .withImage(settle(userId, entryId, AttachableKind.IMAGE, media.image, entry.imageMediaId), now)
+                .withVoice(settle(userId, entryId, AttachableKind.VOICE, media.voice, entry.voiceMediaId), now)
         if (changed != entry) entries.update(changed)
         return changed
     }
+
+    /**
+     * What [slot] makes of the entry's [current] medium of [kind], with `media`
+     * told: the id the entry is to name. Attaching the one it has, or removing
+     * one it has not, asks nothing of `media` and names what it named.
+     */
+    private fun settle(
+        userId: UUID,
+        entryId: EntryId,
+        kind: AttachableKind,
+        slot: MediaSlot,
+        current: UUID?,
+    ): UUID? =
+        when (slot) {
+            MediaSlot.Keep -> {
+                current
+            }
+
+            is MediaSlot.Attach -> {
+                if (slot.id != current) swap(userId, entryId, kind, claimed = slot.id, replaced = current)
+                slot.id
+            }
+
+            MediaSlot.Remove -> {
+                current?.let { attachments.release(userId, it, entryId.value) }
+                null
+            }
+        }
 
     /** `media`'s claim of [claimed] for the entry (FR-044a), then the release of what it replaces, if anything. */
     private fun swap(

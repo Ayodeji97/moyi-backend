@@ -1,6 +1,65 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# The follow-up to #162 (ADR-0059 decision 13: an archive's object deleted after the commit that
+# forgets it, from a debt V54 holds) adds no probe; the data-export section's "its URL no longer
+# downloads it" after a withdrawal is the one that would show the deletion moved too late. Last run
+# on 2026-11-10, on fix/export-followups, from a jar of the branch's tree on e273a41, on a fresh
+# database that applied 49 migrations to V54, against its own compose project (moyi-41k: Postgres
+# 55491, Valkey 56411, MinIO 59491), the jar booted by hand (local profile, the close, reminders,
+# held-pushes, account-deletion and data-export crons at */5) and --attach: 1602 passed, 0 failed,
+# 1 skipped (the tag across the erasure, the poller having won the race); export_archive_deletions
+# empty after it.
+#
+# Issue #165 adds four voice-note probes and three for a deleted one: the waveform media.process
+# measured (ADR-0061), 64 levels of 0-255 with the loudest 255 on the author's entry, 64 bytes on the
+# asset, the same levels to the listener once the note has passed, none on the locked day; and a
+# loose voice note deleted by its owner keeps no waveform on its row. Last run on 2026-11-10, on
+# feat/voice-waveform (main e273a416), from a jar of the branch's tree, on a fresh database that
+# applied 49 migrations to V57, against its own compose project (moyi-42f: Postgres 55660, Valkey
+# 56660, MinIO 57660), the jar booted by hand (local profile, the five crons at */5) and --attach:
+# 1610 passed, 0 failed, 0 skipped. A run before it stopped in the media section when Colima
+# killed that project's MinIO (exit 137, memory shared with four other sessions), not the code.
+#
+# Issue #146 adds one probe to the reveal-push section: each member's REVEAL row keeps the revealed
+# day's own date (`bond_date`, V58), which the consumer sends as `data.date`. The log provider's line
+# leaves the payload out, so the ledger is where a run sees it. Last run on 2026-11-10, on
+# feat/push-data-date-146 (from e273a416 plus the branch's tree), against its own compose project
+# (moyi-42b: Postgres 55620, Valkey 56620, MinIO 57621), the jar booted by hand (local profile, the
+# close, reminders, held-pushes, account-deletion and data-export crons at */5) and --attach, on a
+# fresh database: 1604 passed, 0 failed, 0 skipped.
+#
+# Issue #164 adds eleven entry-media probes in the voice section: removeImage or removeVoice with the
+# id it would replace is 422 on removeImageWithoutImageMediaId / removeVoiceWithoutVoiceMediaId and
+# changes nothing; removeImage, then removeVoice, take each off, released as a replaced one is (on no
+# entry, detached_at set, still READY); removing both again is 200; both go back on. Last run on
+# 2026-11-10, on feat/entry-media-remove, from a jar of the branch's tree on e273a41, on a fresh
+# database, against its own compose project (moyi-42e: Postgres 55650, Valkey 56650, MinIO 57650),
+# the jar booted by hand (local profile, the five crons at */5) and --attach: 1612 passed, 1 failed
+# (typed codes' Retry-After, 8639 for 8640, a one-second boundary this change does not touch),
+# 1 skipped (the tag across the erasure, the poller having won the race).
+#
+# Issue #169 adds the reset-code check: an unknown address and a wrong code one 422, the right code
+# 204 twice (nothing spent), a missing code 400, the reset by the same code still 200 and a check of
+# the spent code 422; three wrong checks and two wrong resets burn the code for both; and the
+# eleventh typed code of the day is 429 on the check too. Last run on 2026-11-10, on
+# feat/reset-code-check (main e273a41), from a jar of that tree, on a fresh database, against its own
+# compose project (moyi-42d: Postgres 55640, Valkey 56640, MinIO 57640), the jar booted by hand (local
+# profile, the five crons at */5) and --attach: 1619 passed, 0 failed, 0 skipped. A first run on the
+# same stack failed three: two probes of mine that took one address past its ten typed codes a day
+# (fixed by a flush before them), and the close job, after a four-minute host stall closed the
+# pool's connections (an infrastructure fault; the fresh run is clean).
+#
+# Issue #149 changes the moderation section: the red (held-back) photo, refused on an entry until
+# now, is put on one in a bond of its own and answered 201 NOT_SHARED with its URL to its author,
+# still QUARANTINED with its verdict, PROCESSING with nothing of it to the partner, and READY to the
+# partner once the operator releases it. Last run on 2026-11-10, on fix/claim-held-media from a jar of
+# 93230258's tree, against its own compose project (moyi-42e: Postgres 55650, Valkey 56650, MinIO
+# 57650), the jar booted by hand (local profile, the close, reminders, held-pushes, account-deletion
+# and data-export crons at */5) and --attach: on a fresh database 1616 passed, 1 failed (late entries:
+# "the job has run since", the ShedLock floor named under #126 below), 0 skipped; again on the same
+# server, 1616 passed, 0 failed, 1 skipped (the tag across the erasure, the poller having won the race).
+#
 # Issue #126 adds the data-export section: 401 without a token, 404 for a latest never asked for,
 # 202 PREPARING and the same export again, one 404 for someone else's id and a missing one, the job
 # (on a five-second cron) making it READY with a URL good for exactly 24 hours, the zip downloaded
@@ -49,6 +108,9 @@
 # 0 skipped. The run before (main c6428c1 merged in) had one failure: the sign-in limit's
 # Retry-After, 179 for 180, a second boundary in a probe this change does not touch; it did not
 # recur.
+#
+# Issue #170 adds two probes: BondResponse.timezoneChangeAllowedFrom null on a bond whose zone never
+# moved, and equal to the 409's allowedFrom once it has.
 #
 # The contract-precision PR (#137 to #140, #142) adds five probes: an error body's traceId (32 hex
 # digits, a new one per request) and a TIMEZONE_CHANGE_TOO_SOON refusal's typed allowedFrom, equal to
@@ -178,7 +240,8 @@
 # the photo is, until D4 moderates it (the owner's ruling on FR-061; since D4, READY to the listener
 # once the local stand-in has passed it). Since Phase 4 D4 it reaches every verdict through the
 # stand-in moderators, which decide by colour: a red square QUARANTINED (its author reads it
-# QUARANTINED with its URL, it cannot be put on an entry), a magenta one PASSED and sensitive (the
+# QUARANTINED with its URL; since #149 it is put on an entry all the same, NOT_SHARED to its author
+# and PROCESSING to the partner until released), a magenta one PASSED and sensitive (the
 # partner is shown it READY, sensitive true), a blue one BLOCKED (no URL even for its author, held as
 # evidence); the operator's moyi media quarantine lists them, refuses to release the blocked one,
 # releases the red one and deletes the blue one, whose objects media.purge then removes; the audit
@@ -928,6 +991,18 @@ expect "reset by code for an unknown address" 422 '"code":"PASSWORD_RESET_TOKEN_
 UNKNOWN_RESET_BODY="$LAST_BODY"
 expect "reset by a wrong code" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.162' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$(other_code "$RESET_CODE")\",\"password\":\"$CODE_PASSWORD\"}"
 [ "$LAST_BODY" = "$UNKNOWN_RESET_BODY" ] && pass "reset by code for an unknown address is the same bytes as a wrong code" || fail "reset unknown vs wrong" "'${LAST_BODY:0:200}' vs '${UNKNOWN_RESET_BODY:0:200}'"
+# #169: the check says whether the code is right before the password is typed; it spends nothing
+# of the code, but every check is one of the address's ten typed codes a day, as the reset is. This
+# address has spent five above, and the probes below would take it past ten: start the day afresh.
+flush_buckets
+CHECK_BODY() { printf '{"email":"%s","code":"%s"}' "$1" "$2"; }
+expect "reset-code check for an unknown address is 422" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.220' -d "$(CHECK_BODY "nobody-$RANDOM@example.com" "$RESET_CODE")"
+UNKNOWN_CHECK_BODY="$LAST_BODY"
+expect "reset-code check with a wrong code is 422" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.221' -d "$(CHECK_BODY "$CODE_EMAIL" "$(other_code "$RESET_CODE")")"
+[ "$LAST_BODY" = "$UNKNOWN_CHECK_BODY" ] && pass "…the same bytes as an unknown address" || fail "check unknown vs wrong" "'${LAST_BODY:0:200}' vs '${UNKNOWN_CHECK_BODY:0:200}'"
+expect "reset-code check with the right code is 204" 204 "" -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.222' -d "$(CHECK_BODY "$(echo "$CODE_EMAIL" | tr a-z A-Z)" "$RESET_CODE")"
+expect "…and again: a check spends nothing" 204 "" -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.223' -d "$(CHECK_BODY "$CODE_EMAIL" "$RESET_CODE")"
+expect "a reset-code check without a code is 400" 400 '"code":"MALFORMED_REQUEST"' -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.224' -d "{\"email\":\"$CODE_EMAIL\"}"
 if [ "$RESET_CODE" != "$CODE2" ]; then
   expect "the verification code is not a reset code" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.163' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$CODE2\",\"password\":\"$CODE_PASSWORD\"}"
 fi
@@ -935,9 +1010,26 @@ expect "a breached password by code is refused per field, code not spent" 422 '"
 expect "reset by address and code is 200" 200 "" -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.165' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$RESET_CODE\",\"password\":\"$CODE_PASSWORD\"}"
 expect "…the same code again is 422, never 410" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.166' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$RESET_CODE\",\"password\":\"$CODE_PASSWORD\"}"
 expect "…and the link beside it is spent: 410" 410 '"code":"PASSWORD_RESET_TOKEN_EXPIRED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.167' -d "{\"token\":\"$RESET_LINK\",\"password\":\"$CODE_PASSWORD\"}"
+expect "a reset-code check of the spent code is 422" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.225' -d "$(CHECK_BODY "$CODE_EMAIL" "$RESET_CODE")"
 expect "the password set by code signs in" 200 '"accessToken"' -- -X POST "$API/auth/login" -H 'X-Forwarded-For: 203.0.113.168' -d "$(login_body "$CODE_EMAIL" "$CODE_PASSWORD")"
+# #169: wrong checks are wrong tries at the reset code, on the same five. Three wrong checks and
+# two wrong resets burn it, so neither the check nor the reset then takes the right code.
+# The burn account has spent six of its ten typed codes today above: start the day afresh.
+flush_buckets
+before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "forgot-password for the burn account is 202" 202 "" -- -X POST "$API/auth/forgot-password" -H 'X-Forwarded-For: 203.0.113.230' -d "{\"email\":\"$BURN_EMAIL\"}"
+await_email "$before"
+BURN_RESET_CODE="$(code_from_log)"
+for i in 1 2 3; do
+  expect "wrong reset-code check $i of 3 is 422" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password/check" -H "X-Forwarded-For: 203.0.113.23$i" -d "$(CHECK_BODY "$BURN_EMAIL" "$(other_code "$BURN_RESET_CODE")")"
+done
+for i in 4 5; do
+  expect "wrong reset by code $i of 5 is 422" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H "X-Forwarded-For: 203.0.113.23$i" -d "{\"email\":\"$BURN_EMAIL\",\"code\":\"$(other_code "$BURN_RESET_CODE")\",\"password\":\"$CODE_PASSWORD\"}"
+done
+expect "the right reset-code check after five wrong tries is refused: checks and resets share the five" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.236' -d "$(CHECK_BODY "$BURN_EMAIL" "$BURN_RESET_CODE")"
+expect "…and so is the right reset" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.237' -d "{\"email\":\"$BURN_EMAIL\",\"code\":\"$BURN_RESET_CODE\",\"password\":\"$CODE_PASSWORD\"}"
 # The code reaches the log only inside the logged email (provider=log, local only): no other line holds it.
-CODE_LEAK=0; for c in "$CODE1" "$CODE2" "$BURN_CODE" "$RESET_CODE"; do [ "$(grep -wF -- "$c" "$MOYI_LOG" | grep -vE "^\s*$c\s*\$" | grep -vc 'It works for' || true)" -gt 0 ] && CODE_LEAK=1; done
+CODE_LEAK=0; for c in "$CODE1" "$CODE2" "$BURN_CODE" "$RESET_CODE" "$BURN_RESET_CODE"; do [ "$(grep -wF -- "$c" "$MOYI_LOG" | grep -vE "^\s*$c\s*\$" | grep -vc 'It works for' || true)" -gt 0 ] && CODE_LEAK=1; done
 [ "$CODE_LEAK" = 0 ] && pass "no code appears in the log outside the logged email" || fail "code in log" "a code appears on a log line that is not the email's"
 
 # Ten typed codes a day per address, both routes together, the same for an address with no account.
@@ -948,6 +1040,7 @@ for i in $(seq 1 10); do
 done
 expect "the eleventh, on reset-password, is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.181' -d "{\"email\":\"$LIMIT_CODE_EMAIL\",\"code\":\"000000\",\"password\":\"$CODE_PASSWORD\"}"
 header_is "…waiting for one try back" "Retry-After" "8640"
+expect "…and on the reset-code check, 429 too" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.238' -d "$(CHECK_BODY "$LIMIT_CODE_EMAIL" "000000")"
 # Twenty an hour per client address on the two routes, links and codes alike.
 flush_buckets
 for i in $(seq 1 20); do
@@ -1266,6 +1359,8 @@ expect "a bond for two is 201" 201 '"anchorTimezone":"Africa/Lagos"' -- -X POST 
 CONSENT_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
 CONSENT_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
 expect "the other member joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$CONSENT_CODE/accept" -H "Authorization: Bearer $AGREER_ACCESS"
+# #170: a zone never moved may move now, so the bond names no date.
+[[ "$LAST_BODY" == *'"timezoneChangeAllowedFrom":null'* ]] && pass "…and timezoneChangeAllowedFrom is null: a change is allowed now" || fail "timezoneChangeAllowedFrom" "${LAST_BODY:0:300}"
 
 # states.md §8's three steps, on the wire.
 expect "proposing a zone is 200 and moves nothing yet" 200 '"proposedTimezone":"Europe/London"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Europe/London"}'
@@ -1293,6 +1388,9 @@ if [ "${#TOO_SOON_TRACE}" = 32 ] && grep "TIMEZONE_CHANGE_TOO_SOON -> 409" "$MOY
 else
   fail "traceId in the log" "'$TOO_SOON_TRACE' not on a TIMEZONE_CHANGE_TOO_SOON line of $MOYI_LOG"
 fi
+# #170: the bond names the same date before any attempt, to both members.
+TOO_SOON_DATE="${TOO_SOON:5:10}"
+expect "the bond names the date the zone may change again" 200 "\"timezoneChangeAllowedFrom\":\"$TOO_SOON_DATE\"" -- "$API/bonds/$CONSENT_BOND" -H "Authorization: Bearer $AGREER_ACCESS"
 expect "a fixed-offset zone is 422 on the field" 422 '"field":"anchorTimezone"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Etc/GMT+3"}'
 expect "a zone of one non-breaking space is 422, not 500" 422 '"field":"anchorTimezone"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"\u00a0"}'
 
@@ -2920,6 +3018,9 @@ for _ in $(seq 1 40); do
 done
 db_is "reveal push: one push SENT to each member, and no more" "$NR_SENT" "2|2"
 db_is "reveal push: …each under its reveal key" "$(sql "SELECT count(*) FROM notifications n JOIN bond_days d ON n.dedupe_key = 'reveal:' || d.id || ':' || n.user_id WHERE n.bond_id = '$NB_BOND' AND n.category = 'REVEAL'")" "2"
+# Issue #146: the row keeps the revealed day's own date, which the consumer sends as `data.date`.
+# The log provider's line leaves the payload out, so the ledger is where a run can see it.
+db_is "reveal push: …each naming the day it revealed (bond_date, sent as data.date)" "$(sql "SELECT count(*) FROM notifications n JOIN bond_days d ON n.dedupe_key = 'reveal:' || d.id || ':' || n.user_id WHERE n.bond_id = '$NB_BOND' AND n.category = 'REVEAL' AND n.bond_date = d.date")" "2"
 # The ledger's SENT is committed by the delivery that logged the send, so the lines are written by
 # now; but a log appender may hand them to the file a moment later. Polled, never loosened: two
 # lines exactly. On a failure, what the ledger and the log said (the smoke run of D4 once saw 0).
@@ -3225,13 +3326,33 @@ expect "voice: another user's voice note on an entry is 422 on voiceMediaId" 422
 expect "voice: a photo named as a voice note is 422 on voiceMediaId" 422 '"field":"voiceMediaId"' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"wrong kind\",\"voiceMediaId\":\"$VO_PHOTO\"}"
 expect "voice: M4 - an entry with a photo and a voice note is 201, both READY to the author" 201 '"durationMs":' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"hear the rain\",\"imageMediaId\":\"$VO_PHOTO\",\"voiceMediaId\":\"$VO_NOTE\"}"
 VO_ENTRY="$(printf '%s' "$LAST_BODY")"
+# Issue #165 (ADR-0061): the waveform media.process measured from the Opus it kept, 64 levels of
+# 0-255, the loudest 255; a steady tone, so every slice away from the ends is loud.
+is "voice: …with its waveform, 64 levels of 0-255, the loudest 255 (ADR-0061)" "$(python3 -c "import json,sys; w=json.load(sys.stdin)['voice']['waveform']; print(len(w), all(type(x) is int and 0 <= x <= 255 for x in w), max(w), min(w[4:60]) >= 200)" <<<"$VO_ENTRY")" "64 True 255 True"
+db_is "voice: …kept on the asset as 64 bytes" "$(sql "SELECT octet_length(waveform) FROM media_assets WHERE id='$VO_NOTE'")" "64"
+VO_LEVELS="$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['waveform'])" <<<"$VO_ENTRY")"
 is "voice: …the photo READY to its author" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['image']['status'])" <<<"$VO_ENTRY")" "READY"
 is "voice: …the voice note READY to its author" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['status'])" <<<"$VO_ENTRY")" "READY"
 db_is "voice: …the voice note is attached to that entry" "$(sql "SELECT (m.attached_entry_id = e.id) FROM media_assets m JOIN entries e ON e.voice_media_id = m.id WHERE m.id='$VO_NOTE'")" "t"
 db_is "voice: …and its length is the asset's, not the entry's (spec D-10)" "$(sql "SELECT voice_duration_ms IS NULL FROM entries WHERE voice_media_id='$VO_NOTE'")" "t"
 expect "voice: the listener's locked entry says nothing of the voice note" 200 '"status":"LOCKED"' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_B"
-if printf '%s' "$LAST_BODY" | grep -q -e "$VO_NOTE" -e '"voice"' -e 'durationMs' -e 'X-Amz'; then fail "voice: …no id, no voice field, no length, no URL" "the locked day carries something of the voice note"; else pass "voice: …no id, no voice field, no length, no URL"; fi
+if printf '%s' "$LAST_BODY" | grep -q -e "$VO_NOTE" -e '"voice"' -e 'durationMs' -e 'waveform' -e 'X-Amz'; then fail "voice: …no id, no voice field, no length, no waveform, no URL" "the locked day carries something of the voice note"; else pass "voice: …no id, no voice field, no length, no waveform, no URL"; fi
 expect "voice: deleting a voice note on an entry is 409 MEDIA_ATTACHED" 409 '"code":"MEDIA_ATTACHED"' -- -X DELETE "$API/media/$VO_NOTE" -H "Authorization: Bearer $VO_A"
+# Issue #164 (ADR-0048 decision 7): PATCH takes a photo or a voice note off with a flag, and lets it
+# go as a replacement does, to the reaper of unattached media; a flag with the id it would replace is
+# 422. Then both go back on, since the reveal below needs them: a removed asset is its owner's again.
+VO_ENTRY_ID="$(python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" <<<"$VO_ENTRY")"
+expect "entry media: removeImage with an imageMediaId is 422 on removeImageWithoutImageMediaId" 422 '"field":"removeImageWithoutImageMediaId"' -- -X PATCH "$API/entries/$VO_ENTRY_ID" -H "Authorization: Bearer $VO_A" -d "{\"text\":\"hear the rain\",\"removeImage\":true,\"imageMediaId\":\"$VO_PHOTO\"}"
+expect "entry media: removeVoice with a voiceMediaId is 422 on removeVoiceWithoutVoiceMediaId" 422 '"field":"removeVoiceWithoutVoiceMediaId"' -- -X PATCH "$API/entries/$VO_ENTRY_ID" -H "Authorization: Bearer $VO_A" -d "{\"text\":\"hear the rain\",\"removeVoice\":true,\"voiceMediaId\":\"$VO_NOTE\"}"
+db_is "entry media: …and after both refusals the entry still has its photo and its voice note" "$(sql "SELECT image_media_id='$VO_PHOTO' AND voice_media_id='$VO_NOTE' FROM entries WHERE id='$VO_ENTRY_ID'")" "t"
+expect "entry media: PATCH removeImage takes the photo off" 200 '"image":null' -- -X PATCH "$API/entries/$VO_ENTRY_ID" -H "Authorization: Bearer $VO_A" -d '{"text":"hear the rain","removeImage":true}'
+is "entry media: …and leaves the voice note" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['id'])" <<<"$LAST_BODY")" "$VO_NOTE"
+db_is "entry media: …the photo is let go to the reaper, as a replaced one is: on no entry, detached now" "$(sql "SELECT attached_entry_id IS NULL AND detached_at IS NOT NULL AND status='READY' FROM media_assets WHERE id='$VO_PHOTO'")" "t"
+expect "entry media: PATCH removeVoice takes the voice note off" 200 '"voice":null' -- -X PATCH "$API/entries/$VO_ENTRY_ID" -H "Authorization: Bearer $VO_A" -d '{"text":"hear the rain","removeVoice":true}'
+db_is "entry media: …the voice note is let go the same way" "$(sql "SELECT attached_entry_id IS NULL AND detached_at IS NOT NULL AND status='READY' FROM media_assets WHERE id='$VO_NOTE'")" "t"
+expect "entry media: removing both again, when neither is there, is 200 and the words stay" 200 '"text":"hear the rain"' -- -X PATCH "$API/entries/$VO_ENTRY_ID" -H "Authorization: Bearer $VO_A" -d '{"text":"hear the rain","removeImage":true,"removeVoice":true}'
+expect "entry media: …and both go back on, the owner's again" 200 '"durationMs":' -- -X PATCH "$API/entries/$VO_ENTRY_ID" -H "Authorization: Bearer $VO_A" -d "{\"text\":\"hear the rain\",\"imageMediaId\":\"$VO_PHOTO\",\"voiceMediaId\":\"$VO_NOTE\"}"
+db_is "entry media: …attached to the entry again" "$(sql "SELECT count(*) FROM media_assets WHERE attached_entry_id='$VO_ENTRY_ID'")" "2"
 expect "voice: the listener writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_B" -H "Idempotency-Key: $(uuidgen)" -d '{"text":"and mine, in words"}'
 # The listener hears it only once it has passed moderation (FR-061, ADR-0049 decision 7); the local
 # profile's stand-in passes every voice note, and this photo, within seconds (D4, ADR-0051).
@@ -3240,12 +3361,19 @@ is "voice: …and the photo too" "$(await_verdict "$VO_PHOTO")" "PASSED"
 expect "voice: once revealed and passed, the listener is played the voice note" 200 '"partnerEntry"' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_B"
 VO_PARTNER="$(python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['partnerEntry']))" <<<"$LAST_BODY")"
 is "voice: …READY to the listener, with a URL and its length" "$(python3 -c "import json,sys; v=json.load(sys.stdin)['voice']; print(v['status'], v['url'] is not None, v['durationMs'] is not None)" <<<"$VO_PARTNER")" "READY True True"
+is "voice: …and the speaker's waveform, the same 64 levels (ADR-0061)" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['waveform'])" <<<"$VO_PARTNER")" "$VO_LEVELS"
 is "voice: …and the photo READY to the listener (FR-101)" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['image']['status'])" <<<"$VO_PARTNER")" "READY"
 expect "voice: the speaker still plays it READY on the revealed day" 200 '"durationMs":' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_A"
 expect "voice: an outsider reaches neither the voice note nor the day" 404 '"code":"NOT_FOUND"' -- "$API/media/$VO_NOTE" -H "Authorization: Bearer $VO_O"
 if grep -q "$(printf '%s' "$VO_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then
   fail "voice: the voice note's URL is in no log line" "its signature is in $MOYI_LOG"
 else pass "voice: the voice note's URL is in no log line"; fi
+# A deleted voice note keeps no waveform (ADR-0061 decision 8): its owner deletes one never attached.
+upload_photo "$VO_A" "$VOICE_DIR/short.wav" audio/wav VOICE; VO_LOOSE="$PHOTO_ID"
+is "voice: a WAV voice note to delete becomes READY" "$(await_photo "$VO_A" "$VO_LOOSE")" "READY"
+db_is "voice: …with a waveform of 64 bytes" "$(sql "SELECT octet_length(waveform) FROM media_assets WHERE id='$VO_LOOSE'")" "64"
+expect "voice: …which its owner deletes, 204" 204 '' -- -X DELETE "$API/media/$VO_LOOSE" -H "Authorization: Bearer $VO_A"
+db_is "voice: …and the deleted row keeps no waveform" "$(sql "SELECT status || '|' || (waveform IS NULL) FROM media_assets WHERE id='$VO_LOOSE'")" "DELETED|true"
 rm -rf "$VOICE_DIR"
 flush_buckets
 
@@ -3300,7 +3428,24 @@ expect "moderation: a bond for the two is 201" 201 '"status":"PENDING_MEMBER"' -
 MO_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
 MO_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
 expect "moderation: …which the partner joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$MO_CODE/accept" -H "Authorization: Bearer $MO_B"
-expect "moderation: a held-back photo cannot be put on an entry: 422 on imageMediaId" 422 '"field":"imageMediaId"' -- -X POST "$API/bonds/$MO_BOND/entries" -H "Authorization: Bearer $MO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"not this one\",\"imageMediaId\":\"$MO_RED\"}"
+# #149: a photo held back before its entry is sent is attached all the same, as it would be had
+# moderation run a moment later (ADR-0051 decision 8 as amended): NOT_SHARED to its author from
+# the entry's first answer, PROCESSING to the partner. In a bond of its own, so this day's entry
+# in MO_BOND stays free for the photo and voice note below.
+verified_account "partner-h" "203.0.113.172"; MO_C="$ACCOUNT_ACCESS"
+expect "moderation: #149 - a second bond is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $MO_A" -d "$(bond_body "Held")"
+MO_HBOND="$(printf '%s' "$LAST_BODY" | jget id)"
+MO_HCODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "moderation: #149 - …which its partner joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$MO_HCODE/accept" -H "Authorization: Bearer $MO_C"
+expect "moderation: #149 - a photo held back before the entry is sent is attached: 201" 201 '"status":"NOT_SHARED"' -- -X POST "$API/bonds/$MO_HBOND/entries" -H "Authorization: Bearer $MO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"this one too\",\"imageMediaId\":\"$MO_RED\"}"
+is "moderation: #149 - …NOT_SHARED to its author, with its URL (Q10)" "$(python3 -c "import json,sys; i=json.load(sys.stdin)['image']; print(i['id'], i['status'], i['url'] is not None, i['sensitive'])" <<<"$LAST_BODY")" "$MO_RED NOT_SHARED True False"
+MO_HENTRY="$(printf '%s' "$LAST_BODY" | jget id)"
+db_is "moderation: #149 - …attached, and still held back with its verdict" "$(sql "SELECT (attached_entry_id = '$MO_HENTRY') || '|' || status || '|' || moderation_verdict FROM media_assets WHERE id='$MO_RED'")" "true|QUARANTINED|QUARANTINED"
+expect "moderation: #149 - the partner writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$MO_HBOND/entries" -H "Authorization: Bearer $MO_C" -H "Idempotency-Key: $(uuidgen)" -d '{"text":"and mine"}'
+expect "moderation: #149 - the partner reads the day" 200 '"partnerEntry"' -- "$API/bonds/$MO_HBOND/today" -H "Authorization: Bearer $MO_C"
+is "moderation: #149 - …and is shown the held-back photo PROCESSING, with nothing of it" "$(python3 -c "import json,sys; i=json.load(sys.stdin)['partnerEntry']['image']; print(i['status'], i['url'], i['width'], i['sensitive'])" <<<"$LAST_BODY")" "PROCESSING None None False"
+case "$LAST_BODY" in *NOT_SHARED*|*X-Amz*) fail "moderation: #149 - …never NOT_SHARED, no signed URL" "${LAST_BODY:0:300}";; *) pass "moderation: #149 - …never NOT_SHARED, no signed URL";; esac
+expect "moderation: #149 - its author reads it NOT_SHARED on the day too" 200 '"status":"NOT_SHARED"' -- "$API/bonds/$MO_HBOND/today" -H "Authorization: Bearer $MO_A"
 expect "moderation: an entry with the nude photo and the voice note is 201" 201 '"sensitive":true' -- -X POST "$API/bonds/$MO_BOND/entries" -H "Authorization: Bearer $MO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"for you\",\"imageMediaId\":\"$MO_NUDE\",\"voiceMediaId\":\"$MO_VOICE\"}"
 expect "moderation: the partner writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$MO_BOND/entries" -H "Authorization: Bearer $MO_B" -H "Idempotency-Key: $(uuidgen)" -d '{"text":"and mine"}'
 expect "moderation: the partner is shown the passed photo" 200 '"partnerEntry"' -- "$API/bonds/$MO_BOND/today" -H "Authorization: Bearer $MO_B"
@@ -3323,6 +3468,8 @@ if [ "$PSQL_OK" = 1 ]; then
   MO_OUT="$(quarantine release "$MO_RED" "smoke: a made-up red square, not violence" 2>&1)" \
     && pass "moderation: the operator releases the quarantined photo" || fail "moderation: release" "$MO_OUT"
   expect "moderation: …which its author now reads READY" 200 '"status":"READY"' -- "$API/media/$MO_RED" -H "Authorization: Bearer $MO_A"
+  expect "moderation: #149 - …and the partner it was on an entry for is now shown it READY" 200 '"partnerEntry"' -- "$API/bonds/$MO_HBOND/today" -H "Authorization: Bearer $MO_C"
+  is "moderation: #149 - …READY, with its URL" "$(python3 -c "import json,sys; i=json.load(sys.stdin)['partnerEntry']['image']; print(i['status'], i['url'] is not None)" <<<"$LAST_BODY")" "READY True"
   MO_KNOWN_KEY="$(sql "SELECT storage_key FROM media_assets WHERE id='$MO_KNOWN'")"
   MO_OUT="$(quarantine delete "$MO_KNOWN" "smoke: reported, ref FAKE-SMOKE-0001" 2>&1)" \
     && pass "moderation: the operator deletes the blocked asset after the report" || fail "moderation: delete" "$MO_OUT"
@@ -3598,6 +3745,40 @@ if [ "$PSQL_OK" = 1 ]; then
     "$(sql "SELECT (subject IS NULL AND body IS NULL) || '|' || status || '|' || (SELECT string_agg(action, ',' ORDER BY at) FROM support_ticket_log WHERE ticket_id = '$SU_ID') FROM support_tickets WHERE id = '$SU_ID'")" "true|CLOSED|READ,CLOSED"
 else
   skip "support: the operator's queue (psql not reachable through docker compose)"
+fi
+flush_buckets
+
+echo; echo "support — the error reference sent with a message (#168, ADR-0057 decision 11)"
+# Optional, 1 to 64 visible ASCII characters (0x21 to 0x7E): stored with the ticket, shown to the
+# operator, never in the acknowledgement email nor any log line, and deleted with the words on close.
+SR_REFERENCE="smoke-ref-$RANDOM$RANDOM-4bf92f3577b34da6"
+SR_MESSAGE="{\"subject\":\"$SU_SUBJECT\",\"body\":\"$SU_BODY\",\"reference\":\"$SR_REFERENCE\"}"
+expect "a support reference with a space is 422 on reference" 422 '"field":"reference"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "{\"subject\":\"$SU_SUBJECT\",\"body\":\"$SU_BODY\",\"reference\":\"$SR_REFERENCE x\"}"
+if [[ "$LAST_BODY" == *"$SR_REFERENCE"* ]]; then fail "support: …and the refusal repeats no reference" "${LAST_BODY:0:200}"; else pass "support: …and the refusal repeats no reference"; fi
+expect "a support reference of 65 characters is 422 on reference" 422 '"field":"reference"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "{\"subject\":\"$SU_SUBJECT\",\"body\":\"$SU_BODY\",\"reference\":\"$(printf 'r%.0s' $(seq 1 65))\"}"
+expect "an empty support reference is 422 on reference" 422 '"field":"reference"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "{\"subject\":\"$SU_SUBJECT\",\"body\":\"$SU_BODY\",\"reference\":\"\"}"
+expect "a support reference past ASCII is 422 on reference" 422 '"field":"reference"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "{\"subject\":\"$SU_SUBJECT\",\"body\":\"$SU_BODY\",\"reference\":\"caf\u00e9\"}"
+flush_buckets
+expect "a support message with a reference is 201 with its id and time" 201 '"createdAt"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "$SR_MESSAGE"
+SR_ID="$(printf '%s' "$LAST_BODY" | jget id)"
+if [[ "$LAST_BODY" == *"$SR_REFERENCE"* ]]; then fail "support: …which does not repeat the reference" "${LAST_BODY:0:200}"; else pass "support: …which does not repeat the reference"; fi
+SR_ACK=""
+for _ in $(seq 1 40); do
+  SR_ACK="$(grep -c "Support ticket $SR_ID acknowledgement: ACCEPTED" "$MOYI_LOG" || true)"
+  [ "$SR_ACK" -gt 0 ] && break
+  sleep 0.25
+done
+is "support: the referenced message was acknowledged (provider=log)" "$SR_ACK" "1"
+if grep -qF "$SR_REFERENCE" "$MOYI_LOG"; then fail "the support reference is in no email and no log line" "it is in $MOYI_LOG"; else pass "the support reference is in no email and no log line"; fi
+if [ "$PSQL_OK" = 1 ]; then
+  db_is "support: the reference is stored with the ticket" "$(sql "SELECT reference FROM support_tickets WHERE id = '$SR_ID'")" "$SR_REFERENCE"
+  SR_OUT="$(support show "$SR_ID" 2>&1)" || true
+  if [[ "$SR_OUT" == *"reference:  $SR_REFERENCE"* ]]; then pass "support: show gives the operator the reference"; else fail "support: show gives the operator the reference" "${SR_OUT:0:400}"; fi
+  SR_OUT="$(support close "$SR_ID" "smoke: found the trace" 2>&1)" && pass "support: the operator closes the referenced one" || fail "support: the operator closes the referenced one" "$SR_OUT"
+  db_is "support: …its reference is deleted with its words" \
+    "$(sql "SELECT (subject IS NULL AND body IS NULL AND reference IS NULL) || '|' || status FROM support_tickets WHERE id = '$SR_ID'")" "true|CLOSED"
+else
+  skip "support: the reference in the operator's queue (psql not reachable through docker compose)"
 fi
 flush_buckets
 

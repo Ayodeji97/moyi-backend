@@ -34,6 +34,7 @@ import org.springframework.transaction.IllegalTransactionStateException
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -149,8 +150,8 @@ internal class SendPushTest(
         provider.sent.map { it.token.value } shouldContainExactlyInAnyOrder listOf("token-ada-phone", "token-ada-tablet")
         provider.sent.toSet() shouldBe
             setOf(
-                PushMessage(PushToken("token-ada-phone"), PushCategory.REVEAL, bond, start.plus(Duration.ofDays(1))),
-                PushMessage(PushToken("token-ada-tablet"), PushCategory.REVEAL, bond, start.plus(Duration.ofDays(1))),
+                PushMessage(PushToken("token-ada-phone"), PushCategory.REVEAL, bond, start.plus(Duration.ofDays(1)), DAY),
+                PushMessage(PushToken("token-ada-tablet"), PushCategory.REVEAL, bond, start.plus(Duration.ofDays(1)), DAY),
             )
         val row = notification(ada)
         row["status"] shouldBe "SENT"
@@ -158,6 +159,35 @@ internal class SendPushTest(
         (row["provider_message_id"] as String).startsWith("projects/test/messages/") shouldBe true
         row["error_class"] shouldBe null
         tokensOf(ada) shouldContainExactlyInAnyOrder listOf(phone, tablet)
+    }
+
+    @Test
+    fun `a push keeps its Bond-day in the ledger and hands it to the phone, and a push about no day keeps none`() {
+        register(ada, "token-ada")
+        transactions.execute {
+            notifications.request(reveal(ada))
+            notifications.request(reveal(ada).copy(category = PushCategory.PARTNER_JOINED, dedupeKey = "joined:$ada", bondDate = null))
+        }
+
+        jdbc.queryForMap("SELECT bond_date FROM notifications WHERE category = 'REVEAL'")["bond_date"] shouldBe java.sql.Date.valueOf(DAY)
+        jdbc.queryForMap("SELECT bond_date FROM notifications WHERE category = 'PARTNER_JOINED'")["bond_date"] shouldBe null
+        dispatcher.dispatchDue(start, BUDGET).delivered shouldBe 2
+
+        provider.sent.associate { it.category to it.bondDate } shouldBe
+            mapOf(PushCategory.REVEAL to DAY, PushCategory.PARTNER_JOINED to null)
+    }
+
+    @Test
+    fun `a push recorded before V58, with no date in its row, is still sent, naming no day`() {
+        register(ada, "token-ada")
+        transactions.execute { notifications.request(reveal(ada)) }
+        // As every row V58 found: the column added, empty.
+        jdbc.update("UPDATE notifications SET bond_date = NULL") shouldBe 1
+
+        dispatcher.dispatchDue(start, BUDGET).delivered shouldBe 1
+
+        provider.sent.single().bondDate shouldBe null
+        notification(ada)["status"] shouldBe "SENT"
     }
 
     @Test
@@ -323,6 +353,7 @@ internal class SendPushTest(
         "reveal:day-1:$userId",
         staleAfter,
         PushRecipient(ZoneId.of("UTC"), null, NotificationPreferences.DEFAULTS),
+        DAY,
     )
 
     private fun register(
@@ -349,5 +380,8 @@ internal class SendPushTest(
 
     private companion object {
         const val BUDGET = 10
+
+        /** The Bond-day a test's reveal is about. */
+        val DAY: LocalDate = LocalDate.parse("2026-10-27")
     }
 }

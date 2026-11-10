@@ -2,6 +2,7 @@ package com.moyi.bond.domain
 
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
 
 /**
@@ -370,8 +371,30 @@ internal data class Bond(
      */
     fun mayChangeTimezoneAt(now: Instant): Boolean = timezoneChangedAt?.plus(TIMEZONE_CHANGE_INTERVAL)?.isAfter(now)?.not() ?: true
 
-    /** When the zone may next move, or `null` if it may move now. The `409`'s detail names this date. */
+    /** When the zone may next move, or `null` if it never has; [timezoneChangeAllowedFrom] is that instant as a date. */
     val nextTimezoneChangeAt: Instant? get() = timezoneChangedAt?.plus(TIMEZONE_CHANGE_INTERVAL)
+
+    /**
+     * The first date, in the anchor zone, on which the zone may move **all day**,
+     * or `null` when it may move [now] (FR-027). The one answer to "from when?":
+     * the `409 TIMEZONE_CHANGE_TOO_SOON`'s `allowedFrom` and
+     * `BondResponse.timezoneChangeAllowedFrom` (#170) both read it, so the date
+     * a client shows before the attempt is the date the refusal would give.
+     *
+     * Thirty days from an afternoon lands in an afternoon, so naming *that*
+     * calendar date makes the sentence false for most of the day it names — a
+     * client that read "28 October" and retried at 10:00 on the 28th got the
+     * identical refusal naming the identical date. Rounding **up** to the next
+     * whole day is the honest direction to be wrong in: the answer may arrive
+     * sooner than promised, never later (second review of PR #41). On that last
+     * day the date is still the next one until the instant itself, and then
+     * there is no date at all.
+     */
+    fun timezoneChangeAllowedFrom(now: Instant): LocalDate? {
+        if (mayChangeTimezoneAt(now)) return null
+        val allowedAt = requireNotNull(nextTimezoneChangeAt).atZone(anchorTimezone.zone)
+        return if (allowedAt.toLocalTime() == LocalTime.MIDNIGHT) allowedAt.toLocalDate() else allowedAt.toLocalDate().plusDays(1)
+    }
 
     /**
      * Moves the anchor zone (FR-027).

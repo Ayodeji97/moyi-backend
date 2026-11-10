@@ -77,7 +77,7 @@ internal class ArchiveContentsTest(
 
     @AfterEach
     fun clear() {
-        jdbc.execute("TRUNCATE TABLE data_exports")
+        jdbc.execute("TRUNCATE TABLE data_exports, export_archive_deletions")
         people.clear()
         storage.clear()
     }
@@ -111,6 +111,7 @@ internal class ArchiveContentsTest(
         only["days"][1]["entries"][1]["status"].asString() shouldBe "DELETED"
         only["days"][1]["entries"][1]["text"].isNull shouldBe true
         archive["supportMessages"].single()["body"].asString() shouldBe "help me"
+        archive["supportMessages"].single()["reference"].asString() shouldBe "trace-77"
         archive["adminAccess"]["logKept"].asBoolean() shouldBe false
         archive["adminAccess"]["accesses"].isEmpty shouldBe true
         output.all shouldNotContain WORDS
@@ -127,6 +128,44 @@ internal class ArchiveContentsTest(
 
         jobs.prepareDue(5) shouldBe 1
         unzip(storage.archives.values.single()).keys shouldBe setOf("README.txt", "moyi-export.json")
+    }
+
+    /**
+     * #149: a photo or voice note moderation blocked can now be attached to its author's own entry
+     * (ADR-0051 decision 8). `media` gives its author no copy of either (`ExportStorageTest`); here,
+     * what the archive makes of that answer: the entry is kept, its `image` and `voice` are null, and
+     * no file of either is in the zip.
+     */
+    @Test
+    fun `a photo and voice note the storage withholds from their author are null in the entry and absent from the zip`() {
+        written()
+        val voice = UUID.randomUUID()
+        people.days[ada to bond] =
+            listOf(
+                ExportedDay(
+                    LocalDate.parse("2026-10-05"),
+                    "REVEALED",
+                    listOf(entry(mine = true, text = WORDS, image = photo, voice = voice)),
+                ),
+            )
+        // Blocked: the objects are still in the storage, held as evidence, but nobody is given a copy.
+        storage.media[photo] = UUID.randomUUID() to "a blocked photo".toByteArray()
+        storage.media[voice] = UUID.randomUUID() to "a blocked voice note".toByteArray()
+
+        requests.request(ada)
+        jobs.prepareDue(5) shouldBe 1
+
+        val files = unzip(storage.archives.values.single())
+        files.keys shouldBe setOf("README.txt", "moyi-export.json")
+        val mine =
+            json
+                .readTree(files.getValue("moyi-export.json"))["bonds"]
+                .single()["days"]
+                .single()["entries"]
+                .single()
+        mine["text"].asString() shouldBe WORDS
+        mine["image"].isNull shouldBe true
+        mine["voice"].isNull shouldBe true
     }
 
     @Test
@@ -212,7 +251,7 @@ internal class ArchiveContentsTest(
                 )
             }
         people.tickets[ada] =
-            listOf(ExportedTicket(UUID.randomUUID(), "A question", "help me", "OPEN", ExportTestApplication.START, null))
+            listOf(ExportedTicket(UUID.randomUUID(), "A question", "help me", "trace-77", "OPEN", ExportTestApplication.START, null))
         storage.media[photo] = ada to "a photo".toByteArray()
     }
 
@@ -224,6 +263,7 @@ internal class ArchiveContentsTest(
         favourited: Boolean = false,
         reaction: String? = null,
         image: UUID? = null,
+        voice: UUID? = null,
     ) = ExportedEntry(
         id = UUID.randomUUID(),
         mine = mine,
@@ -234,7 +274,7 @@ internal class ArchiveContentsTest(
         favourited = favourited,
         reaction = reaction,
         imageId = image,
-        voiceId = null,
+        voiceId = voice,
     )
 
     private fun bondOf() =

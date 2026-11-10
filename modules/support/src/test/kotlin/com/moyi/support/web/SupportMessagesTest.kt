@@ -5,6 +5,7 @@ import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
 import com.moyi.support.infra.RecordingAccountMail
 import com.moyi.support.infra.SupportTestApplication
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotContain
@@ -17,6 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
@@ -63,8 +65,8 @@ internal class SupportMessagesTest(
         body.propertyNames().asSequence().toList() shouldBe listOf("id", "createdAt")
         val id = UUID.fromString(body["id"].asString())
         Instant.parse(body["createdAt"].asString())
-        jdbc.queryForMap("SELECT user_id, subject, body, status FROM support_tickets WHERE id = ?", id) shouldBe
-            mapOf("user_id" to ada, "subject" to SUBJECT, "body" to BODY, "status" to "OPEN")
+        jdbc.queryForMap("SELECT user_id, subject, body, reference, status FROM support_tickets WHERE id = ?", id) shouldBe
+            mapOf("user_id" to ada, "subject" to SUBJECT, "body" to BODY, "reference" to null, "status" to "OPEN")
 
         await().atMost(WAIT).until { mail.sent.isNotEmpty() }
         val (to, message) = mail.sent.single()
@@ -98,6 +100,71 @@ internal class SupportMessagesTest(
         jdbc.queryForObject("SELECT count(*) FROM support_tickets", Long::class.java) shouldBe 0
         mail.sent shouldHaveSize 0
         output.all shouldNotContain WATCHED
+    }
+
+    @Test
+    fun `a reference is stored with the ticket, and is in no answer, email or log line`(output: CapturedOutput) {
+        val ada = UUID.randomUUID()
+
+        val sent = send(ada, """{"subject":"$SUBJECT","body":"$BODY","reference":"$REFERENCE"}""")
+
+        sent.status shouldBe 201
+        body(sent).propertyNames().asSequence().toList() shouldBe listOf("id", "createdAt")
+        sent.contentAsString shouldNotContain REFERENCE_MARK
+        val id = UUID.fromString(body(sent)["id"].asString())
+        jdbc.queryForObject("SELECT reference FROM support_tickets WHERE id = ?", String::class.java, id) shouldBe REFERENCE
+
+        await().atMost(WAIT).until { mail.sent.isNotEmpty() }
+        val (_, message) = mail.sent.single()
+        message.text shouldNotContain REFERENCE_MARK
+        message.html!! shouldNotContain REFERENCE_MARK
+        message.subject shouldNotContain REFERENCE_MARK
+        output.all shouldNotContain REFERENCE_MARK
+    }
+
+    @Test
+    fun `a reference that is empty, too long, or not visible ASCII is refused by name, and nothing is filed`(output: CapturedOutput) {
+        val ada = UUID.randomUUID()
+        listOf(
+            "",
+            REFERENCE_MARK.repeat(64 / REFERENCE_MARK.length + 1),
+            "$REFERENCE_MARK with a space",
+            "$REFERENCE_MARK\\t",
+            "$REFERENCE_MARK\\u007f",
+            "${REFERENCE_MARK}é",
+            "${REFERENCE_MARK}😀",
+        ).forEach { reference ->
+            val refused = send(ada, """{"subject":"$SUBJECT","body":"$BODY","reference":"$reference"}""")
+            refused.status shouldBe 422
+            body(refused)["code"].asString() shouldBe "VALIDATION_FAILED"
+            body(refused)["errors"].toList().map { it["field"].asString() } shouldBe listOf("reference")
+            refused.contentAsString shouldNotContain REFERENCE_MARK
+        }
+        jdbc.queryForObject("SELECT count(*) FROM support_tickets", Long::class.java) shouldBe 0
+        mail.sent shouldHaveSize 0
+        output.all shouldNotContain REFERENCE_MARK
+    }
+
+    @Test
+    fun `the table refuses a reference the domain refuses, its second line`() {
+        val insert =
+            "INSERT INTO support_tickets (id, user_id, subject, body, reference, status, created_at) " +
+                "VALUES (?, ?, 's', 'b', ?, 'OPEN', now())"
+        listOf("", "x".repeat(65), "a b", "a\u007f", "caf\u00e9", "a\tb").forEach { reference ->
+            shouldThrow<DataIntegrityViolationException> { jdbc.update(insert, UUID.randomUUID(), UUID.randomUUID(), reference) }
+        }
+        (0x21..0x7E).map { it.toChar() }.joinToString("").chunked(64).forEach { reference ->
+            jdbc.update(insert, UUID.randomUUID(), UUID.randomUUID(), reference) shouldBe 1
+        }
+    }
+
+    @Test
+    fun `an explicit null reference is no reference`() {
+        val ada = UUID.randomUUID()
+        val sent = send(ada, """{"subject":"$SUBJECT","body":"$BODY","reference":null}""")
+        sent.status shouldBe 201
+        val id = UUID.fromString(body(sent)["id"].asString())
+        jdbc.queryForObject("SELECT reference FROM support_tickets WHERE id = ?", String::class.java, id) shouldBe null
     }
 
     @Test
@@ -148,16 +215,17 @@ internal class SupportMessagesTest(
     @Test
     fun `the operator's close empties the words and keeps the record, and each look is logged`() {
         val ada = UUID.randomUUID()
-        val id = UUID.fromString(body(send(ada, """{"subject":"$SUBJECT","body":"$BODY"}"""))["id"].asString())
+        val id =
+            UUID.fromString(body(send(ada, """{"subject":"$SUBJECT","body":"$BODY","reference":"$REFERENCE"}"""))["id"].asString())
 
         jdbc.queryForList("SELECT ticket_id FROM support_ticket_list('op')", UUID::class.java) shouldBe listOf(id)
-        jdbc.queryForMap("SELECT subject, body FROM support_ticket_read(?, 'op')", id) shouldBe
-            mapOf("subject" to SUBJECT, "body" to BODY)
+        jdbc.queryForMap("SELECT subject, body, reference FROM support_ticket_read(?, 'op')", id) shouldBe
+            mapOf("subject" to SUBJECT, "body" to BODY, "reference" to REFERENCE)
         jdbc.queryForObject("SELECT support_ticket_close(?, 'op', 'answered by email')", String::class.java, id) shouldBe "CLOSED"
         jdbc.queryForObject("SELECT support_ticket_close(?, 'op', 'again')", String::class.java, id) shouldBe "NOT_OPEN"
 
-        jdbc.queryForMap("SELECT subject, body, status FROM support_tickets WHERE id = ?", id) shouldBe
-            mapOf("subject" to null, "body" to null, "status" to "CLOSED")
+        jdbc.queryForMap("SELECT subject, body, reference, status FROM support_tickets WHERE id = ?", id) shouldBe
+            mapOf("subject" to null, "body" to null, "reference" to null, "status" to "CLOSED")
         jdbc.queryForList("SELECT action FROM support_ticket_log ORDER BY at, action", String::class.java) shouldBe
             listOf("LISTED", "READ", "CLOSED")
     }
@@ -184,6 +252,10 @@ internal class SupportMessagesTest(
         const val SUBJECT = "$WATCHED locked out"
         const val BODY = "My partner and I $WATCHED cannot see today's entries."
         const val SETTLE_MILLIS = 500L
+
+        /** In the reference alone: found in an answer, an email or a log line, the reference leaked. */
+        const val REFERENCE_MARK = "Zygomorphic"
+        const val REFERENCE = "$REFERENCE_MARK-4bf92f3577b34da6!~"
         val WAIT: Duration = Duration.ofSeconds(5)
     }
 }

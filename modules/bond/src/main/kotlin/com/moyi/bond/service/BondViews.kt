@@ -13,6 +13,7 @@ import com.moyi.identity.api.UserSummary
 import org.springframework.stereotype.Component
 import java.net.URI
 import java.time.Clock
+import java.time.LocalDate
 
 /**
  * What a member sees of a bond: the aggregate, the display names identity
@@ -66,6 +67,7 @@ internal class BondViews(
                 me = bond.memberOf(viewer) ?: error("the viewer is not a member of this bond; the guard should have refused the request"),
                 invite = live[bond.id]?.let { InviteView(it, links.linkFor(it.code)) },
                 proposals = pending[bond.id].orEmpty(),
+                timezoneChangeAllowedFrom = bond.timezoneChangeAllowedFrom(now),
             )
         }
     }
@@ -102,6 +104,13 @@ internal data class BondView(
      * [semanticSearchOn] are the questions the HTTP layer asks of it.
      */
     val proposals: List<Proposal> = emptyList(),
+    /**
+     * FR-027: the first date the anchor zone may move again, `null` when it may
+     * move now (#170). Read at the same instant as the live invite and
+     * proposals, so it changes with the passing of time and not only with a
+     * write, which is why `entityTag` digests it.
+     */
+    val timezoneChangeAllowedFrom: LocalDate? = null,
 ) {
     val timezoneChange: Proposal? get() = proposals.firstOrNull { it.kind == ProposalKind.TIMEZONE_CHANGE }
 

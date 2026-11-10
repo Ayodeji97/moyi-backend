@@ -7,10 +7,12 @@ import com.moyi.export.api.DataExportJobs
 import com.moyi.export.infra.ExportTestApplication
 import com.moyi.export.infra.FakeStorage
 import com.moyi.export.infra.People
+import com.moyi.export.infra.RecordingMail
 import com.moyi.export.infra.database.DataExports
 import com.moyi.gratitude.api.ExportedDay
 import com.moyi.gratitude.api.ExportedEntry
 import com.moyi.identity.api.ExportedAccount
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -39,6 +41,7 @@ internal class ExportFailuresTest(
     @Autowired private val exports: DataExports,
     @Autowired private val people: People,
     @Autowired private val storage: FakeStorage,
+    @Autowired private val mail: RecordingMail,
     @Autowired private val clock: MutableClock,
     @Autowired dataSource: DataSource,
 ) : IntegrationTest() {
@@ -55,9 +58,11 @@ internal class ExportFailuresTest(
 
     @AfterEach
     fun clear() {
-        jdbc.execute("TRUNCATE TABLE data_exports")
+        jdbc.execute("TRUNCATE TABLE data_exports, export_archive_deletions")
         people.clear()
         storage.clear()
+        mail.sent.clear()
+        mail.failing = false
     }
 
     @Test
@@ -103,6 +108,37 @@ internal class ExportFailuresTest(
         storage.archives.isEmpty() shouldBe true
         // And a new request is a new export, not the stuck one.
         (requests.request(ada).export.id == id) shouldBe false
+    }
+
+    @Test
+    fun `an archive whose row went while it was built, and which could not be deleted then, is deleted by the next run`() {
+        requests.request(ada)
+        people.duringBuild = {
+            jdbc.update("DELETE FROM data_exports WHERE user_id = ?", ada)
+            storage.failingDeletes = true
+        }
+
+        jobs.prepareDue(5) shouldBe 0
+
+        storage.archives.size shouldBe 1
+        people.duringBuild = {}
+        storage.failingDeletes = false
+
+        jobs.prepareDue(5) shouldBe 0
+
+        storage.archives.keys.shouldBeEmpty()
+    }
+
+    @Test
+    fun `an email that cannot be sent leaves the export READY and counted as made, not an attempt spent`() {
+        val id = requests.request(ada).export.id
+        mail.failing = true
+
+        jobs.prepareDue(5) shouldBe 1
+
+        row(id) shouldBe ("READY" to 1)
+        storage.archives.size shouldBe 1
+        storage.deleted.shouldBeEmpty()
     }
 
     @Test
