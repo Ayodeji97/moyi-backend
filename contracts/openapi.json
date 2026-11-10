@@ -7151,6 +7151,16 @@
             "type" : [ "string", "null" ],
             "format" : "uuid"
           },
+          "removeImage" : {
+            "type" : "boolean",
+            "default" : false,
+            "description" : "`true` takes the entry's photo off; it is then attached to nothing and deleted a day later unless attached again, as a replaced one is. Removing a photo the entry does not have changes nothing (`200`). `true` together with `imageMediaId` is `422 VALIDATION_FAILED`. Before the reveal only, as every edit."
+          },
+          "removeVoice" : {
+            "type" : "boolean",
+            "default" : false,
+            "description" : "`true` takes the entry's voice note off; it is then attached to nothing and deleted a day later unless attached again, as a replaced one is. Removing a voice note the entry does not have changes nothing (`200`). `true` together with `voiceMediaId` is `422 VALIDATION_FAILED`. Before the reveal only, as every edit."
+          },
           "text" : {
             "type" : "string",
             "description" : "FR-041: at least one character that is neither whitespace (Unicode-aware, so a lone non-breaking space does not count either) nor invisible (Unicode's Default_Ignorable_Code_Point: a text of only zero-width spaces, joiners, variation selectors and the like is refused as empty; the published `pattern` does not express this, and matches such a text), at most 8192 UTF-8 octets and at most 500 user-perceived characters (graphemes, not UTF-16 code units — an emoji sequence can be one grapheme and several of those). `maxLength` here states the octet cap in UTF-16 characters, which is not the same unit as either real limit and both are wider than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a guarantee. The server enforces both limits exactly and is the only authority on whether a given body is accepted. The text is stored and returned exactly as sent — not normalised, not trimmed. The 500 are counted as typed, on the text as sent, untrimmed (so a typographic ellipsis counts as one, and a leading or trailing space counts too), and so are the octets. U+0000 is refused.",

@@ -8,6 +8,7 @@ import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.gratitude.infra.ProcessedPhotos
 import com.moyi.identity.api.UserDirectory
+import com.moyi.media.api.MediaLifecycle
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -52,6 +53,7 @@ internal class EntryPhotoTest(
     @Autowired directory: UserDirectory,
     @Autowired dataSource: DataSource,
     @Autowired private val clock: MutableClock,
+    @Autowired private val lifecycle: MediaLifecycle,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
@@ -236,6 +238,111 @@ internal class EntryPhotoTest(
             mapOf("status" to "READY", "detached_at" to java.sql.Timestamp.from(clock.instant()))
     }
 
+    /**
+     * Issue #164: `removeImage` takes the photo off, and the photo goes the one
+     * way a replaced photo goes (ADR-0048): let go to its owner, attached to
+     * nothing, and reaped a day later (D5) unless attached again. Both are
+     * shown here side by side, through the reaper itself.
+     */
+    @Test
+    fun `PATCH removeImage takes the photo off, and it is reaped a day later exactly as a replaced one is`() {
+        val entry = body(submit(ada, bondId, """{"text":"words"}"""))["id"].asString()
+        val replaced = photos.ready(owner = ada)
+        val removed = photos.ready(owner = ada)
+        // Made long before, so that the day the reaper counts is the one since they were let go.
+        jdbc.update("UPDATE media_assets SET created_at = ?", java.sql.Timestamp.from(NOW.minusSeconds(3 * 86_400)))
+        patch(ada, entry, """{"text":"words","imageMediaId":"$replaced"}""").status shouldBe 200
+        patch(ada, entry, """{"text":"words","imageMediaId":"$removed"}""").status shouldBe 200
+
+        val response = patch(ada, entry, """{"text":"words","removeImage":true}""")
+
+        response.status shouldBe 200
+        body(response)["image"].isNull shouldBe true
+        body(response)["text"].asString() shouldBe "words"
+        jdbc.queryForObject("SELECT image_media_id FROM entries WHERE id = ?::uuid", UUID::class.java, entry).shouldBeNull()
+        body(getToday(ada, bondId))["myEntry"]["image"].isNull shouldBe true
+        for (photo in listOf(replaced, removed)) {
+            photos.attachedTo(photo).shouldBeNull()
+            jdbc.queryForMap("SELECT status, detached_at FROM media_assets WHERE id = ?", photo) shouldBe
+                mapOf("status" to "READY", "detached_at" to java.sql.Timestamp.from(clock.instant()))
+        }
+
+        lifecycle.reap(clock.instant().plusSeconds(86_400 - 1), 100)
+        statusOf(replaced) shouldBe "READY"
+        statusOf(removed) shouldBe "READY"
+        lifecycle.reap(clock.instant().plusSeconds(86_400 + 1), 100)
+        statusOf(replaced) shouldBe "DELETED"
+        statusOf(removed) shouldBe "DELETED"
+    }
+
+    @Test
+    fun `PATCH removeImage on an entry with no photo is a 200 that changes nothing, and so is saying it again`() {
+        val entry = body(submit(ada, bondId, """{"text":"words"}"""))["id"].asString()
+        val before = jdbc.queryForObject("SELECT updated_at FROM entries WHERE id = ?::uuid", java.sql.Timestamp::class.java, entry)
+        clock.set(NOW.plusSeconds(60))
+
+        repeat(2) {
+            val response = patch(ada, entry, """{"text":"words","removeImage":true}""")
+            response.status shouldBe 200
+            body(response)["image"].isNull shouldBe true
+        }
+
+        jdbc.queryForObject("SELECT updated_at FROM entries WHERE id = ?::uuid", java.sql.Timestamp::class.java, entry) shouldBe before
+    }
+
+    @Test
+    fun `PATCH removeImage with an imageMediaId is refused 422, and neither is done`() {
+        val kept = photos.ready(owner = ada)
+        val entry = body(submit(ada, bondId, """{"text":"words","imageMediaId":"$kept"}"""))["id"].asString()
+        val named = photos.ready(owner = ada)
+
+        val refused = patch(ada, entry, """{"text":"changed","removeImage":true,"imageMediaId":"$named"}""")
+
+        refused.status shouldBe 422
+        refused.contentAsString shouldContain "\"code\":\"VALIDATION_FAILED\""
+        refused.contentAsString shouldContain "\"field\":\"removeImageWithoutImageMediaId\""
+        photos.attachedTo(kept) shouldBe UUID.fromString(entry)
+        photos.attachedTo(named).shouldBeNull()
+        body(getToday(ada, bondId))["myEntry"]["text"].asString() shouldBe "words"
+    }
+
+    @Test
+    fun `PATCH removeImage false, or with the image's id again, keeps the photo`() {
+        val photo = photos.ready(owner = ada)
+        val entry = body(submit(ada, bondId, """{"text":"words","imageMediaId":"$photo"}"""))["id"].asString()
+
+        body(patch(ada, entry, """{"text":"words","removeImage":false}"""))["image"]["id"].asString() shouldBe photo.toString()
+        body(patch(ada, entry, """{"text":"words","removeImage":false,"imageMediaId":"$photo"}"""))["image"]["id"].asString() shouldBe
+            photo.toString()
+        photos.attachedTo(photo) shouldBe UUID.fromString(entry)
+    }
+
+    @Test
+    fun `PATCH removeImage of a revealed entry is immutable, and the photo stays on it`() {
+        val photo = photos.ready(owner = ada)
+        val entry = body(submit(ada, bondId, """{"text":"words","imageMediaId":"$photo"}"""))["id"].asString()
+        submit(bea, bondId, """{"text":"hers"}""").status shouldBe 201
+
+        val refused = patch(ada, entry, """{"text":"words","removeImage":true}""")
+
+        refused.status shouldBe 409
+        refused.contentAsString shouldContain "\"code\":\"ENTRY_IMMUTABLE\""
+        photos.attachedTo(photo) shouldBe UUID.fromString(entry)
+    }
+
+    /** An entry keeps its words whatever happens to its media: `text` is required on every `PATCH` (FR-041). */
+    @Test
+    fun `PATCH removeImage without text is refused on text, as every PATCH without text is`() {
+        val photo = photos.ready(owner = ada)
+        val entry = body(submit(ada, bondId, """{"text":"words","imageMediaId":"$photo"}"""))["id"].asString()
+
+        val refused = patch(ada, entry, """{"removeImage":true}""")
+
+        refused.status shouldBe 422
+        refused.contentAsString shouldContain "\"field\":\"text\""
+        photos.attachedTo(photo) shouldBe UUID.fromString(entry)
+    }
+
     @Test
     fun `PATCH of a revealed entry is immutable, and the photo it named is not claimed`() {
         val entry = body(submit(ada, bondId, """{"text":"words"}"""))["id"].asString()
@@ -380,6 +487,9 @@ internal class EntryPhotoTest(
         date: String,
     ): MockHttpServletResponse =
         mockMvc.get("/api/v1/bonds/$bondId/days/$date") { header(HttpHeaders.AUTHORIZATION, bearer(caller)) }.andReturn().response
+
+    private fun statusOf(media: UUID): String =
+        checkNotNull(jdbc.queryForObject("SELECT status FROM media_assets WHERE id = ?", String::class.java, media))
 
     private fun bearer(user: UUID) = "Bearer ${tokens.issue(user).token}"
 
