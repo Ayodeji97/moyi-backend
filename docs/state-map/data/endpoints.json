@@ -1480,6 +1480,44 @@
     "curl": "curl -X POST \"$API/auth/reset-password\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$RESET_TOKEN\\\", \\\"password\\\": \\\"$PASSWORD\\\"}\"   # or -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"code\\\": \\\"$CODE\\\", \\\"password\\\": \\\"$PASSWORD\\\"}\""
   },
   {
+    "id": "POST /api/v1/auth/reset-password/check",
+    "summary": "check a typed reset code before the new password is typed",
+    "machine": "account",
+    "auth": "none",
+    "headers": [
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "Content-Type (application/json. The email address and the six-digit code from the reset email, in the body, are what is checked)",
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. The reset's own two buckets, not new ones: twenty an hour per client address, shared with verify-email and reset-password, spent before the body is checked; and ten typed codes a day per email address as typed, shared with the code forms of verify-email and reset-password, spent by every check, right or wrong, counted for every address whether or not it has an account: the eleventh is 429 with Retry-After)"
+    ],
+    "requestErrors": [
+      {
+        "status": 400,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The email or the code is missing (both are required), or the body is not JSON. Nothing is looked up and no try is counted.",
+        "evidence": "smoke",
+        "evidenceRef": "a reset-code check without a code is 400",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/PasswordResetController.kt#internal data class ResetCodeCheckRequest("
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The email is blank or not shaped like an address, or the code is not six ASCII digits (VALID_VERIFICATION_CODE). Checked before the address is looked up, so it counts against no code.",
+        "evidence": "test",
+        "evidenceRef": "ResetCodeCheckEndpointTest#a body that is not an address and a six-digit code is refused, and costs no try",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/PasswordResetController.kt#internal data class ResetCodeCheckRequest("
+      },
+      {
+        "status": 503,
+        "code": "CODE_CHECK_UNAVAILABLE",
+        "reason": "The store that counts typed codes (Redis) cannot be reached: no code is checked until it is back (owner's ruling 2026-11-09, ADR-0023 amended; #169 put the check under the same ruling). Retry-After: 60. Answered before the address is looked up, the same bytes for every address; the code is neither counted nor spent. The reset link in the same email still works.",
+        "evidence": "test",
+        "evidenceRef": "TypedCodeRedisOutageTest#a reset-code check is 503, counts nothing, and is the same bytes for an address with no account",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerificationCodeCheck.kt#RateLimitDecision.Unavailable -> if (bucket.failsClosed) throw CodeCheckUnavailableException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/reset-password/check\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"code\\\": \\\"$CODE\\\"}\""
+  },
+  {
     "id": "POST /api/v1/media/upload-intent",
     "summary": "ask for a URL to upload a photo or a voice note to",
     "machine": "media",

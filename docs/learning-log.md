@@ -3327,3 +3327,18 @@ Wrong about: where the no-op lived. The first cut checked "is there a photo?" in
          remove" guard broke no test: the guard was dead. Now removal is `withImage(null)`, whose
          one equality check is the no-op for attach and remove alike (and kept `Entry` under
          detekt's function limit), and that mutation goes red.
+
+## 2026-11-10 · Feature · A check for a reset code is the reset's own gate, called alone (issue #169, ADR-0022 amended)
+
+Expected: a new endpoint with its own lookup of the code, and a test that it counts.
+Reality: the reset already had the whole gate in two lines (the daily limit, then the counted,
+         committed check); the check is those two lines and nothing else, so the reset and the
+         check now share one private `accept` and cannot count apart. The tests that matter are
+         the cross ones: three wrong checks and two wrong resets burn the code for both, and the
+         eleventh typed code of any mix is 429. Mutation-tested by making the check's count roll
+         back (the shared-counter tests went red), by dropping its daily limit (the 429 and the
+         Redis-outage 503 tests went red) and by dropping its per-address bucket.
+Wrong about: what a body without a field answers. A Kotlin non-null field that is absent is a
+         body Jackson cannot build, so `400 MALFORMED_REQUEST`, not the 422 the two-form routes
+         give (their fields are nullable because either form may be absent). Kept: the contract
+         now says both fields are required, which is what the generated client should see.
