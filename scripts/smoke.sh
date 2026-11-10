@@ -1,6 +1,26 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# The follow-up to #162 (ADR-0059 decision 13: an archive's object deleted after the commit that
+# forgets it, from a debt V54 holds) adds no probe; the data-export section's "its URL no longer
+# downloads it" after a withdrawal is the one that would show the deletion moved too late. Last run
+# on 2026-11-10, on fix/export-followups, from a jar of the branch's tree on e273a41, on a fresh
+# database that applied 49 migrations to V54, against its own compose project (moyi-41k: Postgres
+# 55491, Valkey 56411, MinIO 59491), the jar booted by hand (local profile, the close, reminders,
+# held-pushes, account-deletion and data-export crons at */5) and --attach: 1602 passed, 0 failed,
+# 1 skipped (the tag across the erasure, the poller having won the race); export_archive_deletions
+# empty after it.
+#
+# Issue #165 adds four voice-note probes and three for a deleted one: the waveform media.process
+# measured (ADR-0061), 64 levels of 0-255 with the loudest 255 on the author's entry, 64 bytes on the
+# asset, the same levels to the listener once the note has passed, none on the locked day; and a
+# loose voice note deleted by its owner keeps no waveform on its row. Last run on 2026-11-10, on
+# feat/voice-waveform (main e273a416), from a jar of the branch's tree, on a fresh database that
+# applied 49 migrations to V57, against its own compose project (moyi-42f: Postgres 55660, Valkey
+# 56660, MinIO 57660), the jar booted by hand (local profile, the five crons at */5) and --attach:
+# 1610 passed, 0 failed, 0 skipped. A run before it stopped in the media section when Colima
+# killed that project's MinIO (exit 137, memory shared with four other sessions), not the code.
+#
 # Issue #152 adds, in the voice notes section, the AAC copy iOS streams (ADR-0060): the author's
 # entry carries urlAac beside url, the listener's too once passed; it downloads as audio/mp4, starts
 # with an MP4 `ftyp` box, has its `moov` index before `mdat`, is one channel of AAC-LC by ffprobe,
@@ -3234,12 +3254,17 @@ expect "voice: another user's voice note on an entry is 422 on voiceMediaId" 422
 expect "voice: a photo named as a voice note is 422 on voiceMediaId" 422 '"field":"voiceMediaId"' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"wrong kind\",\"voiceMediaId\":\"$VO_PHOTO\"}"
 expect "voice: M4 - an entry with a photo and a voice note is 201, both READY to the author" 201 '"durationMs":' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"hear the rain\",\"imageMediaId\":\"$VO_PHOTO\",\"voiceMediaId\":\"$VO_NOTE\"}"
 VO_ENTRY="$(printf '%s' "$LAST_BODY")"
+# Issue #165 (ADR-0061): the waveform media.process measured from the Opus it kept, 64 levels of
+# 0-255, the loudest 255; a steady tone, so every slice away from the ends is loud.
+is "voice: …with its waveform, 64 levels of 0-255, the loudest 255 (ADR-0061)" "$(python3 -c "import json,sys; w=json.load(sys.stdin)['voice']['waveform']; print(len(w), all(type(x) is int and 0 <= x <= 255 for x in w), max(w), min(w[4:60]) >= 200)" <<<"$VO_ENTRY")" "64 True 255 True"
+db_is "voice: …kept on the asset as 64 bytes" "$(sql "SELECT octet_length(waveform) FROM media_assets WHERE id='$VO_NOTE'")" "64"
+VO_LEVELS="$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['waveform'])" <<<"$VO_ENTRY")"
 is "voice: …the photo READY to its author" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['image']['status'])" <<<"$VO_ENTRY")" "READY"
 is "voice: …the voice note READY to its author" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['status'])" <<<"$VO_ENTRY")" "READY"
 db_is "voice: …the voice note is attached to that entry" "$(sql "SELECT (m.attached_entry_id = e.id) FROM media_assets m JOIN entries e ON e.voice_media_id = m.id WHERE m.id='$VO_NOTE'")" "t"
 db_is "voice: …and its length is the asset's, not the entry's (spec D-10)" "$(sql "SELECT voice_duration_ms IS NULL FROM entries WHERE voice_media_id='$VO_NOTE'")" "t"
 expect "voice: the listener's locked entry says nothing of the voice note" 200 '"status":"LOCKED"' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_B"
-if printf '%s' "$LAST_BODY" | grep -q -e "$VO_NOTE" -e '"voice"' -e 'durationMs' -e 'X-Amz'; then fail "voice: …no id, no voice field, no length, no URL" "the locked day carries something of the voice note"; else pass "voice: …no id, no voice field, no length, no URL"; fi
+if printf '%s' "$LAST_BODY" | grep -q -e "$VO_NOTE" -e '"voice"' -e 'durationMs' -e 'waveform' -e 'X-Amz'; then fail "voice: …no id, no voice field, no length, no waveform, no URL" "the locked day carries something of the voice note"; else pass "voice: …no id, no voice field, no length, no waveform, no URL"; fi
 expect "voice: deleting a voice note on an entry is 409 MEDIA_ATTACHED" 409 '"code":"MEDIA_ATTACHED"' -- -X DELETE "$API/media/$VO_NOTE" -H "Authorization: Bearer $VO_A"
 expect "voice: the listener writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_B" -H "Idempotency-Key: $(uuidgen)" -d '{"text":"and mine, in words"}'
 # The listener hears it only once it has passed moderation (FR-061, ADR-0049 decision 7); the local
@@ -3249,6 +3274,7 @@ is "voice: …and the photo too" "$(await_verdict "$VO_PHOTO")" "PASSED"
 expect "voice: once revealed and passed, the listener is played the voice note" 200 '"partnerEntry"' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_B"
 VO_PARTNER="$(python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['partnerEntry']))" <<<"$LAST_BODY")"
 is "voice: …READY to the listener, with a URL and its length" "$(python3 -c "import json,sys; v=json.load(sys.stdin)['voice']; print(v['status'], v['url'] is not None, v['durationMs'] is not None)" <<<"$VO_PARTNER")" "READY True True"
+is "voice: …and the speaker's waveform, the same 64 levels (ADR-0061)" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['waveform'])" <<<"$VO_PARTNER")" "$VO_LEVELS"
 is "voice: …and the photo READY to the listener (FR-101)" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['image']['status'])" <<<"$VO_PARTNER")" "READY"
 # Issue #152, ADR-0060: the same note as AAC-LC in MP4 (.m4a), which iOS's AVPlayer can stream: given
 # to the author with the Opus, and to the listener under the same rule; it downloads, and is an MP4
@@ -3273,6 +3299,12 @@ expect "voice: an outsider reaches neither the voice note nor the day" 404 '"cod
 if grep -q "$(printf '%s' "$VO_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then
   fail "voice: the voice note's URL is in no log line" "its signature is in $MOYI_LOG"
 else pass "voice: the voice note's URL is in no log line"; fi
+# A deleted voice note keeps no waveform (ADR-0061 decision 8): its owner deletes one never attached.
+upload_photo "$VO_A" "$VOICE_DIR/short.wav" audio/wav VOICE; VO_LOOSE="$PHOTO_ID"
+is "voice: a WAV voice note to delete becomes READY" "$(await_photo "$VO_A" "$VO_LOOSE")" "READY"
+db_is "voice: …with a waveform of 64 bytes" "$(sql "SELECT octet_length(waveform) FROM media_assets WHERE id='$VO_LOOSE'")" "64"
+expect "voice: …which its owner deletes, 204" 204 '' -- -X DELETE "$API/media/$VO_LOOSE" -H "Authorization: Bearer $VO_A"
+db_is "voice: …and the deleted row keeps no waveform" "$(sql "SELECT status || '|' || (waveform IS NULL) FROM media_assets WHERE id='$VO_LOOSE'")" "DELETED|true"
 rm -rf "$VOICE_DIR"
 flush_buckets
 
@@ -3625,6 +3657,40 @@ if [ "$PSQL_OK" = 1 ]; then
     "$(sql "SELECT (subject IS NULL AND body IS NULL) || '|' || status || '|' || (SELECT string_agg(action, ',' ORDER BY at) FROM support_ticket_log WHERE ticket_id = '$SU_ID') FROM support_tickets WHERE id = '$SU_ID'")" "true|CLOSED|READ,CLOSED"
 else
   skip "support: the operator's queue (psql not reachable through docker compose)"
+fi
+flush_buckets
+
+echo; echo "support — the error reference sent with a message (#168, ADR-0057 decision 11)"
+# Optional, 1 to 64 visible ASCII characters (0x21 to 0x7E): stored with the ticket, shown to the
+# operator, never in the acknowledgement email nor any log line, and deleted with the words on close.
+SR_REFERENCE="smoke-ref-$RANDOM$RANDOM-4bf92f3577b34da6"
+SR_MESSAGE="{\"subject\":\"$SU_SUBJECT\",\"body\":\"$SU_BODY\",\"reference\":\"$SR_REFERENCE\"}"
+expect "a support reference with a space is 422 on reference" 422 '"field":"reference"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "{\"subject\":\"$SU_SUBJECT\",\"body\":\"$SU_BODY\",\"reference\":\"$SR_REFERENCE x\"}"
+if [[ "$LAST_BODY" == *"$SR_REFERENCE"* ]]; then fail "support: …and the refusal repeats no reference" "${LAST_BODY:0:200}"; else pass "support: …and the refusal repeats no reference"; fi
+expect "a support reference of 65 characters is 422 on reference" 422 '"field":"reference"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "{\"subject\":\"$SU_SUBJECT\",\"body\":\"$SU_BODY\",\"reference\":\"$(printf 'r%.0s' $(seq 1 65))\"}"
+expect "an empty support reference is 422 on reference" 422 '"field":"reference"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "{\"subject\":\"$SU_SUBJECT\",\"body\":\"$SU_BODY\",\"reference\":\"\"}"
+expect "a support reference past ASCII is 422 on reference" 422 '"field":"reference"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "{\"subject\":\"$SU_SUBJECT\",\"body\":\"$SU_BODY\",\"reference\":\"caf\u00e9\"}"
+flush_buckets
+expect "a support message with a reference is 201 with its id and time" 201 '"createdAt"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "$SR_MESSAGE"
+SR_ID="$(printf '%s' "$LAST_BODY" | jget id)"
+if [[ "$LAST_BODY" == *"$SR_REFERENCE"* ]]; then fail "support: …which does not repeat the reference" "${LAST_BODY:0:200}"; else pass "support: …which does not repeat the reference"; fi
+SR_ACK=""
+for _ in $(seq 1 40); do
+  SR_ACK="$(grep -c "Support ticket $SR_ID acknowledgement: ACCEPTED" "$MOYI_LOG" || true)"
+  [ "$SR_ACK" -gt 0 ] && break
+  sleep 0.25
+done
+is "support: the referenced message was acknowledged (provider=log)" "$SR_ACK" "1"
+if grep -qF "$SR_REFERENCE" "$MOYI_LOG"; then fail "the support reference is in no email and no log line" "it is in $MOYI_LOG"; else pass "the support reference is in no email and no log line"; fi
+if [ "$PSQL_OK" = 1 ]; then
+  db_is "support: the reference is stored with the ticket" "$(sql "SELECT reference FROM support_tickets WHERE id = '$SR_ID'")" "$SR_REFERENCE"
+  SR_OUT="$(support show "$SR_ID" 2>&1)" || true
+  if [[ "$SR_OUT" == *"reference:  $SR_REFERENCE"* ]]; then pass "support: show gives the operator the reference"; else fail "support: show gives the operator the reference" "${SR_OUT:0:400}"; fi
+  SR_OUT="$(support close "$SR_ID" "smoke: found the trace" 2>&1)" && pass "support: the operator closes the referenced one" || fail "support: the operator closes the referenced one" "$SR_OUT"
+  db_is "support: …its reference is deleted with its words" \
+    "$(sql "SELECT (subject IS NULL AND body IS NULL AND reference IS NULL) || '|' || status FROM support_tickets WHERE id = '$SR_ID'")" "true|CLOSED"
+else
+  skip "support: the reference in the operator's queue (psql not reachable through docker compose)"
 fi
 flush_buckets
 

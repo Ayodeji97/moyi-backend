@@ -148,7 +148,8 @@ other deletion (ADR-0051, ADR-0053); the purge knows that rule and this does not
 **10. `support`'s share** (consumer `support.account-deletion`): every open ticket the person sent
 is closed with its subject and body emptied, as an operator's close empties it, and logged
 `CLOSED` by `account-deletion` (ADR-0057 decision 8). `user_id` is kept: it names the anonymised
-account.
+account. *Since V55 (2026-11-10, issue #168) the error `reference` sent with a ticket is emptied with
+its words (ADR-0057 decision 11).*
 
 **11. Rate limit: `account:deletion:user`, five an hour per user**, greedy (one back every twelve
 minutes), spent before the password is read, wrong passwords included. It is what bounds the

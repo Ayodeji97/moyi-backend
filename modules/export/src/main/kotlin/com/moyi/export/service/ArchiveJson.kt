@@ -126,6 +126,8 @@ internal class SupportMessageJson(
     val id: UUID,
     val subject: String?,
     val body: String?,
+    /** The error reference sent with it (ADR-0057 decision 11), or null: none, or emptied with the words. */
+    val reference: String?,
     val status: String,
     val createdAt: Instant,
     val closedAt: Instant?,

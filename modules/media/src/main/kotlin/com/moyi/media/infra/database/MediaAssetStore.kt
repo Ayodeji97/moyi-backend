@@ -8,6 +8,7 @@ import com.moyi.media.domain.ModerationVerdict
 import com.moyi.media.domain.Retention
 import com.moyi.media.domain.StorageKey
 import com.moyi.media.domain.StoredVariant
+import com.moyi.media.domain.Waveform
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.stereotype.Repository
@@ -144,7 +145,8 @@ internal class MediaAssetStore(
 
     /**
      * A voice note, PROCESSING to READY, with its length (spec D-10: on the
-     * asset only) and, when one was made, where its AAC variant is ([aacKey],
+     * asset only), its [waveform] (ADR-0061; null when it could not be
+     * measured) and, when one was made, where its AAC variant is ([aacKey],
      * ADR-0060). Only a voice note, and only from PROCESSING. Its Opus is at
      * the key derived from its upload's (`StorageKey.forVoice`), so that needs
      * no recording.
@@ -152,13 +154,15 @@ internal class MediaAssetStore(
     fun markVoiceReady(
         id: UUID,
         durationMs: Int,
+        waveform: Waveform?,
         aacKey: StorageKey?,
         at: Instant,
     ): Boolean =
         jdbc.update(
-            "UPDATE media_assets SET status = 'READY', duration_ms = ?, aac_key = ?, ready_at = ? " +
+            "UPDATE media_assets SET status = 'READY', duration_ms = ?, waveform = ?, aac_key = ?, ready_at = ? " +
                 "WHERE id = ? AND kind = 'VOICE' AND status = 'PROCESSING'",
             durationMs,
+            waveform?.toBytes(),
             aacKey?.value,
             Timestamp.from(at),
             id,
@@ -415,7 +419,7 @@ internal class MediaAssetStore(
         const val SELECT =
             "SELECT id, owner_user_id, kind, storage_key, content_type, size_bytes, checksum, status, " +
                 "attached_entry_id, created_at, expires_at, variants::text AS variants, moderation_verdict, processing_attempts, tier, " +
-                "duration_ms, aac_key, sensitive, evidence_held, " +
+                "duration_ms, waveform, aac_key, sensitive, evidence_held, " +
                 "EXISTS (SELECT 1 FROM media_report_holds h WHERE h.media_id = media_assets.id) AS report_held " +
                 "FROM media_assets"
 
@@ -443,6 +447,7 @@ internal class MediaAssetStore(
                     processingAttempts = rs.getInt("processing_attempts"),
                     tier = rs.getInt("tier"),
                     durationMs = rs.getInt("duration_ms").takeUnless { rs.wasNull() },
+                    waveform = rs.getBytes("waveform")?.let(Waveform::ofStored),
                     aacKey = rs.getString("aac_key")?.let(::StorageKey),
                     sensitive = rs.getBoolean("sensitive"),
                     evidenceHeld = rs.getBoolean("evidence_held"),

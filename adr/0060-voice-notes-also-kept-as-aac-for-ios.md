@@ -2,7 +2,8 @@
 
 **Status:** Accepted · **Date:** 2026-11-10 · **Deciders:** the lead of the 2026-11-10 batch, for
 issue #152 (the format, the bitrate, the field name and "no backfill" were ruled; decisions 2, 3, 5
-and 6 were made in building it, and are **the owner's to overrule**: Open questions, below)
+and 6 were made in building it); the four questions left open were ruled by the owner and the lead
+on 2026-11-10 before merging (Rulings, below)
 
 ## Context
 
@@ -97,7 +98,7 @@ the end has arrived.
    `PlayVoices` signs both at the same instant (`HourlyUrls`), so they expire together. It is null
    whenever `url` is, and for a note with no variant. `toString` redacts it, as `url`. Not added to
    `GET /media/{id}` (`MediaResponse`): the issue asked for the entry's voice note, and the author
-   previewing a just-recorded note has the recording on the phone (Open questions).
+   previewing a just-recorded note has the recording on the phone (ruled: Rulings, 3).
 
 7. **No backfill.** A note processed before this has `aac_key` null and `urlAac` null, and the iOS
    client keeps its in-memory repackaging for exactly those. A backfill would be a new pipeline
@@ -116,7 +117,7 @@ the end has arrived.
   transcoding" is now held **per copy** (`-fs` and the check use `VoiceRules.MAX_KEPT_BYTES` for
   each), so a 61 s note may keep up to about 0.6 MB in all (measured 546 KB for a 61 s tone, the
   worst case Opus's constrained VBR makes). Photos dominate the media budget, so this is small, but
-  it is the owner's to confirm (Open questions).
+  it was confirmed (Rulings, 2).
 - The worker spends one more ffmpeg run per note, on at most 61 s of Opus, inside the same deadline.
 - V59 is claimed while V54 to V58 belong to parallel pull requests (#176's V57 among them). Flyway
   runs without `outOfOrder`, so **V59 must not reach production before every lower version that
@@ -134,16 +135,19 @@ the end has arrived.
   can disagree on its length near the limit; decision 2.
 - **A variant that fails the note**: an iOS-only convenience would then cost Android its note.
 
-## Open questions (the owner's)
+## Rulings (2026-11-10, the owner and the lead, before merging)
 
-1. The bitrate: the lead ruled about 32 kbit/s; ADR-0049's Q4 fallback named 48 kbit/s for AAC.
-2. Doc 06:186's 500 KB per voice note, now per copy (Consequences).
-3. Whether `GET /media/{id}` should carry `urlAac` too (decision 6).
-4. A backfill, if real users' notes predate this (decision 7).
+These were this ADR's open questions; each is now decided.
 
-## Revisit when
+1. **The bitrate stays about 32 kbit/s** (`VoiceRules.AAC_BITS_PER_SECOND`), not ADR-0049's Q4
+   fallback of 48 kbit/s: the AAC is a second copy for one platform, not the only copy.
+2. **About 500 KB per copy is fine.** Doc 06:186's "one voice note ≤500 KB after transcoding" is
+   held per copy, as built, so a note may keep up to about 0.6 MB in all.
+3. **No `urlAac` on `GET /media/{id}`** (`MediaResponse`): only the entry's voice note carries it
+   (decision 6).
+4. **No backfill.** Notes processed before this keep `aac_key` and `urlAac` null, and the iOS
+   client keeps repackaging their Opus (decision 7).
 
-The iPhone playback test (ADR-0049 Owed) is run against `urlAac`, and against `url` through CAF.
-AVPlayer is seen to stream Opus in CAF or MP4 on every supported iOS version (then one copy may
-suffice). ffmpeg's native AAC encoder changes its defaults. The storage budget for media is
-revisited.
+This ADR and ADR-0061 (the waveform, #165) were built in parallel and merged together: one
+`media.process` run measures the waveform of the kept Opus and then makes its AAC copy, each best
+effort and inside the same deadline, and `EntryVoiceResponse` carries both `waveform` and `urlAac`.

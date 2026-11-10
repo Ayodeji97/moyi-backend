@@ -1097,18 +1097,30 @@ class OpenApiContractTest(
             .properties.keys shouldBe setOf("authorMemberId", "status")
     }
 
-    /** Phase 4 D3, ADR-0049, D4, ADR-0051: `{id, status, url?, durationMs?, sensitive}`, and nowhere on a locked entry (BR-8). */
+    /**
+     * Phase 4 D3, ADR-0049, D4, ADR-0051, #165 (ADR-0061): `{id, status, url?, durationMs?, waveform?, sensitive}`,
+     * and nowhere on a locked entry (BR-8).
+     */
     @Test
     fun `an entry's voice note is an id, a status and, once playable, a URL and a length, every field always sent`() {
         val voice = api.components.schemas["EntryVoiceResponse"]!!
-        voice.properties.keys shouldBe setOf("id", "status", "url", "durationMs", "sensitive", "urlAac")
+        voice.properties.keys shouldBe setOf("id", "status", "url", "durationMs", "waveform", "sensitive", "urlAac")
         voice.required.toSet() shouldBe voice.properties.keys
         voice.properties["status"]!!.enum.map { it.toString() } shouldBe listOf("READY", "PROCESSING", "NOT_SHARED")
-        listOf("url", "durationMs", "urlAac").forEach { voice.properties[it]!!.types shouldContain "null" }
+        listOf("url", "durationMs", "waveform", "urlAac").forEach { voice.properties[it]!!.types shouldContain "null" }
         voice.description.shouldNotBeNull() shouldContain "to the other member only once it has passed moderation"
         // Issue #152, ADR-0060: the AAC copy iOS streams, by url's rule.
         voice.description shouldContain "urlAac is the same note as AAC-LC in MP4"
         voice.description shouldContain "given to exactly whoever is given url"
+        // Issue #165, ADR-0061: exactly 64 integers, each 0 to 255, when it is not null.
+        val waveform = voice.properties["waveform"]!!
+        waveform.types shouldContain "array"
+        waveform.minItems shouldBe 64
+        waveform.maxItems shouldBe 64
+        waveform.items.types shouldContain "integer"
+        waveform.items.minimum.toInt() shouldBe 0
+        waveform.items.maximum.toInt() shouldBe 255
+        waveform.description.shouldNotBeNull() shouldContain "Given exactly when url is"
 
         val full =
             fieldsOf("EntryResponse")

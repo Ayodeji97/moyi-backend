@@ -54,6 +54,7 @@ internal class PlayVoices(
                     VoiceViewStatus.READY,
                     url,
                     heard.durationMs,
+                    heard.waveform?.levels,
                     heard.sensitive,
                     heard.aacKey?.let { urls.sign(it, signedAt) },
                 )
@@ -62,7 +63,15 @@ internal class PlayVoices(
             is MediaAsset.Heard.NotShared -> {
                 val url = heard.key?.let { urls.sign(it, signedAt) }
                 val urlAac = heard.aacKey?.takeIf { url != null }?.let { urls.sign(it, signedAt) }
-                VoiceView(asset.id, VoiceViewStatus.NOT_SHARED, url, heard.durationMs?.takeIf { url != null }, urlAac = urlAac)
+                // The length, the waveform and the AAC go with the URL: none without it (blocked, or no storage).
+                VoiceView(
+                    asset.id,
+                    VoiceViewStatus.NOT_SHARED,
+                    url,
+                    heard.durationMs?.takeIf { url != null },
+                    heard.waveform?.levels?.takeIf { url != null },
+                    urlAac = urlAac,
+                )
             }
         }
 

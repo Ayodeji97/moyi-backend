@@ -92,12 +92,14 @@ internal class EntryVoiceTest(
         val entry = body(created)
         voices.attachedTo(voice) shouldBe UUID.fromString(entry["id"].asString())
         val played = entry["voice"]
-        played.propertyNames().asSequence().toList() shouldBe listOf("id", "status", "url", "durationMs", "sensitive", "urlAac")
+        played.propertyNames().asSequence().toList() shouldBe listOf("id", "status", "url", "durationMs", "waveform", "sensitive", "urlAac")
         // ADR-0060: a note made without an AAC variant (before it existed) is played from its Opus alone.
         played["urlAac"].isNull shouldBe true
         played["id"].asString() shouldBe voice.toString()
         played["status"].asString() shouldBe "READY"
         played["durationMs"].asInt() shouldBe ProcessedVoices.DURATION_MS
+        // Issue #165, ADR-0061: its 64 levels, as media measured them, unsigned.
+        played["waveform"].values().map { it.asInt() } shouldBe ProcessedVoices.LEVELS
         played["url"].asString() shouldStartWith "http://127.0.0.1:9/moyi-media-test/v/"
         played["url"].asString().substringBefore("?") shouldEndWith "/voice.ogg"
         played["url"].asString() shouldContain "X-Amz-Signature="
@@ -136,6 +138,8 @@ internal class EntryVoiceTest(
         partners["status"].asString() shouldBe "PROCESSING"
         partners["url"].isNull shouldBe true
         partners["durationMs"].isNull shouldBe true
+        // The waveform goes with the URL (ADR-0061): none until the partner may play the note.
+        partners["waveform"].isNull shouldBe true
         getToday(ada, bondId).contentAsString shouldNotContain "voice.ogg"
         // The archive says the same.
         body(day(ada, bondId, "2026-09-15"))["partnerEntry"]["voice"]["status"].asString() shouldBe "PROCESSING"
@@ -143,6 +147,49 @@ internal class EntryVoiceTest(
         val own = body(getToday(bea, bondId))["myEntry"]["voice"]
         own["status"].asString() shouldBe "READY"
         own["url"].asString() shouldContain "X-Amz-Signature="
+        own["waveform"].values().map { it.asInt() } shouldBe ProcessedVoices.LEVELS
+
+        // Once it has passed moderation, the partner is given the same levels with the URL.
+        jdbc.update("UPDATE media_assets SET moderation_verdict = 'PASSED', moderated_at = now() WHERE id = ?", voice)
+        val passed = body(getToday(ada, bondId))["partnerEntry"]["voice"]
+        passed["status"].asString() shouldBe "READY"
+        passed["waveform"].values().map { it.asInt() } shouldBe ProcessedVoices.LEVELS
+    }
+
+    /** ADR-0061: held back from the partner, the author still has the note and its levels; blocked, neither. */
+    @Test
+    fun `a voice note held back is NOT_SHARED to its author with its waveform, and blocked has none`() {
+        val voice = voices.ready(owner = bea)
+        submit(bea, bondId, """{"text":"a secret kindness","voiceMediaId":"$voice"}""").status shouldBe 201
+        submit(ada, bondId, """{"text":"and mine"}""").status shouldBe 201
+        jdbc.update(
+            "UPDATE media_assets SET status = 'QUARANTINED', moderation_verdict = 'QUARANTINED', moderated_at = now() WHERE id = ?",
+            voice,
+        )
+
+        val held = body(getToday(bea, bondId))["myEntry"]["voice"]
+        held["status"].asString() shouldBe "NOT_SHARED"
+        held["waveform"].values().map { it.asInt() } shouldBe ProcessedVoices.LEVELS
+        body(getToday(ada, bondId))["partnerEntry"]["voice"]["waveform"].isNull shouldBe true
+
+        jdbc.update("UPDATE media_assets SET moderation_verdict = 'BLOCKED' WHERE id = ?", voice)
+        val blocked = body(getToday(bea, bondId))["myEntry"]["voice"]
+        blocked["status"].asString() shouldBe "NOT_SHARED"
+        blocked["url"].isNull shouldBe true
+        blocked["waveform"].isNull shouldBe true
+    }
+
+    /** ADR-0061: a note processed before the levels were measured is played as before, with no waveform: the client keeps its stand-in. */
+    @Test
+    fun `a voice note with no waveform measured is READY with its URL and a null waveform`() {
+        val voice = voices.ready(owner = ada, waveform = null)
+
+        val played = body(submit(ada, bondId, """{"text":"from before","voiceMediaId":"$voice"}"""))["voice"]
+
+        played["status"].asString() shouldBe "READY"
+        played["url"].asString() shouldContain "X-Amz-Signature="
+        played.has("waveform") shouldBe true
+        played["waveform"].isNull shouldBe true
     }
 
     /**
@@ -190,6 +237,7 @@ internal class EntryVoiceTest(
             shown["status"].asString() shouldBe "PROCESSING"
             shown["url"].isNull shouldBe true
             shown["durationMs"].isNull shouldBe true
+            shown["waveform"].isNull shouldBe true
         }
     }
 

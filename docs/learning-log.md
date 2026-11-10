@@ -3229,6 +3229,58 @@ Then (review of #162): three things a copy does that a reading does not. An arch
          `DELETE … RETURNING` waits on that row instead. The race was proved by holding the build's
          UPDATE open and waiting for the delete to block on it in `pg_stat_activity`, not by a sleep.
 
+## 2026-11-10 · Fix · An object store outside the transaction: neither order is safe alone (#162's three minors, ADR-0059 decision 13)
+
+Expected: the reviewer's word for the third minor, "delete after commit", would be the whole fix:
+         register an `afterCommit`, as `media.process` already does.
+Reality: `media` can afford a best-effort delete after commit because its `in/` prefix has a
+         lifecycle rule behind it. The archive prefix `x/` has none, and a URL signed before a
+         withdrawal stays good for its 24 hours. Before the commit, a rollback leaves a READY row
+         naming nothing; after it, a storage refusal leaves the words stored with nothing naming
+         them, for ever. What makes either safe is writing the debt down in the same transaction
+         (V54's `export_archive_deletions`), deleting after the commit, and paying the debt once the
+         object is gone, with the build job's run sweeping whatever the storage refused. The first
+         minor (a build's `deleteArchive` throwing after its row went) is the same debt, owed
+         before the delete. The second (a ready email that throws counted as a failed build) was a
+         try/catch drawn round too much.
+Wrong about: thinking the third minor was the safe direction to move in. On its own it trades a
+         transient, self-healing inconsistency for a permanent leak of the one thing this product
+         must not leak. A rollback test also has to ask what the *next* run does: owing the keys in
+         a transaction of their own passed every assertion about the delivery itself, and deleted
+         two live archives on the following sweep (mutation run, red, restored).
+
+## 2026-11-10 · Feature · A support message carries the error that led to it (#168, ADR-0057 decision 11)
+
+Expected: one optional field and one column.
+Reality: the field reaches four places besides the insert, and each had to be decided: the
+         operator's read (a function whose result gains a column, so V55 drops and recreates it;
+         `CREATE OR REPLACE` cannot), the close and the account deletion (both empty it, and V55's
+         widened `CHECK` refuses a closed ticket that keeps one), the person's export (it already
+         carries their tickets, so it carries this too), and the acknowledgement (which cannot reach
+         it: the event is ids only). The rule is visible ASCII, 0x21 to 0x7E, stated once in the
+         domain and once as the table's `CHECK`; seven mutants (validator off, a space let in by the
+         domain or by the `CHECK`, the deletion or the close keeping it, the `CHECK` alone, the export
+         dropping it) each turned the right test red.
+Wrong about: a JSON number being refused. Jackson's default coercion files `"reference": 12345` as
+         the string "12345", as it would for `subject`; the test that assumed otherwise was dropped
+         and the ADR says so.
+
+## 2026-11-10 · Feature · A voice note's waveform, measured by the server (#165, ADR-0061)
+Expected: the work was the 64 levels: RMS or peak, the scale, silence. And that clearing the
+         levels on deletion meant adding `waveform = NULL` to the statements that delete.
+Reality: there were five such statements, one of them a plpgsql function the operator runs
+         (`media_quarantine_delete`, which a report's takedown also calls), merged and not
+         editable; a CHECK alone would have made the operator's delete of a held-back note
+         fail. A BEFORE trigger clears it on every path, the CHECK stays as its backstop, and a
+         test disables the trigger in a rolled-back transaction to see the CHECK refuse. Two
+         test tools lied first: a fake ffmpeg told to fail on `*s16le*` also failed the
+         transcode, because a WAV's decoder allow-list names `pcm_s16le`; and a mutation script
+         that restored by replacing the mutant's text once restored the wrong line of
+         PlayVoices, since the mutant was a prefix of a line it did not touch.
+Wrong about: "add it to each statement" as the way to make a rule hold on every path. The
+         paths that matter most were the ones not in the Kotlin. And about restoring a
+         mutation by inverse replacement: restore the file's saved text instead.
+
 ## 2026-11-10 · Feature · Voice notes also kept as AAC in MP4, so that iOS can stream them (#152, ADR-0060)
 
 Expected: a second ffmpeg output and a second URL; the work is in the encoder flags.

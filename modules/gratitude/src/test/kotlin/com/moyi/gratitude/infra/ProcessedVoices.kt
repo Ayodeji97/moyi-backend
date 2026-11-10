@@ -18,6 +18,7 @@ internal class ProcessedVoices(
         owner: UUID,
         status: String = "READY",
         durationMs: Int? = DURATION_MS,
+        waveform: ByteArray? = WAVEFORM,
         withAac: Boolean = false,
     ): UUID {
         val id = UUID.randomUUID()
@@ -25,8 +26,8 @@ internal class ProcessedVoices(
         jdbc.update(
             """
             INSERT INTO media_assets (id, owner_user_id, kind, storage_key, content_type, size_bytes, checksum, status, duration_ms,
-                                      aac_key, created_at, deleted_at)
-            VALUES (?, ?, 'VOICE', ?, 'audio/mp4', 1000, 'Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyMDA=', ?, ?, ?, now(),
+                                      waveform, aac_key, created_at, deleted_at)
+            VALUES (?, ?, 'VOICE', ?, 'audio/mp4', 1000, 'Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyMDA=', ?, ?, ?, ?, now(),
                     CASE WHEN ? = 'DELETED' THEN now() END)
             """.trimIndent(),
             id,
@@ -34,6 +35,7 @@ internal class ProcessedVoices(
             "in/$random",
             status,
             durationMs.takeIf { status == "READY" },
+            waveform.takeIf { status == "READY" },
             "v/$random/voice.m4a".takeIf { withAac },
             status,
         )
@@ -46,5 +48,10 @@ internal class ProcessedVoices(
     companion object {
         /** A plainly made-up length: 4.2 seconds. */
         const val DURATION_MS = 4_200
+
+        /** A plainly made-up waveform (ADR-0061): 64 levels rising by fours, 0 to 252. */
+        val LEVELS: List<Int> = List(64) { it * 4 }
+
+        val WAVEFORM: ByteArray = ByteArray(64) { (it * 4).toByte() }
     }
 }

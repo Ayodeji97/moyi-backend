@@ -65,9 +65,11 @@ internal enum class EntryVoiceStatus {
 
 /**
  * A voice note on an entry as one reader is played it: `{id, status, url?,
- * durationMs?}` (spec §4 D3). [url] and [durationMs] are present exactly when
- * [status] is [EntryVoiceStatus.READY]. The URL is a bearer credential for the
- * voice note, so [toString] leaves it out.
+ * durationMs?, waveform?}` (spec §4 D3, ADR-0061). [url] and [durationMs] are
+ * present when [status] is [EntryVoiceStatus.READY] (and on the author's
+ * `NOT_SHARED` unless it was blocked); [waveform] only with [url], and only if
+ * the note has one. The URL is a bearer credential for the voice note, so
+ * [toString] leaves it out.
  */
 internal data class EntryVoice(
     val id: UUID,
@@ -75,12 +77,13 @@ internal data class EntryVoice(
     val url: URI?,
     val durationMs: Int?,
     val sensitive: Boolean,
+    val waveform: List<Int>? = null,
     /** The same note as AAC in MP4, for iOS (ADR-0060); a bearer credential, as [url] is. */
     val urlAac: URI? = null,
 ) {
     override fun toString(): String =
         "EntryVoice(id=$id, status=$status, url=${url?.let { "<redacted>" }}, urlAac=${urlAac?.let { "<redacted>" }}, " +
-            "durationMs=$durationMs, sensitive=$sensitive)"
+            "durationMs=$durationMs, waveform=${waveform?.let { "<${it.size} levels>" }}, sensitive=$sensitive)"
 }
 
 /** An entry's photo and voice note as one reader is shown them; either may be absent. */
@@ -163,6 +166,7 @@ internal class EntryMedia(
             url = view.url,
             durationMs = view.durationMs,
             sensitive = view.sensitive,
+            waveform = view.waveform,
             urlAac = view.urlAac,
         )
 }

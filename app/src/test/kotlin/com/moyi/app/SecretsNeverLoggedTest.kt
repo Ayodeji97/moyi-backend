@@ -87,7 +87,8 @@ import kotlin.math.sqrt
  *
  * **What is scanned for:** the text of three entries (as submitted, as
  * edited, and the partner's), a password, two access tokens and two refresh
- * tokens, and a support message's subject and body (ADR-0057), across register, sign-in, pairing, submit, read, edit, the reveal,
+ * tokens, and a support message's subject, body and reference (ADR-0057), across register, sign-in,
+ * pairing, submit, read, edit, the reveal,
  * the archive (the feed with and without `favourites`, one day, a bookmark
  * set and removed, a conditional read that answers `304`), a search, by a
  * word that is watched (and the same word beside bytes that are not UTF-8, a `400`), on this day with a memory, the
@@ -344,10 +345,13 @@ abstract class SecretsNeverLoggedTest(
         // email the local sender prints in full, which must say it arrived without repeating it.
         scan.watch("support subject", SUPPORT_SUBJECT)
         scan.watch("support body", SUPPORT_BODY)
-        val support = """{"subject":"$SUPPORT_SUBJECT","body":"$SUPPORT_BODY"}"""
+        scan.watch("support reference", SUPPORT_REFERENCE)
+        val support = """{"subject":"$SUPPORT_SUBJECT","body":"$SUPPORT_BODY","reference":"$SUPPORT_REFERENCE"}"""
         val ticket = post("/support/messages", ada, support, idempotent = true)
         ticket.status shouldBe 201
         post("/support/messages", ada, """{"subject":"$SUPPORT_SUBJECT","body":""}""").status shouldBe 422
+        post("/support/messages", ada, """{"subject":"$SUPPORT_SUBJECT","body":"$SUPPORT_BODY","reference":"$SUPPORT_REFERENCE "}""")
+            .status shouldBe 422
         val acknowledged = "Support ticket ${ticket.json["id"].asString()} acknowledgement: ACCEPTED"
         await().atMost(Duration.ofSeconds(SUPPORT_ACK_SECONDS)).until { acknowledged in output.all }
 
@@ -781,6 +785,7 @@ abstract class SecretsNeverLoggedTest(
         const val SEARCH_TERMS = "zqkettlesearch"
         const val SUPPORT_SUBJECT = "Support~subject~zqlocked"
         const val SUPPORT_BODY = "Support~body~we cannot see today"
+        const val SUPPORT_REFERENCE = "Support~reference~zq4bf92f3577"
         const val SUPPORT_ACK_SECONDS = 10L
         const val UNDECODABLE_TERMS = "zqundecodablesearch"
         const val DISPATCHER_SERVLET = "org.springframework.web.servlet.DispatcherServlet"
