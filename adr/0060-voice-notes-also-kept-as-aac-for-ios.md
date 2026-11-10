@@ -50,9 +50,12 @@ the end has arrived.
    build, as the Ogg does not.
 
 3. **Best effort: a variant that cannot be made never refuses the note.** If the encode fails, runs
-   out of the deadline, exceeds the cap, or is not the same note, the note is `READY` with its Opus
-   alone, `aac_key` stays null, and `urlAac` is null; the log line says `Opus only` (the id, never a
-   key). An ffmpeg without the `aac` encoder would make every note so, silently, so the worker
+   out of the deadline, exceeds the cap, or is not the same note, **or the storage cannot take it**
+   (an `ObjectStoreUnavailableException` on its PUT, after the Opus's succeeded: review of #182), the
+   note is `READY` with its Opus alone in that same delivery, not retried, `aac_key` stays null, and
+   `urlAac` is null; the log says so (a WARN for the storage, `Opus only` on the ready line; the id,
+   never a key). Whatever part of a failed PUT reached the storage is at the derived key, so the
+   note's deletion takes it (decision 4). An ffmpeg without the `aac` encoder would make every note so, silently, so the worker
    refuses to start without it (`MediaProcessingConfiguration`, beside the `libopus` check), the
    image's build checks it (`app/Dockerfile`), and CI checks the built image on both architectures.
 

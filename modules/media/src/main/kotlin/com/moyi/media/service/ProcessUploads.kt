@@ -232,13 +232,30 @@ internal class ProcessUploads(
 
             is Transcoding.Transcoded -> {
                 storage.put(StorageKey.forVoice(asset.storageKey), transcoding.file, VoiceRules.KEPT_CONTENT_TYPE)
-                // ADR-0060: the AAC variant iOS streams, when one was made; recorded only once it is stored.
-                val aacKey =
-                    transcoding.aac?.let { aac ->
-                        StorageKey.forVoiceAac(asset.storageKey).also { storage.put(it, aac.file, VoiceRules.AAC_CONTENT_TYPE) }
-                    }
-                Result.VoiceReady(transcoding.durationMs, aacKey)
+                Result.VoiceReady(transcoding.durationMs, transcoding.aac?.let { storeAac(asset, it) })
             }
+        }
+    }
+
+    /**
+     * ADR-0060: the AAC variant iOS streams, stored; its key, or null when the storage cannot take it.
+     * Best effort, an outage included (review of #182): the note is kept with its Opus alone rather
+     * than the delivery retried for a copy iOS can live without. Whatever of the object did arrive is
+     * at a key [MediaAsset.objectKeys] derives, so the note's deletion takes it.
+     */
+    @Suppress("SwallowedException") // On purpose: the copy is best effort, and the line below says so, without the key.
+    private fun storeAac(
+        asset: MediaAsset,
+        aac: Transcoding.AacVariant,
+    ): StorageKey? {
+        val key = StorageKey.forVoiceAac(asset.storageKey)
+        return try {
+            storage.put(key, aac.file, VoiceRules.AAC_CONTENT_TYPE)
+            key
+        } catch (unavailable: ObjectStoreUnavailableException) {
+            // The id, never the key: the key reaches the bytes.
+            log.warn("Media {}: its AAC copy could not be stored; the note is kept with its Opus alone", asset.id)
+            null
         }
     }
 

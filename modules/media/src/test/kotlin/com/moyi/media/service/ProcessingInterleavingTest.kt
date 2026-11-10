@@ -23,12 +23,17 @@ import com.moyi.media.infra.storage.ObjectStoreUnavailableException
 import com.moyi.media.infra.storage.R2ObjectStore
 import com.moyi.media.web.MediaClient
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
@@ -55,6 +60,7 @@ import javax.sql.DataSource
 @AutoConfigureMockMvc
 @Import(ProcessingInterleavingTest.Doubles::class)
 @Timeout(value = 60, unit = TimeUnit.SECONDS)
+@ExtendWith(OutputCaptureExtension::class)
 @Suppress("LongParameterList") // A test's collaborators, each injected by Spring.
 internal class ProcessingInterleavingTest(
     @Autowired mvc: MockMvc,
@@ -226,6 +232,37 @@ internal class ProcessingInterleavingTest(
         // ADR-0060: and the AAC variant it made.
         stored("v/${upload.removePrefix("in/")}/voice.m4a") shouldBe false
         stored(upload) shouldBe false
+    }
+
+    /**
+     * ADR-0060 decision 3, review of #182: the AAC copy is best effort, an outage included. A storage that
+     * stores the Opus and then cannot store the m4a leaves the note READY with its Opus alone, in the same
+     * delivery, not retried; and whatever of the m4a reached the storage is still one of the note's derived
+     * keys, so its deletion takes it.
+     */
+    @Test
+    fun `a storage that fails on the AAC copy leaves the note ready with its Opus alone, and its deletion takes everything`(
+        output: CapturedOutput,
+    ) {
+        val mediaId = client.upload(ada, TestVoices.wav(2.0), declaredType = "audio/wav", kind = "VOICE")
+        val random = storageKeyOf(mediaId).removePrefix("in/")
+        storage.putsLeft = 1
+
+        dispatcher.dispatchDue(clock.instant(), BUDGET).failed shouldBe 0
+
+        jdbc.queryForMap("SELECT status, aac_key, processing_attempts FROM media_assets WHERE id = ?::uuid", mediaId) shouldBe
+            mapOf("status" to "READY", "aac_key" to null, "processing_attempts" to 1)
+        stored("v/$random/voice.ogg") shouldBe true
+        stored("v/$random/voice.m4a") shouldBe false
+        output.out shouldContain "Media $mediaId: its AAC copy could not be stored"
+        output.out shouldNotContain random
+
+        // As if the failed PUT had left an object behind: the deletion still finds it, by derivation.
+        storage.putsLeft = Int.MAX_VALUE
+        putBehindTheApi("v/$random/voice.m4a", byteArrayOf(1, 2, 3))
+        client.delete(ada, mediaId).status shouldBe 204
+        stored("v/$random/voice.ogg") shouldBe false
+        stored("v/$random/voice.m4a") shouldBe false
     }
 
     private fun statusOf(mediaId: String): String =
