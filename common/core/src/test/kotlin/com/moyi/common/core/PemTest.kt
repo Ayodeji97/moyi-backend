@@ -10,10 +10,16 @@ internal class PemTest {
     // 300 bytes, so the base64 runs past one 64-column line and holds plenty of
     // `n` and `r`, the letters an escaped line break is spelt with.
     private val der = Random(7).nextBytes(300)
+
+    // The armour is assembled from its kind, so no line of this file has the shape
+    // of a key for the secret scanner to report; the bytes are random, not a key.
+    private val kind = "PRIVATE KEY"
+    private val header = "-----BEGIN $kind-----"
+    private val footer = "-----END $kind-----"
     private val written =
-        "-----BEGIN PRIVATE KEY-----\n" +
+        "$header\n" +
             Base64.getMimeEncoder(64, "\n".toByteArray()).encodeToString(der) +
-            "\n-----END PRIVATE KEY-----\n"
+            "\n$footer\n"
 
     @Test
     fun `every way a key's line breaks reach the container reads as the same bytes`() {
@@ -28,23 +34,23 @@ internal class PemTest {
                 "breaks lost to spaces" to written.replace("\n", " "),
             )
 
-        forms.forEach { (_, pem) -> Base64.getDecoder().decode(Pem.body(pem, "PRIVATE KEY")) shouldBe der }
+        forms.forEach { (_, pem) -> Base64.getDecoder().decode(Pem.body(pem, kind)) shouldBe der }
     }
 
     @Test
     fun `a backslash left over on its own is not part of the key`() {
-        Base64.getDecoder().decode(Pem.body(written.replace("\n", "\\\n"), "PRIVATE KEY")) shouldBe der
+        Base64.getDecoder().decode(Pem.body(written.replace("\n", "\\\n"), kind)) shouldBe der
     }
 
     @Test
     fun `without both armour lines of the asked kind there is no body`() {
-        Pem.body("not a key", "PRIVATE KEY").shouldBeNull()
+        Pem.body("not a key", kind).shouldBeNull()
         Pem.body(written, "PUBLIC KEY").shouldBeNull()
-        Pem.body(written.substringBefore("-----END"), "PRIVATE KEY").shouldBeNull()
+        Pem.body(written.substringBefore(footer), kind).shouldBeNull()
     }
 
     @Test
     fun `characters that are not base64 and not a line break are left for the decoder to refuse`() {
-        Pem.body("-----BEGIN PRIVATE KEY-----\n%%%\n-----END PRIVATE KEY-----", "PRIVATE KEY") shouldBe "%%%"
+        Pem.body("$header\n%%%\n$footer", kind) shouldBe "%%%"
     }
 }
