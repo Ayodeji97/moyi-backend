@@ -3228,3 +3228,19 @@ Then (review of #162): three things a copy does that a reading does not. An arch
          let a build commit READY in between and leave an object nothing named:
          `DELETE … RETURNING` waits on that row instead. The race was proved by holding the build's
          UPDATE open and waiting for the delete to block on it in `pg_stat_activity`, not by a sleep.
+
+## 2026-11-10 · Feature · A check for a reset code is the reset's own gate, called alone (issue #169, ADR-0022 amended)
+
+Expected: a new endpoint with its own lookup of the code, and a test that it counts.
+Reality: the reset already had the whole gate in two lines (the daily limit, then the counted,
+         committed check); the check is those two lines and nothing else, so the reset and the
+         check now share one private `accept` and cannot count apart. The tests that matter are
+         the cross ones: three wrong checks and two wrong resets burn the code for both, and the
+         eleventh typed code of any mix is 429. Mutation-tested by making the check's count roll
+         back (the shared-counter tests went red), by dropping its daily limit (the 429 and the
+         Redis-outage 503 tests went red) and by dropping its per-address bucket.
+Wrong about: what a body without a field answers. A Kotlin non-null field that is absent is a
+         body Jackson cannot build, so `400 MALFORMED_REQUEST`, not the 422 the two-form routes
+         give (their fields are nullable because either form may be absent). Kept: the contract
+         now says both fields are required, which is what the generated client should see.
+

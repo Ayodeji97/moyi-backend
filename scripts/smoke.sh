@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# Issue #169 adds the reset-code check: an unknown address and a wrong code one 422, the right code
+# 204 twice (nothing spent), a missing code 400, the reset by the same code still 200 and a check of
+# the spent code 422; three wrong checks and two wrong resets burn the code for both; and the
+# eleventh typed code of the day is 429 on the check too. Last run on 2026-11-10, on
+# feat/reset-code-check (main e273a41), from a jar of that tree, on a fresh database, against its own
+# compose project (moyi-42d: Postgres 55640, Valkey 56640, MinIO 57640), the jar booted by hand (local
+# profile, the five crons at */5) and --attach: 1619 passed, 0 failed, 0 skipped. A first run on the
+# same stack failed three: two probes of mine that took one address past its ten typed codes a day
+# (fixed by a flush before them), and the close job, after a four-minute host stall closed the
+# pool's connections (an infrastructure fault; the fresh run is clean).
+#
 # Issue #126 adds the data-export section: 401 without a token, 404 for a latest never asked for,
 # 202 PREPARING and the same export again, one 404 for someone else's id and a missing one, the job
 # (on a five-second cron) making it READY with a URL good for exactly 24 hours, the zip downloaded
@@ -928,6 +939,18 @@ expect "reset by code for an unknown address" 422 '"code":"PASSWORD_RESET_TOKEN_
 UNKNOWN_RESET_BODY="$LAST_BODY"
 expect "reset by a wrong code" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.162' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$(other_code "$RESET_CODE")\",\"password\":\"$CODE_PASSWORD\"}"
 [ "$LAST_BODY" = "$UNKNOWN_RESET_BODY" ] && pass "reset by code for an unknown address is the same bytes as a wrong code" || fail "reset unknown vs wrong" "'${LAST_BODY:0:200}' vs '${UNKNOWN_RESET_BODY:0:200}'"
+# #169: the check says whether the code is right before the password is typed; it spends nothing
+# of the code, but every check is one of the address's ten typed codes a day, as the reset is. This
+# address has spent five above, and the probes below would take it past ten: start the day afresh.
+flush_buckets
+CHECK_BODY() { printf '{"email":"%s","code":"%s"}' "$1" "$2"; }
+expect "reset-code check for an unknown address is 422" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.220' -d "$(CHECK_BODY "nobody-$RANDOM@example.com" "$RESET_CODE")"
+UNKNOWN_CHECK_BODY="$LAST_BODY"
+expect "reset-code check with a wrong code is 422" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.221' -d "$(CHECK_BODY "$CODE_EMAIL" "$(other_code "$RESET_CODE")")"
+[ "$LAST_BODY" = "$UNKNOWN_CHECK_BODY" ] && pass "…the same bytes as an unknown address" || fail "check unknown vs wrong" "'${LAST_BODY:0:200}' vs '${UNKNOWN_CHECK_BODY:0:200}'"
+expect "reset-code check with the right code is 204" 204 "" -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.222' -d "$(CHECK_BODY "$(echo "$CODE_EMAIL" | tr a-z A-Z)" "$RESET_CODE")"
+expect "…and again: a check spends nothing" 204 "" -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.223' -d "$(CHECK_BODY "$CODE_EMAIL" "$RESET_CODE")"
+expect "a reset-code check without a code is 400" 400 '"code":"MALFORMED_REQUEST"' -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.224' -d "{\"email\":\"$CODE_EMAIL\"}"
 if [ "$RESET_CODE" != "$CODE2" ]; then
   expect "the verification code is not a reset code" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.163' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$CODE2\",\"password\":\"$CODE_PASSWORD\"}"
 fi
@@ -935,9 +958,26 @@ expect "a breached password by code is refused per field, code not spent" 422 '"
 expect "reset by address and code is 200" 200 "" -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.165' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$RESET_CODE\",\"password\":\"$CODE_PASSWORD\"}"
 expect "…the same code again is 422, never 410" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.166' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$RESET_CODE\",\"password\":\"$CODE_PASSWORD\"}"
 expect "…and the link beside it is spent: 410" 410 '"code":"PASSWORD_RESET_TOKEN_EXPIRED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.167' -d "{\"token\":\"$RESET_LINK\",\"password\":\"$CODE_PASSWORD\"}"
+expect "a reset-code check of the spent code is 422" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.225' -d "$(CHECK_BODY "$CODE_EMAIL" "$RESET_CODE")"
 expect "the password set by code signs in" 200 '"accessToken"' -- -X POST "$API/auth/login" -H 'X-Forwarded-For: 203.0.113.168' -d "$(login_body "$CODE_EMAIL" "$CODE_PASSWORD")"
+# #169: wrong checks are wrong tries at the reset code, on the same five. Three wrong checks and
+# two wrong resets burn it, so neither the check nor the reset then takes the right code.
+# The burn account has spent six of its ten typed codes today above: start the day afresh.
+flush_buckets
+before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "forgot-password for the burn account is 202" 202 "" -- -X POST "$API/auth/forgot-password" -H 'X-Forwarded-For: 203.0.113.230' -d "{\"email\":\"$BURN_EMAIL\"}"
+await_email "$before"
+BURN_RESET_CODE="$(code_from_log)"
+for i in 1 2 3; do
+  expect "wrong reset-code check $i of 3 is 422" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password/check" -H "X-Forwarded-For: 203.0.113.23$i" -d "$(CHECK_BODY "$BURN_EMAIL" "$(other_code "$BURN_RESET_CODE")")"
+done
+for i in 4 5; do
+  expect "wrong reset by code $i of 5 is 422" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H "X-Forwarded-For: 203.0.113.23$i" -d "{\"email\":\"$BURN_EMAIL\",\"code\":\"$(other_code "$BURN_RESET_CODE")\",\"password\":\"$CODE_PASSWORD\"}"
+done
+expect "the right reset-code check after five wrong tries is refused: checks and resets share the five" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.236' -d "$(CHECK_BODY "$BURN_EMAIL" "$BURN_RESET_CODE")"
+expect "…and so is the right reset" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.237' -d "{\"email\":\"$BURN_EMAIL\",\"code\":\"$BURN_RESET_CODE\",\"password\":\"$CODE_PASSWORD\"}"
 # The code reaches the log only inside the logged email (provider=log, local only): no other line holds it.
-CODE_LEAK=0; for c in "$CODE1" "$CODE2" "$BURN_CODE" "$RESET_CODE"; do [ "$(grep -wF -- "$c" "$MOYI_LOG" | grep -vE "^\s*$c\s*\$" | grep -vc 'It works for' || true)" -gt 0 ] && CODE_LEAK=1; done
+CODE_LEAK=0; for c in "$CODE1" "$CODE2" "$BURN_CODE" "$RESET_CODE" "$BURN_RESET_CODE"; do [ "$(grep -wF -- "$c" "$MOYI_LOG" | grep -vE "^\s*$c\s*\$" | grep -vc 'It works for' || true)" -gt 0 ] && CODE_LEAK=1; done
 [ "$CODE_LEAK" = 0 ] && pass "no code appears in the log outside the logged email" || fail "code in log" "a code appears on a log line that is not the email's"
 
 # Ten typed codes a day per address, both routes together, the same for an address with no account.
@@ -948,6 +988,7 @@ for i in $(seq 1 10); do
 done
 expect "the eleventh, on reset-password, is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.181' -d "{\"email\":\"$LIMIT_CODE_EMAIL\",\"code\":\"000000\",\"password\":\"$CODE_PASSWORD\"}"
 header_is "…waiting for one try back" "Retry-After" "8640"
+expect "…and on the reset-code check, 429 too" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/reset-password/check" -H 'X-Forwarded-For: 203.0.113.238' -d "$(CHECK_BODY "$LIMIT_CODE_EMAIL" "000000")"
 # Twenty an hour per client address on the two routes, links and codes alike.
 flush_buckets
 for i in $(seq 1 20); do

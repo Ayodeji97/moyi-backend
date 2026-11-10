@@ -1,6 +1,6 @@
 # ADR-0022 — Password reset: a verification token with a different purpose, and a different page
 
-**Status:** Accepted · **Date:** 2026-09-23 · **Amended:** 2026-11-08 (reset by a six-digit code, #135); 2026-11-09 (a code is refused while Redis is down)
+**Status:** Accepted · **Date:** 2026-09-23 · **Amended:** 2026-11-08 (reset by a six-digit code, #135); 2026-11-09 (a code is refused while Redis is down); 2026-11-10 (a reset code can be checked before the password is typed, #169)
 
 ## Context
 
@@ -49,4 +49,22 @@ The reset email carries the same six-digit code as the verification email, on th
 **3. A reset takes back the code of any later reset email**, since the password it would reset has just changed. Earlier reset *links* still stay live until their hour, as decision 3's consequence said; that is unchanged.
 
 **4. A forgot-password email is a new code.** It retires the previous reset code; three an hour per address (FR-012) bounds how often, and ADR-0023's `auth:code:email` bounds how many codes may be tried. *(Amended 2026-11-09: that bucket fails closed, so with Redis unreachable `{email, code, password}` is `503 CODE_CHECK_UNAVAILABLE` before anything is read or hashed, and `{token, password}` still resets; ADR-0023.)*
+
+## Amendment — 2026-11-10: a reset code can be checked before the password is typed (#169)
+
+The app asks for the code and the new password on one screen, so a mistyped code was learned only after the person had chosen and typed a password; verification, by contrast, answers on the sixth digit. The issue offered two shapes: a check-only call, or a short-lived reset grant exchanged for the code.
+
+**1. `POST /auth/reset-password/check` with `{email, code}`: `204` and an empty body when the code is right now.** A check, not a grant. The code is not spent, its tries are not reset, and nothing is issued: `POST /auth/reset-password` still takes `{email, code, password}` and is still the one place the code is spent. A grant was rejected because it is a second credential for the same act, with its own lifetime, storage, redaction and revocation (a later reset email, a reset by the link) to get right, while a check adds no state at all. What a check cannot promise, the contract says: a code right at the check can still be refused by the reset, if its fifteen minutes run out, the link beside it is used, or a newer email replaces it in between; the app shows the reset's 422 as it does today.
+
+**2. A check is the reset's own gate, not a copy of it.** `ResetPassword.check` and the code form of `reset` both run one private `accept`: `VerificationCodeCheck.limit` (ADR-0023's `auth:code:email`, first, before any read), then `checkAlone` for `PASSWORD_RESET`, in its own committed transaction. So:
+
+- **One counter, not two budgets.** A wrong check is counted on the same row's `code_attempts` as a wrong reset; checks and resets together get five wrong tries per code (`ResetCodeCheckEndpointTest`: three wrong checks and two wrong resets burn the code for both).
+- **One daily ten.** Every check, right or wrong, spends one of the address's ten typed codes a day, the bucket `verify-email` and `reset-password` already share; the eleventh of any mix is `429` (`RateLimitingEndpointTest`). A right check followed by the reset is two of the ten; for a person that is ample (a code that is right once needs no second check), and it keeps the limit before any read, which is what makes the 429 say nothing about the address. ADR-0023 decision 3's arithmetic is unchanged: at most ten guesses a day against one account, however they are split between the two routes.
+- **One per-address bucket.** `@RateLimited(AUTH_CODE_IP)`, the twenty an hour per client address the two routes already share.
+- **One answer.** Every refusal is `422 PASSWORD_RESET_TOKEN_INVALID` with the reset's detail, the same bytes (but `traceId`) for an unknown address, a wrong, expired, burned or spent code, and the same work (one lookup, one locking `SELECT`, one HMAC, one `UPDATE`; `VerificationCodeCheck`'s own test counts it). Only `instance` differs from the reset's body, being the path.
+- **Redis down: fail closed, as ruled on 2026-11-09.** `503 CODE_CHECK_UNAVAILABLE`, `Retry-After: 60`, before any read, the same bytes for every address; the link still resets (`TypedCodeRedisOutageTest`).
+
+**3. The body is `{email, code}` and nothing else.** Both are required in the contract, so a missing one is `400 MALFORMED_REQUEST` like any request missing a required field; a malformed one is `422 VALIDATION_FAILED` (`VALID_VERIFICATION_CODE` asks the domain, as before). Neither is looked up or counted. No `token` form: a link is 256 bits and needs no check. No `Idempotency-Key`: none of the signed-out auth routes take one, and a repeated check is harmless (a right one changes nothing; a wrong one is a try the client chose to spend).
+
+**What it costs.** One more request on the reset screen, and one more of the ten a day. **Revisit when** a typed code ever needs to be checked by another purpose (verification answers by spending, so it has no need), or the app wants the check to hold the code for it, which would be the grant rejected above.
 

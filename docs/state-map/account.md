@@ -291,6 +291,7 @@ stateDiagram-v2
 |---|---|---|---|---|
 | ask for a password reset link<br>`POST /auth/forgot-password` | 202 → `REQUESTED` (an account has this address, verified or not)<br>202 stays (no account has this address) | 202 stays | 202 stays | 202 stays |
 | set a new password with a reset link or code<br>`POST /auth/reset-password` | 422 `PASSWORD_RESET_TOKEN_INVALID` (a token is sent)<br>422 `PASSWORD_RESET_TOKEN_INVALID` (an email and a code are sent) | 200 → `USED` (a token is sent)<br>200 → `USED` (an email and a code are sent, and the code is the one in the newest reset email: under 15 minutes old, fewer than 5 wrong codes tried, and neither it nor its link used) | 410 `PASSWORD_RESET_TOKEN_EXPIRED` | 410 `PASSWORD_RESET_TOKEN_EXPIRED` |
+| check a typed reset code before the new password is typed<br>`POST /auth/reset-password/check` | 422 `PASSWORD_RESET_TOKEN_INVALID` | 204 stays (the code is the one in the newest reset email: under 15 minutes old, fewer than 5 wrong codes tried, and neither it nor its link used)<br>422 `PASSWORD_RESET_TOKEN_INVALID` (the code is wrong, older than the newest reset email's, expired (15 minutes) or burned (5 wrong tries)) | 422 `PASSWORD_RESET_TOKEN_INVALID` | 422 `PASSWORD_RESET_TOKEN_INVALID` |
 
 ### You can
 
@@ -303,6 +304,7 @@ stateDiagram-v2
 | `EXPIRED` | ask for a password reset link |  | stays | A new link is made and emailed; the expired one stays expired. | never-run |
 | `REQUESTED` | set a new password with a reset link or code | a token is sent | `USED` | The link is spent and the password replaced. In the same transaction any lockout is cleared, every session of the account is ended and every access token stops being accepted; afterwards the address is emailed that the password changed. The account's other live reset links are not cancelled and stay usable until their own hour ends; the code in the newest reset email is taken back. The new password is checked before the link is looked at, so a refused password does not spend it. | test |
 | `REQUESTED` | set a new password with a reset link or code | an email and a code are sent, and the code is the one in the newest reset email: under 15 minutes old, fewer than 5 wrong codes tried, and neither it nor its link used | `USED` | As by the link: the row is spent (the link beside the code with it), the password replaced, every session ended and the address emailed. A wrong, older, expired, burned or used code is the one 422 PASSWORD_RESET_TOKEN_INVALID, never 410. | smoke |
+| `REQUESTED` | check a typed reset code before the new password is typed | the code is the one in the newest reset email: under 15 minutes old, fewer than 5 wrong codes tried, and neither it nor its link used | stays | A check, not a grant: the code is right now, and nothing about it changes. It is not spent, its tries are not reset, and the reset still needs the address, the code and the new password. It spends one of the address's ten typed codes today, as the reset will. | smoke |
 
 ### Refused here
 
@@ -312,6 +314,10 @@ stateDiagram-v2
 | `NONE` | set a new password with a reset link or code | an email and a code are sent | 422 `PASSWORD_RESET_TOKEN_INVALID` | No reset code is held for the address (no account, or none asked for). The same bytes as a wrong code for an account that holds one. | #135, ADR-0022 (amended 2026-11-08) | smoke |
 | `USED` | set a new password with a reset link or code |  | 410 `PASSWORD_RESET_TOKEN_EXPIRED` | A reset link works once. Used and expired get the same answer; ask for a new link. | FR-004, ADR-0022 §1 | smoke |
 | `EXPIRED` | set a new password with a reset link or code |  | 410 `PASSWORD_RESET_TOKEN_EXPIRED` | The link's hour has passed. Nothing changes; ask for a new link. | FR-004, ADR-0022 §1 | never-run |
+| `NONE` | check a typed reset code before the new password is typed |  | 422 `PASSWORD_RESET_TOKEN_INVALID` | No reset code is held for the address (no account, or none asked for). The same bytes as a wrong code for an account that holds one, and the same answer reset-password gives. | #169, ADR-0022 (amended 2026-11-10) | smoke |
+| `REQUESTED` | check a typed reset code before the new password is typed | the code is wrong, older than the newest reset email's, expired (15 minutes) or burned (5 wrong tries) | 422 `PASSWORD_RESET_TOKEN_INVALID` | The one answer for every refused code. A wrong check is a wrong try at the reset code: checks and resets share its five, so three wrong checks and two wrong resets burn it for both. The link beside it still works. | #169, ADR-0022 (amended 2026-11-10) | smoke |
+| `USED` | check a typed reset code before the new password is typed |  | 422 `PASSWORD_RESET_TOKEN_INVALID` | The code was spent with the reset (by the code or by the link beside it). The same 422 as a wrong code, never 410. | #169, ADR-0022 (amended 2026-11-10) | smoke |
+| `EXPIRED` | check a typed reset code before the new password is typed |  | 422 `PASSWORD_RESET_TOKEN_INVALID` | The link's hour has passed, and the code's fifteen minutes before it. The same 422 as a wrong code; ask for a new email. | #169, ADR-0022 (amended 2026-11-10) | test |
 
 ### Happens without you
 

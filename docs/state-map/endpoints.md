@@ -725,6 +725,40 @@ curl -X POST "$API/auth/reset-password" -H 'Content-Type: application/json' -d "
 | 503 | `HASHING_CAPACITY_EXCEEDED` | Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. The link or the code is not spent. (the test of this answer drives register, not a reset) | never-run |
 | 503 | `CODE_CHECK_UNAVAILABLE` | An email, a code and a password only, while the store that counts typed codes (Redis) cannot be reached: no code is checked until it is back (owner's ruling 2026-11-09, ADR-0023 amended). Retry-After: 60. Answered before the address is looked up or the password hashed, the same bytes for every address; the code is neither counted nor spent. A token is never answered this: the reset link still works. | test |
 
+### POST /auth/reset-password/check
+
+check a typed reset code before the new password is typed
+
+**Needs:** no access token.
+
+- Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)
+- Content-Type (application/json. The email address and the six-digit code from the reset email, in the body, are what is checked)
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. The reset's own two buckets, not new ones: twenty an hour per client address, shared with verify-email and reset-password, spent before the body is checked; and ten typed codes a day per email address as typed, shared with the code forms of verify-email and reset-password, spent by every check, right or wrong, counted for every address whether or not it has an account: the eleventh is 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl -X POST "$API/auth/reset-password/check" -H 'Content-Type: application/json' -d "{\"email\": \"$EMAIL\", \"code\": \"$CODE\"}"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `account.reset` | `NONE` |  | 422 `PASSWORD_RESET_TOKEN_INVALID` | No reset code is held for the address (no account, or none asked for). The same bytes as a wrong code for an account that holds one, and the same answer reset-password gives. | #169, ADR-0022 (amended 2026-11-10) | smoke |
+| `account.reset` | `REQUESTED` | the code is the one in the newest reset email: under 15 minutes old, fewer than 5 wrong codes tried, and neither it nor its link used | 204 stays | A check, not a grant: the code is right now, and nothing about it changes. It is not spent, its tries are not reset, and the reset still needs the address, the code and the new password. It spends one of the address's ten typed codes today, as the reset will. | #169, ADR-0022 (amended 2026-11-10) | smoke |
+| `account.reset` | `REQUESTED` | the code is wrong, older than the newest reset email's, expired (15 minutes) or burned (5 wrong tries) | 422 `PASSWORD_RESET_TOKEN_INVALID` | The one answer for every refused code. A wrong check is a wrong try at the reset code: checks and resets share its five, so three wrong checks and two wrong resets burn it for both. The link beside it still works. | #169, ADR-0022 (amended 2026-11-10) | smoke |
+| `account.reset` | `USED` |  | 422 `PASSWORD_RESET_TOKEN_INVALID` | The code was spent with the reset (by the code or by the link beside it). The same 422 as a wrong code, never 410. | #169, ADR-0022 (amended 2026-11-10) | smoke |
+| `account.reset` | `EXPIRED` |  | 422 `PASSWORD_RESET_TOKEN_INVALID` | The link's hour has passed, and the code's fifteen minutes before it. The same 422 as a wrong code; ask for a new email. | #169, ADR-0022 (amended 2026-11-10) | test |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 400 | `MALFORMED_REQUEST` | The email or the code is missing (both are required), or the body is not JSON. Nothing is looked up and no try is counted. | smoke |
+| 422 | `VALIDATION_FAILED` | The email is blank or not shaped like an address, or the code is not six ASCII digits (VALID_VERIFICATION_CODE). Checked before the address is looked up, so it counts against no code. | test |
+| 503 | `CODE_CHECK_UNAVAILABLE` | The store that counts typed codes (Redis) cannot be reached: no code is checked until it is back (owner's ruling 2026-11-09, ADR-0023 amended; #169 put the check under the same ruling). Retry-After: 60. Answered before the address is looked up, the same bytes for every address; the code is neither counted nor spent. The reset link in the same email still works. | test |
+
 ## Bond
 
 ### GET /bonds
