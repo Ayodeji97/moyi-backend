@@ -48,6 +48,7 @@ internal class RequestingConsumer(
                 dedupeKey = "reveal:${event.aggregateId}:$userId",
                 staleAfter = event.occurredAt.plus(Duration.ofDays(1)),
                 recipient = PushRecipient(ZoneId.of("UTC"), null, NotificationPreferences.DEFAULTS),
+                bondDate = null,
             ),
         )
     }

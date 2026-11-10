@@ -1,7 +1,9 @@
 # ADR-0057 — In-app support messages: a ticket for a person, an acknowledgement that never repeats it, and the operator's queue in the database
 
-**Status:** Accepted · **Date:** 2026-11-08 · **Deciders:** Daniel, for FR-102 and doc 06; decisions
-1, 3, 6 and 7 were made without him and are his to revisit (issue #129 left them to the backend).
+**Status:** Accepted · **Date:** 2026-11-08 · **Amended:** 2026-11-10 (decision 11, an optional
+`reference`, issue #168; decisions 7, 8 and 10 widened to carry it) · **Deciders:** Daniel, for FR-102
+and doc 06; decisions 1, 3, 6 and 7 were made without him and are his to revisit (issue #129 left them
+to the backend); decision 11's rulings were the session lead's for issue #168.
 
 ## Context
 
@@ -82,7 +84,9 @@ operator's three functions, each writing a row in `support_ticket_log` (who look
 note; never the words): `support_ticket_list` (ids, sender, how long each field is, when; never the
 words), `support_ticket_read` (the words, and the address to answer at, read from identity's `users`
 at that moment rather than copied into the ticket, with whether it was ever confirmed) and
-`support_ticket_close` (empties the subject and body, keeps the record). `scripts/moyi support
+`support_ticket_close` (empties the subject and body, keeps the record). Since V55, `reference` is a
+column too, shown by `support_ticket_read` and emptied by `support_ticket_close` with the words
+(decision 11). `scripts/moyi support
 list|show|close` names which to run, under `MOYI_OPERATOR`. **The words do not outlive the answer in
 the live database**: closing empties them (V45's `support_tickets_text_kept_check`), as a decided
 report's detail is (ADR-0053 decision 7), with the same caveat: dead tuples until autovacuum, and the
@@ -94,6 +98,8 @@ anonymised as the deletion's ADR decides; `support_tickets_user_idx` is there fo
 then a ticket names its sender by id only, and `support_ticket_read` shows no address for an account
 that is gone.
 *Discharged 2026-11-09 by ADR-0058 (issue #125): the deletion closes and empties the account's open tickets, logged `CLOSED` by `account-deletion`, and keeps `user_id` (decision 10 there).*
+*Since V55 the emptying includes the ticket's `reference` (decision 11), and V55's
+`support_tickets_text_kept_check` refuses a closed ticket that keeps one.*
 
 **9. `support:create:user`, five a day per account** (doc 06 §4; `RateLimitBucket.SUPPORT_CREATE_USER`,
 greedy, so one back every 4.8 hours). Spent before the body is read, as every bucket here is, so a
@@ -106,7 +112,46 @@ bounds both.
 ours) and key, never the text; the services log ids and outcomes. `SecretsNeverLoggedTest` sends a
 support message (keyed, and a refused one) with every logger at TRACE and the local email sender
 printing the acknowledgement in full, and finds neither field in any line; `SupportMessagesTest`
-captures the output of a filing and of every `422`.
+captures the output of a filing and of every `422`. The `reference` (decision 11) is held to the
+same rule: `SupportReference` prints its length, the request's `toString` redacts it, and both tests
+watch it.
+
+**11. An optional `reference`: the error that brought the person here** (issue #168, 2026-11-10).
+Doc 06 §2 says `traceId` exists so "a user-reported problem maps directly to a trace", and the app
+offers Get help from its error screen; without this the operator could find the failing request only
+by account and time. The client will not paste the id into the body (the body is the person's words,
+and the app's privacy line promises support sees only what they write), so `SupportMessageRequest`
+gains `reference`:
+
+- **Named `reference`, not `traceId`.** It is whatever the client shows the person as their error's
+  reference; this API does not promise it is a trace id, and a client may send another reference later
+  without a contract change. (The acknowledgement email's "Your reference is …" is the *ticket's* id,
+  unchanged; the operator sees both, labelled apart.)
+- **Optional; absent or `null` is none.** When present, **1 to 64 visible ASCII characters, 0x21 to
+  0x7E**: `support.domain.SupportReference` is the rule, `ValidSupportReference` asks it at the edge (a
+  refusal is `422 VALIDATION_FAILED` naming `reference`, never repeating the value), and V55's
+  `support_tickets_reference_check` (`^[\x21-\x7E]{1,64}$`) is the second line. A trace id needs no
+  more, and a value with no space, control character or non-ASCII letter cannot break a row or forge a
+  line in the operator's terminal, so `moyi support show` prints it as it is.
+- **Stored with the ticket** (`support_tickets.reference`, nullable, V55) and **shown where the
+  operator reads tickets**: `support_ticket_read` returns it (V55 drops and recreates the function,
+  since its result gains a column) and `moyi support show` prints it. `support_ticket_list` does not:
+  the list shows lengths and ids only, as before.
+- **Never in the acknowledgement email**: `SupportTicketFiled` carries ids only, so the email cannot
+  reach it, and `SupportMessagesTest` checks the email for it.
+- **Never logged** (decision 10).
+- **In the person's own export**, because the export already carries their tickets (ADR-0059):
+  `ExportedTicket.reference` and `supportMessages[].reference`, null when none or emptied.
+- **Emptied with the words**: by the operator's close and by an account deletion (decision 8,
+  ADR-0058 decision 10). V55 widens `support_tickets_text_kept_check` so a closed ticket holding a
+  reference is refused by the database too. It is less sensitive than the words, but it was sent with
+  them, it names one request of the person's, and nothing needs it once the ticket is answered.
+- **Part of the idempotency fingerprint**, as the whole body is: the same key with another reference
+  is `422`, a different request.
+
+Not decided here: Jackson's default coercion turns a JSON number into a string, so `"reference": 123`
+is accepted as `"123"`, as a number would be for `subject`; that is the API's general behaviour, not
+this field's.
 
 ## Consequences
 
@@ -124,7 +169,9 @@ for it (a decimal V45.1 was tried first and ruled out by the coordinator on 2026
 change that widens the same `CHECK` (#127) must list `SUPPORT_TICKET` too, whichever lands second.
 
 **Neutral.** A new module (`modules/support`), wired in `app` and listed in `ArchitectureTest`. One
-route, one bucket, one `ResultKind`, one `identity.api` port. No error code is added.
+route, one bucket, one `ResultKind`, one `identity.api` port. No error code is added. Decision 11 adds
+one optional request field (additive for a generated client), one nullable column and V55, a third
+migration.
 
 ## Alternatives considered
 

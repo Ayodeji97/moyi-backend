@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -93,7 +94,7 @@ internal class NotifyDayMembers(
         val audience = audienceTakingWrites(day.bondId) ?: return
         val staleAfter = endOfFollowingDay(day) ?: return
         audience.members.forEach { member ->
-            request(member, day.bondId, PushCategory.REVEAL, PushKeys.reveal(day.id, member.userId), staleAfter)
+            request(member, day.bondId, PushCategory.REVEAL, PushKeys.reveal(day.id, member.userId), staleAfter, day.date)
         }
     }
 
@@ -112,7 +113,7 @@ internal class NotifyDayMembers(
         val audience = audienceTakingWrites(day.bondId) ?: return
         val staleAfter = endOfFollowingDay(day) ?: return
         audience.members.filterNot { it.memberId == author }.forEach { partner ->
-            request(partner, day.bondId, PushCategory.SOLO_UNLOCK, PushKeys.soloUnlock(day.id, partner.userId), staleAfter)
+            request(partner, day.bondId, PushCategory.SOLO_UNLOCK, PushKeys.soloUnlock(day.id, partner.userId), staleAfter, day.date)
         }
     }
 
@@ -121,8 +122,12 @@ internal class NotifyDayMembers(
         val bondDayId = event.reference(BOND_DAY_ID)
         val audience = audienceTakingWrites(bondId) ?: return
         val staleAfter = event.occurredAt.plus(MILESTONE_STALE_AFTER)
+        // The day that reached it, read here, in the module that holds days (#146). Not carried in
+        // the event: an event's payload is names to ids (ADR-0035). A day this module does not hold
+        // names no date, and the milestone is told all the same.
+        val date = days.find(BondDayId(bondDayId))?.date
         audience.members.forEach { member ->
-            request(member, bondId, PushCategory.MILESTONE, PushKeys.milestone(bondDayId, member.userId), staleAfter)
+            request(member, bondId, PushCategory.MILESTONE, PushKeys.milestone(bondDayId, member.userId), staleAfter, date)
         }
     }
 
@@ -142,12 +147,14 @@ internal class NotifyDayMembers(
             ?.dayBoundsAt(day.endsAt)
             ?.endsAt
 
+    @Suppress("LongParameterList") // One push, field for field: whose, which Bond, what, its key, its deadline, its day.
     private fun request(
         member: PushAudienceMember,
         bondId: UUID,
         category: PushCategory,
         dedupeKey: String,
         staleAfter: Instant,
+        bondDate: LocalDate?,
     ) {
         notifications.request(
             PushRequest(
@@ -157,6 +164,7 @@ internal class NotifyDayMembers(
                 dedupeKey = dedupeKey,
                 staleAfter = staleAfter,
                 recipient = member.recipient,
+                bondDate = bondDate,
             ),
         )
     }
