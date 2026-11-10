@@ -4,7 +4,12 @@
 # Issue #149 changes the moderation section: the red (held-back) photo, refused on an entry until
 # now, is put on one in a bond of its own and answered 201 NOT_SHARED with its URL to its author,
 # still QUARANTINED with its verdict, PROCESSING with nothing of it to the partner, and READY to the
-# partner once the operator releases it. Run on 2026-11-10: see the pull request for the numbers.
+# partner once the operator releases it. Last run on 2026-11-10, on fix/claim-held-media from a jar of
+# 93230258's tree, against its own compose project (moyi-42e: Postgres 55650, Valkey 56650, MinIO
+# 57650), the jar booted by hand (local profile, the close, reminders, held-pushes, account-deletion
+# and data-export crons at */5) and --attach: on a fresh database 1616 passed, 1 failed (late entries:
+# "the job has run since", the ShedLock floor named under #126 below), 0 skipped; again on the same
+# server, 1616 passed, 0 failed, 1 skipped (the tag across the erasure, the poller having won the race).
 #
 # Issue #126 adds the data-export section: 401 without a token, 404 for a latest never asked for,
 # 202 PREPARING and the same export again, one 404 for someone else's id and a missing one, the job
