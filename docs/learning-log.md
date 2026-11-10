@@ -3228,3 +3228,20 @@ Then (review of #162): three things a copy does that a reading does not. An arch
          let a build commit READY in between and leave an object nothing named:
          `DELETE … RETURNING` waits on that row instead. The race was proved by holding the build's
          UPDATE open and waiting for the delete to block on it in `pg_stat_activity`, not by a sleep.
+
+## 2026-11-10 · Feature · The Bond-day's date in a push's data (#146, ADR-0044 amended, V58)
+
+Expected: one more key in `FcmPushSender.payloadOf`.
+Reality: the sender never sees the request. The consumer builds the message from the ledger
+         row, and a push held by quiet hours is published again with its id alone. So the date
+         had to go on the row (`notifications.bond_date`, V58), and every caller had to resolve it,
+         because `notification` cannot read a day. `PushRequest.bondDate` is required and nullable,
+         so a new caller cannot forget to decide whether its push concerns a day.
+Wrong about: the first brief said no migration, and the work stopped until V58 was given. The
+         milestone date was asked to travel in `MilestoneReached`. The outbox's references are
+         `Map<String, UUID>` (ADR-0035), so the consumer reads it from the `bondDayId` the event
+         already names, in the module that holds days. And a test's "UTC" bond was refused with a
+         422: anchors and reminder zones are region zones, so `Atlantic/Reykjavik` stands in for UTC.
+Also: the boundary is the point. At 18:00Z a bond in Auckland is already on the next day. A
+         mutant that read the reveal's date in UTC passed the Lagos test and failed only the
+         Auckland one.

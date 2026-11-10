@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# Issue #146 adds one probe to the reveal-push section: each member's REVEAL row keeps the revealed
+# day's own date (`bond_date`, V58), which the consumer sends as `data.date`. The log provider's line
+# leaves the payload out, so the ledger is where a run sees it. Last run on 2026-11-10, on
+# feat/push-data-date-146 (from e273a416 plus the branch's tree), against its own compose project
+# (moyi-42b: Postgres 55620, Valkey 56620, MinIO 57621), the jar booted by hand (local profile, the
+# close, reminders, held-pushes, account-deletion and data-export crons at */5) and --attach, on a
+# fresh database: 1604 passed, 0 failed, 0 skipped.
+#
 # Issue #126 adds the data-export section: 401 without a token, 404 for a latest never asked for,
 # 202 PREPARING and the same export again, one 404 for someone else's id and a missing one, the job
 # (on a five-second cron) making it READY with a URL good for exactly 24 hours, the zip downloaded
@@ -2920,6 +2928,9 @@ for _ in $(seq 1 40); do
 done
 db_is "reveal push: one push SENT to each member, and no more" "$NR_SENT" "2|2"
 db_is "reveal push: …each under its reveal key" "$(sql "SELECT count(*) FROM notifications n JOIN bond_days d ON n.dedupe_key = 'reveal:' || d.id || ':' || n.user_id WHERE n.bond_id = '$NB_BOND' AND n.category = 'REVEAL'")" "2"
+# Issue #146: the row keeps the revealed day's own date, which the consumer sends as `data.date`.
+# The log provider's line leaves the payload out, so the ledger is where a run can see it.
+db_is "reveal push: …each naming the day it revealed (bond_date, sent as data.date)" "$(sql "SELECT count(*) FROM notifications n JOIN bond_days d ON n.dedupe_key = 'reveal:' || d.id || ':' || n.user_id WHERE n.bond_id = '$NB_BOND' AND n.category = 'REVEAL' AND n.bond_date = d.date")" "2"
 # The ledger's SENT is committed by the delivery that logged the send, so the lines are written by
 # now; but a log appender may hand them to the file a moment later. Polled, never loosened: two
 # lines exactly. On a failure, what the ledger and the log said (the smoke run of D4 once saw 0).

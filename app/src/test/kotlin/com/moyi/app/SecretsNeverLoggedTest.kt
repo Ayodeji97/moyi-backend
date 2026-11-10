@@ -446,6 +446,7 @@ abstract class SecretsNeverLoggedTest(
                     "secrets-probe:$user",
                     Instant.now().plusSeconds(PUSH_STALE_SECONDS),
                     PushRecipient(ZoneId.of("UTC"), null, NotificationPreferences.DEFAULTS),
+                    null,
                 ),
             ) shouldBe true
         }
