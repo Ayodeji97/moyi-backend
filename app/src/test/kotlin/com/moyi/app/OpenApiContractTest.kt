@@ -1101,11 +1101,14 @@ class OpenApiContractTest(
     @Test
     fun `an entry's voice note is an id, a status and, once playable, a URL and a length, every field always sent`() {
         val voice = api.components.schemas["EntryVoiceResponse"]!!
-        voice.properties.keys shouldBe setOf("id", "status", "url", "durationMs", "sensitive")
+        voice.properties.keys shouldBe setOf("id", "status", "url", "durationMs", "sensitive", "urlAac")
         voice.required.toSet() shouldBe voice.properties.keys
         voice.properties["status"]!!.enum.map { it.toString() } shouldBe listOf("READY", "PROCESSING", "NOT_SHARED")
-        listOf("url", "durationMs").forEach { voice.properties[it]!!.types shouldContain "null" }
+        listOf("url", "durationMs", "urlAac").forEach { voice.properties[it]!!.types shouldContain "null" }
         voice.description.shouldNotBeNull() shouldContain "to the other member only once it has passed moderation"
+        // Issue #152, ADR-0060: the AAC copy iOS streams, by url's rule.
+        voice.description shouldContain "urlAac is the same note as AAC-LC in MP4"
+        voice.description shouldContain "given to exactly whoever is given url"
 
         val full =
             fieldsOf("EntryResponse")
