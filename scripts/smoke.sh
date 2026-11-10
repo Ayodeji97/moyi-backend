@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# Issue #149 changes the moderation section: the red (held-back) photo, refused on an entry until
+# now, is put on one in a bond of its own and answered 201 NOT_SHARED with its URL to its author,
+# still QUARANTINED with its verdict, PROCESSING with nothing of it to the partner, and READY to the
+# partner once the operator releases it. Run on 2026-11-10: see the pull request for the numbers.
+#
 # Issue #126 adds the data-export section: 401 without a token, 404 for a latest never asked for,
 # 202 PREPARING and the same export again, one 404 for someone else's id and a missing one, the job
 # (on a five-second cron) making it READY with a URL good for exactly 24 hours, the zip downloaded
@@ -178,7 +183,8 @@
 # the photo is, until D4 moderates it (the owner's ruling on FR-061; since D4, READY to the listener
 # once the local stand-in has passed it). Since Phase 4 D4 it reaches every verdict through the
 # stand-in moderators, which decide by colour: a red square QUARANTINED (its author reads it
-# QUARANTINED with its URL, it cannot be put on an entry), a magenta one PASSED and sensitive (the
+# QUARANTINED with its URL; since #149 it is put on an entry all the same, NOT_SHARED to its author
+# and PROCESSING to the partner until released), a magenta one PASSED and sensitive (the
 # partner is shown it READY, sensitive true), a blue one BLOCKED (no URL even for its author, held as
 # evidence); the operator's moyi media quarantine lists them, refuses to release the blocked one,
 # releases the red one and deletes the blue one, whose objects media.purge then removes; the audit
@@ -3300,7 +3306,24 @@ expect "moderation: a bond for the two is 201" 201 '"status":"PENDING_MEMBER"' -
 MO_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
 MO_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
 expect "moderation: …which the partner joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$MO_CODE/accept" -H "Authorization: Bearer $MO_B"
-expect "moderation: a held-back photo cannot be put on an entry: 422 on imageMediaId" 422 '"field":"imageMediaId"' -- -X POST "$API/bonds/$MO_BOND/entries" -H "Authorization: Bearer $MO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"not this one\",\"imageMediaId\":\"$MO_RED\"}"
+# #149: a photo held back before its entry is sent is attached all the same, as it would be had
+# moderation run a moment later (ADR-0051 decision 8 as amended): NOT_SHARED to its author from
+# the entry's first answer, PROCESSING to the partner. In a bond of its own, so this day's entry
+# in MO_BOND stays free for the photo and voice note below.
+verified_account "partner-h" "203.0.113.172"; MO_C="$ACCOUNT_ACCESS"
+expect "moderation: #149 - a second bond is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $MO_A" -d "$(bond_body "Held")"
+MO_HBOND="$(printf '%s' "$LAST_BODY" | jget id)"
+MO_HCODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "moderation: #149 - …which its partner joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$MO_HCODE/accept" -H "Authorization: Bearer $MO_C"
+expect "moderation: #149 - a photo held back before the entry is sent is attached: 201" 201 '"status":"NOT_SHARED"' -- -X POST "$API/bonds/$MO_HBOND/entries" -H "Authorization: Bearer $MO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"this one too\",\"imageMediaId\":\"$MO_RED\"}"
+is "moderation: #149 - …NOT_SHARED to its author, with its URL (Q10)" "$(python3 -c "import json,sys; i=json.load(sys.stdin)['image']; print(i['id'], i['status'], i['url'] is not None, i['sensitive'])" <<<"$LAST_BODY")" "$MO_RED NOT_SHARED True False"
+MO_HENTRY="$(printf '%s' "$LAST_BODY" | jget id)"
+db_is "moderation: #149 - …attached, and still held back with its verdict" "$(sql "SELECT (attached_entry_id = '$MO_HENTRY') || '|' || status || '|' || moderation_verdict FROM media_assets WHERE id='$MO_RED'")" "true|QUARANTINED|QUARANTINED"
+expect "moderation: #149 - the partner writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$MO_HBOND/entries" -H "Authorization: Bearer $MO_C" -H "Idempotency-Key: $(uuidgen)" -d '{"text":"and mine"}'
+expect "moderation: #149 - the partner reads the day" 200 '"partnerEntry"' -- "$API/bonds/$MO_HBOND/today" -H "Authorization: Bearer $MO_C"
+is "moderation: #149 - …and is shown the held-back photo PROCESSING, with nothing of it" "$(python3 -c "import json,sys; i=json.load(sys.stdin)['partnerEntry']['image']; print(i['status'], i['url'], i['width'], i['sensitive'])" <<<"$LAST_BODY")" "PROCESSING None None False"
+case "$LAST_BODY" in *NOT_SHARED*|*X-Amz*) fail "moderation: #149 - …never NOT_SHARED, no signed URL" "${LAST_BODY:0:300}";; *) pass "moderation: #149 - …never NOT_SHARED, no signed URL";; esac
+expect "moderation: #149 - its author reads it NOT_SHARED on the day too" 200 '"status":"NOT_SHARED"' -- "$API/bonds/$MO_HBOND/today" -H "Authorization: Bearer $MO_A"
 expect "moderation: an entry with the nude photo and the voice note is 201" 201 '"sensitive":true' -- -X POST "$API/bonds/$MO_BOND/entries" -H "Authorization: Bearer $MO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"for you\",\"imageMediaId\":\"$MO_NUDE\",\"voiceMediaId\":\"$MO_VOICE\"}"
 expect "moderation: the partner writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$MO_BOND/entries" -H "Authorization: Bearer $MO_B" -H "Idempotency-Key: $(uuidgen)" -d '{"text":"and mine"}'
 expect "moderation: the partner is shown the passed photo" 200 '"partnerEntry"' -- "$API/bonds/$MO_BOND/today" -H "Authorization: Bearer $MO_B"
@@ -3323,6 +3346,8 @@ if [ "$PSQL_OK" = 1 ]; then
   MO_OUT="$(quarantine release "$MO_RED" "smoke: a made-up red square, not violence" 2>&1)" \
     && pass "moderation: the operator releases the quarantined photo" || fail "moderation: release" "$MO_OUT"
   expect "moderation: …which its author now reads READY" 200 '"status":"READY"' -- "$API/media/$MO_RED" -H "Authorization: Bearer $MO_A"
+  expect "moderation: #149 - …and the partner it was on an entry for is now shown it READY" 200 '"partnerEntry"' -- "$API/bonds/$MO_HBOND/today" -H "Authorization: Bearer $MO_C"
+  is "moderation: #149 - …READY, with its URL" "$(python3 -c "import json,sys; i=json.load(sys.stdin)['partnerEntry']['image']; print(i['status'], i['url'] is not None)" <<<"$LAST_BODY")" "READY True"
   MO_KNOWN_KEY="$(sql "SELECT storage_key FROM media_assets WHERE id='$MO_KNOWN'")"
   MO_OUT="$(quarantine delete "$MO_KNOWN" "smoke: reported, ref FAKE-SMOKE-0001" 2>&1)" \
     && pass "moderation: the operator deletes the blocked asset after the report" || fail "moderation: delete" "$MO_OUT"

@@ -204,7 +204,9 @@ id (doc 09:18). `variants` (jsonb, V32) records each variant's key, size and byt
 
 **FR-044a** is `media.api.MediaAttachments.claim(owner, mediaId, kind, entryId)`: one conditional
 `UPDATE … WHERE id = ? AND owner_user_id = ? AND kind = ? AND status = 'READY' AND
-attached_entry_id IS NULL`, run in the caller's transaction (`MANDATORY`: outside one, Spring
+attached_entry_id IS NULL` (since #149, `status IN ('READY', 'QUARANTINED')`: a photo moderation held
+back before the claim is attached as one held back after it is; ADR-0051 decision 8 has the table of
+every status), run in the caller's transaction (`MANDATORY`: outside one, Spring
 refuses the call, so a claim never commits apart from its entry). Two entries racing for one photo
 are serialised on its row and the second matches nothing (`MediaAttachmentsTest`, both claims seen
 parked on a held row in `pg_locks`). Its answer is a boolean with no reason: another user's photo,

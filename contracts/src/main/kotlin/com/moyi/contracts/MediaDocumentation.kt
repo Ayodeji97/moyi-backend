@@ -48,7 +48,9 @@ private const val ENTRY_IMAGE_DESCRIPTION =
         "author once it is ready, to the other member only once it has also passed moderation; until then it is " +
         "PROCESSING to them, whatever the reason. NOT_SHARED is its author's alone: the photo is held back, for review, " +
         "from the other member, who is shown PROCESSING and never told it was removed; url, width and height are " +
-        "still given, unless it was blocked outright, when they are null. sensitive is true when the photo passed " +
+        "still given, unless it was blocked outright, when they are null. A photo held back before the entry was " +
+        "sent is attached all the same and is NOT_SHARED from the entry's first answer, exactly as one held back " +
+        "after: the outcome does not depend on when moderation ran. sensitive is true when the photo passed " +
         "moderation with adult nudity found: show it blurred, behind a tap to view; it is false otherwise, and " +
         "always false unless status is READY. The url is a signed GET, valid for at least 24 hours, ending on the " +
         "hour and the same all hour, so it may be cached by; it is a credential for the photo."
@@ -57,7 +59,8 @@ private const val ENTRY_VOICE_DESCRIPTION =
     "An entry's voice note as the caller is played it. url and durationMs are present when status is READY, " +
         "to its author once it is transcoded, to the other member only once it has passed moderation; until then it is " +
         "PROCESSING to them, whatever the reason. NOT_SHARED is its author's alone, as a photo's: held back from the " +
-        "other member for review; url and durationMs are still given unless it was blocked outright. sensitive " +
+        "other member for review, whether before or after the entry was sent; url and durationMs are still given " +
+        "unless it was blocked outright. sensitive " +
         "as a photo's. The url is a signed GET of an Ogg Opus file (mono, 24 kbit/s), " +
         "valid for at least 24 hours, ending on the hour and the same all hour, so it may be cached by; it is a " +
         "credential for the voice note. durationMs is the length of what was transcoded, at most 61.1 seconds."

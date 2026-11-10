@@ -363,7 +363,7 @@
             },
             {
               "id": "QUARANTINED",
-              "label": "QUARANTINED: held back from the partner by moderation (extreme violence, unreadable, or blocked)"
+              "label": "QUARANTINED: held back from the partner by moderation (extreme violence, unreadable, or blocked), attached to an entry or not"
             },
             {
               "id": "FAILED",

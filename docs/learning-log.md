@@ -3228,3 +3228,17 @@ Then (review of #162): three things a copy does that a reading does not. An arch
          let a build commit READY in between and leave an object nothing named:
          `DELETE … RETURNING` waits on that row instead. The race was proved by holding the build's
          UPDATE open and waiting for the delete to block on it in `pg_stat_activity`, not by a sleep.
+
+## 2026-11-10 · Fix · A photo held back before its entry is attached all the same (#149, ADR-0051 amended)
+
+Expected: a photo moderation holds back should not be attachable; the claim's `READY`-only rule
+         was the conservative one.
+Reality: moderation runs *after* `READY`, so the rule only decided whether a held-back photo
+         reached its entry by which came first, the verdict or the POST. Refusing leaked when
+         moderation had run and lost the person's entry; it protected nothing, because what keeps
+         a held-back photo from the partner is `shownTo`, not the claim. The claim now takes
+         `READY` or `QUARANTINED` and changes only the attachment. A race is tested by recording
+         the verdict before the claim in one case and after it in another, and comparing what
+         each reader is shown: no thread, no sleep.
+Also: taking `QUARANTINED` but refusing `BLOCKED` would have told the uploader, by a 422, which of
+         the two it was: the tipping-off ADR-0051's question 2 is about.

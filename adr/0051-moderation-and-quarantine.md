@@ -229,8 +229,9 @@ longer counts a held asset as "unpurged". A demotion's purge leaves a held photo
 
 **8. The rest of the lifecycle.** An unattached `QUARANTINED` asset is reaped a day after the latest
 of its creation, readiness and detachment, like a `READY` one (ADR-0050's owed question). A
-held-back asset cannot be claimed by an entry (the claim takes `READY` only, FR-044a); its owner's
-`GET /media/{id}` says `QUARANTINED`, so a client can say it will not be shared before it is sent.
+held-back asset **is** claimed by an entry, and shown there as it would be had it been held back
+after the claim (amended 2026-11-10 for #149; the table below). Its owner's `GET /media/{id}` says
+`QUARANTINED`, so a client may say before sending that it will not be shared; it need not refuse it.
 **Demotion takes only what has `PASSED`** (review of #113), not every `READY` photo. Demotion
 deletes the full variant for good; a photo not yet moderated (a backlog while moderation is `none`,
 or a vendor outage of days) and later found to be child abuse material would have lost evidence.
@@ -240,6 +241,50 @@ row, with no configuration for the job to consult, and the cost of it is only th
 wait (90 days and more) while nothing moderates, which in production means nothing is shown to a
 partner either. A quarantined photo keeps its full variant until it is released (then demoted on
 its next night) or deleted. A tier-2 photo is moderated on the display variant it still has.
+
+**What the claim does with each status** (amended 2026-11-10, #149; the lead's ruling: "one outcome:
+attach it"). As first built, the claim took `READY` only, and moderation runs after `READY`; so a
+photo held back in the seconds between `READY` and the entry's `POST` was refused (`422
+VALIDATION_FAILED`, `MEDIA_NOT_ATTACHABLE`, the entry not written), while the same photo held back a
+moment later was attached and shown `NOT_SHARED`. The outcome depended on a race, the refusal told
+the author when moderation had run, and the person lost the entry they wrote. Now
+`MediaAssetStore.claim` takes `status IN ('READY', 'QUARANTINED')`, for `POST
+/bonds/{bondId}/entries` and `PATCH /entries/{entryId}` alike, and for a voice note as for a photo
+(voice notes are moderated, decision 5: the same statement, the same `heardBy`):
+
+| The asset named | The claim | What each reader is shown |
+|---|---|---|
+| none, a v7 id, or another user's | refused, `422` `MEDIA_NOT_ATTACHABLE` | (no entry written) |
+| `PENDING_UPLOAD`, `UPLOADED`, `PROCESSING` | refused, the same `422` | (no entry written) |
+| `READY`, no verdict yet | **attached** | author `READY` with its URL; partner `PROCESSING` until it passes |
+| `READY`, `PASSED` | **attached** | `READY` to both, `sensitive` as found |
+| `QUARANTINED` (`QUARANTINED`: violence, `UNMODERATABLE`, `REPORTED`) | **attached** (#149) | author `NOT_SHARED` with its URL; partner `PROCESSING`, for ever unless released |
+| `QUARANTINED` (`BLOCKED`, evidence held) | **attached** (#149) | author `NOT_SHARED` without a URL; partner `PROCESSING`; the hold untouched |
+| `FAILED` | refused, the same `422` | (no entry written) |
+| `DELETED` (by its owner, an erasure, or the reaper) | refused, the same `422` | (no entry written) |
+| the other kind than the field names | refused, the same `422` | (no entry written) |
+| attached to an entry already | refused, the same `422` | (no entry written) |
+| any, its owner's email not verified | refused, `403` `EMAIL_NOT_VERIFIED` (ADR-0049) | (no entry written) |
+
+The refusals stay one answer for every cause, as ADR-0048 decision 4 has them. The claim changes
+only `attached_entry_id` (and, by V38's trigger, `last_entry_id`): never the status, the verdict, or
+`evidence_held`. So nothing about a held-back asset is released by attaching it; the partner's
+`PROCESSING` comes from `shownTo`/`heardBy`, as it does for one held back after the claim. Why
+`BLOCKED` too, rather than only `QUARANTINED`: a claim that took one and refused the other would
+tell the author, by a `422`, that their upload was blocked rather than held for review, which is
+the tipping-off question 2 asks about. Attached, a blocked asset sits on an entry exactly as one
+blocked after the claim does today, and the entry's erasure deletes it to its owner while its
+objects are held (decision 7). A report-held asset is not newly reachable here: reports are of a
+revealed entry, a revealed entry cannot be edited, so its photo is let go only by an erasure, which
+makes it `DELETED`.
+
+`EntryPhotoTest` ("#149 - …") makes the race deterministic: the verdict recorded before the `POST`
+in one bond and after it in another, the two compared as the author and the partner see them, for
+`QUARANTINED` and `BLOCKED`; `MediaAttachmentsTest` the same through `media.api` with moderation's
+own verdict statement, for a photo and a voice note. Mutation-tested both ways: the claim back to
+`READY` only turns the seven new tests red; widened to anything not deleted, the FR-044a refusals
+of `FAILED` and `PROCESSING` turn red. FR-044a in the product corpus (doc 03) still says `READY`:
+its purpose (ownership, one entry) is kept, its letter is now narrower than the code.
 
 **Assets made `READY` before D4** have no `MediaReady`, and would never be moderated. V36 inserts
 one for each `READY` asset with no verdict that has none (the moderation consumers subscribe from
