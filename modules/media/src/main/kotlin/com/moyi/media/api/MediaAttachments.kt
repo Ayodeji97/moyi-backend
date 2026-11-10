@@ -14,12 +14,16 @@ import java.util.UUID
 interface MediaAttachments {
     /**
      * Attaches [mediaId] to [entryId] if, and only if, it is [owner]'s, of
-     * [kind], `READY`, and attached to no entry: one conditional update, so two
-     * entries racing for one asset have one winner (spec §4 D2). `false` for
+     * [kind], processed (`READY`, or held back by moderation), and attached to
+     * no entry: one conditional update, so two entries racing for one asset
+     * have one winner (spec §4 D2). One held back is attached as it would have
+     * been had moderation run a moment later, and is shown to its owner as not
+     * shared and to anybody else as processing (#149, ADR-0051). `false` for
      * every other case, with no word about which: an id that names nothing, a
      * v7 id (media ids are v4, doc 06:14), another person's asset, one not yet
-     * ready, one of the other kind, one attached already. Telling them apart
-     * would tell a caller whether somebody else's asset exists.
+     * processed, one that failed or was deleted, one of the other kind, one
+     * attached already. Telling them apart would tell a caller whether
+     * somebody else's asset exists.
      *
      * Throws (`403 EMAIL_NOT_VERIFIED`) when [owner] has not confirmed their
      * address (ADR-0049): a fact about the caller's own account, not the asset.

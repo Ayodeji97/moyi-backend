@@ -37,8 +37,9 @@ internal class BondArchivedException :
 
 /**
  * 422: `imageMediaId` names no photo, or `voiceMediaId` no voice note, `media` will attach
- * to this entry (FR-044a, spec §4 D2 and D3): not the caller's, not `READY`, attached to
- * another entry already, of the other kind, or nothing at all. One answer for every cause,
+ * to this entry (FR-044a, spec §4 D2 and D3): not the caller's, not yet processed, failed or
+ * deleted, attached to another entry already, of the other kind, or nothing at all. One held
+ * back by moderation is not refused (#149, ADR-0051 decision 8). One answer for every cause,
  * naming the field and never the value: told apart, they would tell a caller whether
  * somebody else's photo or voice note exists. The entry is not created with the media
  * dropped; text is kept by the client and sent again.

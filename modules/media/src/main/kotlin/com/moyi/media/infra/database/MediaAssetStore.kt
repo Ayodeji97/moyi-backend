@@ -171,10 +171,17 @@ internal class MediaAssetStore(
 
     /**
      * FR-044a, in one statement (spec §4 D2): the asset is attached to
-     * [entryId] only if it is [owner]'s, of [kind], `READY`, and attached to
-     * nothing. Two entries racing for one asset are serialised on its row, and
-     * the second finds `attached_entry_id` set and matches nothing: one winner.
-     * Returns whether this call attached it.
+     * [entryId] only if it is [owner]'s, of [kind], `READY` or `QUARANTINED`,
+     * and attached to nothing. Two entries racing for one asset are serialised
+     * on its row, and the second finds `attached_entry_id` set and matches
+     * nothing: one winner. Returns whether this call attached it.
+     *
+     * **`QUARANTINED` is claimed as `READY` is** (#149, ADR-0051 decision 8 as
+     * amended): moderation runs after `READY`, so whether a held-back asset
+     * reached its entry would otherwise depend on which came first, the verdict
+     * or the entry's POST. Claimed, it is shown as one held back after it was
+     * attached ([com.moyi.media.domain.MediaAsset.shownTo]); the claim changes
+     * nothing but the attachment, so its verdict, status and evidence hold stay.
      */
     fun claim(
         owner: UUID,
@@ -184,7 +191,7 @@ internal class MediaAssetStore(
     ): Boolean =
         jdbc.update(
             "UPDATE media_assets SET attached_entry_id = ? " +
-                "WHERE id = ? AND owner_user_id = ? AND kind = ? AND status = 'READY' AND attached_entry_id IS NULL",
+                "WHERE id = ? AND owner_user_id = ? AND kind = ? AND status IN ('READY', 'QUARANTINED') AND attached_entry_id IS NULL",
             entryId,
             id,
             owner,

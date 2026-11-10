@@ -3372,3 +3372,17 @@ Wrong about: "reads both real and escaped line breaks" being enough. It was test
          between the two had been run. Now `Pem` reads all four shapes for FCM and the JWT keys
          (which read no `\n` at all, and were safe only because they were stored on one line),
          and the runbook checks the field as Kamal reads it, printing flags, never the key.
+
+## 2026-11-10 · Fix · A photo held back before its entry is attached all the same (#149, ADR-0051 amended)
+
+Expected: a photo moderation holds back should not be attachable; the claim's `READY`-only rule
+         was the conservative one.
+Reality: moderation runs *after* `READY`, so the rule only decided whether a held-back photo
+         reached its entry by which came first, the verdict or the POST. Refusing leaked when
+         moderation had run and lost the person's entry; it protected nothing, because what keeps
+         a held-back photo from the partner is `shownTo`, not the claim. The claim now takes
+         `READY` or `QUARANTINED` and changes only the attachment. A race is tested by recording
+         the verdict before the claim in one case and after it in another, and comparing what
+         each reader is shown: no thread, no sleep.
+Also: taking `QUARANTINED` but refusing `BLOCKED` would have told the uploader, by a 422, which of
+         the two it was: the tipping-off ADR-0051's question 2 is about.

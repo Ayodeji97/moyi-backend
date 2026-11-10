@@ -174,6 +174,83 @@ internal class EntryPhotoTest(
         body(getToday(bea, bondId))["myEntry"]["image"]["sensitive"].asBoolean() shouldBe true
     }
 
+    /**
+     * #149, the lead's ruling: one outcome whatever the timing. A photo that
+     * moderation held back between READY and the entry's POST is attached, and
+     * the entry is written; each reader is shown exactly what they would have
+     * been shown had moderation run a moment after the POST (ADR-0051 decision
+     * 8). Made deterministic: the verdict is recorded before the POST in one
+     * bond and after it in another, and the two are compared as each reader
+     * sees them. Held back or blocked, the same either way.
+     */
+    @Test
+    fun `#149 - a photo held back before the POST is attached, and shown exactly as one held back after it`() {
+        for (verdict in listOf("QUARANTINED", "BLOCKED")) {
+            val cara = users.verified("Cara")
+            val dee = users.verified("Dee")
+            val early = pair(cara, dee)
+            val late = pair(dee, cara)
+
+            val heldFirst = photos.ready(owner = cara)
+            moderate(heldFirst, verdict)
+            val created = submit(cara, early, """{"text":"look","imageMediaId":"$heldFirst"}""")
+            created.status shouldBe 201
+            photos.attachedTo(heldFirst) shouldBe UUID.fromString(body(created)["id"].asString())
+
+            val heldAfter = photos.ready(owner = cara)
+            submit(cara, late, """{"text":"look","imageMediaId":"$heldAfter"}""").status shouldBe 201
+            moderate(heldAfter, verdict)
+
+            // Its author: NOT_SHARED, with the photo unless it was blocked, on the POST's answer and every read after.
+            val authorEarly = shape(body(created)["image"])
+            authorEarly["status"] shouldBe "NOT_SHARED"
+            authorEarly["url"] shouldBe if (verdict == "BLOCKED") null else "signed"
+            shape(body(getToday(cara, early))["myEntry"]["image"]) shouldBe authorEarly
+            shape(body(getToday(cara, late))["myEntry"]["image"]) shouldBe authorEarly
+
+            // The partner, once the day reveals: PROCESSING with nothing of it, never NOT_SHARED, the same either way.
+            submit(dee, early, """{"text":"mine"}""").status shouldBe 201
+            submit(dee, late, """{"text":"mine"}""").status shouldBe 201
+            val partnerEarly = shape(body(getToday(dee, early))["partnerEntry"]["image"])
+            partnerEarly shouldBe mapOf("status" to "PROCESSING", "url" to null, "width" to null, "height" to null, "sensitive" to false)
+            shape(body(getToday(dee, late))["partnerEntry"]["image"]) shouldBe partnerEarly
+            getToday(dee, early).contentAsString shouldNotContain "NOT_SHARED"
+            getToday(dee, early).contentAsString shouldNotContain "X-Amz"
+        }
+    }
+
+    /** #149 on PATCH: the replacing photo, held back before the PATCH, is attached and the first let go. */
+    @Test
+    fun `#149 - PATCH with a photo held back before it is attached, not shared to its author`() {
+        val entry = body(submit(ada, bondId, """{"text":"words","imageMediaId":"${photos.ready(owner = ada)}"}"""))["id"].asString()
+        val held = photos.ready(owner = ada)
+        moderate(held, "QUARANTINED")
+
+        val changed = patch(ada, entry, """{"text":"words","imageMediaId":"$held"}""")
+
+        changed.status shouldBe 200
+        body(changed)["image"]["status"].asString() shouldBe "NOT_SHARED"
+        body(changed)["image"]["url"].asString() shouldContain "X-Amz-Signature="
+        photos.attachedTo(held) shouldBe UUID.fromString(entry)
+    }
+
+    /** What still refuses (#149's ADR table): held back changes nothing about whose a photo is, or where it is. */
+    @Test
+    fun `#149 - a held-back photo of another user's, or on another entry, is still refused`() {
+        val beas = photos.ready(owner = bea)
+        moderate(beas, "QUARANTINED")
+        submit(ada, bondId, """{"text":"not mine","imageMediaId":"$beas"}""").status shouldBe 422
+        photos.attachedTo(beas).shouldBeNull()
+
+        val cara = users.verified("Cara")
+        val second = pair(ada, cara)
+        val mine = photos.ready(owner = ada)
+        moderate(mine, "QUARANTINED")
+        val first = body(submit(ada, bondId, """{"text":"here","imageMediaId":"$mine"}"""))
+        submit(ada, second, """{"text":"and here","imageMediaId":"$mine"}""").status shouldBe 422
+        photos.attachedTo(mine) shouldBe UUID.fromString(first["id"].asString())
+    }
+
     @Test
     fun `FR-044a - another user's photo is refused on imageMediaId, and no entry is created`() {
         val beas = photos.ready(owner = bea)
@@ -188,8 +265,16 @@ internal class EntryPhotoTest(
     }
 
     @Test
-    fun `FR-044a - a v7 id, a photo not ready, and a voice note named as a photo are each refused`() {
-        for (image in listOf(V7_ID, photos.ready(owner = ada, status = "PROCESSING"), photos.ready(owner = ada, kind = "VOICE"))) {
+    fun `FR-044a - a v7 id, a photo not ready, a failed or deleted one, and a voice note named as a photo are each refused`() {
+        val refused =
+            listOf(
+                V7_ID,
+                photos.ready(owner = ada, status = "PROCESSING"),
+                photos.ready(owner = ada, status = "FAILED"),
+                photos.ready(owner = ada, status = "DELETED"),
+                photos.ready(owner = ada, kind = "VOICE"),
+            )
+        for (image in refused) {
             submit(ada, bondId, """{"text":"look","imageMediaId":"$image"}""").status shouldBe 422
         }
         jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 0
@@ -490,6 +575,30 @@ internal class EntryPhotoTest(
 
     private fun statusOf(media: UUID): String =
         checkNotNull(jdbc.queryForObject("SELECT status FROM media_assets WHERE id = ?", String::class.java, media))
+
+    /** Moderation's verdict as `media.moderate-image` records it on a READY photo with none (ADR-0051 decision 1). */
+    private fun moderate(
+        photo: UUID,
+        verdict: String,
+    ) {
+        jdbc.update(
+            "UPDATE media_assets SET status = 'QUARANTINED', moderation_verdict = ?, moderated_at = now(), " +
+                "evidence_held = (? = 'BLOCKED') WHERE id = ? AND status = 'READY' AND moderation_verdict IS NULL",
+            verdict,
+            verdict,
+            photo,
+        ) shouldBe 1
+    }
+
+    /** An image as a reader is shown it, but for its id and its URL's signature: whether there is a URL is kept. */
+    private fun shape(image: JsonNode): Map<String, Any?> =
+        mapOf(
+            "status" to image["status"].asString(),
+            "url" to if (image["url"].isNull) null else "signed",
+            "width" to image["width"].takeUnless { it.isNull }?.asInt(),
+            "height" to image["height"].takeUnless { it.isNull }?.asInt(),
+            "sensitive" to image["sensitive"].asBoolean(),
+        )
 
     private fun bearer(user: UUID) = "Bearer ${tokens.issue(user).token}"
 

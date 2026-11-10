@@ -7,13 +7,16 @@ import com.moyi.media.api.ImageViews
 import com.moyi.media.api.MediaAttachments
 import com.moyi.media.api.VoiceViewStatus
 import com.moyi.media.api.VoiceViews
+import com.moyi.media.domain.ModerationVerdict
 import com.moyi.media.infra.MediaIntegrationTest
 import com.moyi.media.infra.MediaTestApplication
+import com.moyi.media.infra.database.MediaAssetStore
 import com.moyi.media.web.HeldRow
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.maps.shouldBeEmpty
 import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -48,6 +51,7 @@ internal class MediaAttachmentsTest(
     @Autowired private val dataSource: DataSource,
 ) : MediaIntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
+    private val store = MediaAssetStore(jdbc)
     private val ada = UUID.randomUUID()
     private val bea = UUID.randomUUID()
     private val entry = UUID.randomUUID()
@@ -87,11 +91,80 @@ internal class MediaAttachmentsTest(
 
     @Test
     fun `FR-044a - a photo that is not ready, a deleted one, and a voice note are not claimed as a photo`() {
-        for (status in listOf("PENDING_UPLOAD", "UPLOADED", "PROCESSING", "FAILED", "QUARANTINED")) {
+        for (status in listOf("PENDING_UPLOAD", "UPLOADED", "PROCESSING", "FAILED")) {
             claim(ada, asset(ada, status = status)) shouldBe false
         }
         claim(ada, asset(ada, status = "DELETED")) shouldBe false
         claim(ada, asset(ada, kind = "VOICE")) shouldBe false
+    }
+
+    /**
+     * #149, the lead's ruling: one outcome whatever the timing. A photo that
+     * moderation held back in the seconds between READY and the entry's POST is
+     * attached, and shown exactly as one held back a moment after it was
+     * attached: NOT_SHARED to its owner, PROCESSING to anybody else. The race is
+     * made deterministic by running moderation's own verdict statement before
+     * the claim for one photo and after it for the other.
+     */
+    @Test
+    fun `a photo held back before it is claimed is attached, and shown exactly as one held back after`() {
+        for (verdict in listOf(ModerationVerdict.QUARANTINED, ModerationVerdict.BLOCKED)) {
+            val before = asset(ada)
+            moderate(before, verdict)
+            claim(ada, before, entryId = UUID.randomUUID()) shouldBe true
+
+            val after = asset(ada)
+            claim(ada, after, entryId = UUID.randomUUID()) shouldBe true
+            moderate(after, verdict)
+
+            val shown = images.shownTo(ada, listOf(before, after))
+            for (id in listOf(before, after)) {
+                attachedTo(id).shouldNotBeNull()
+                shown.getValue(id).status shouldBe ImageViewStatus.NOT_SHARED
+                val toBea = images.shownTo(bea, listOf(id)).getValue(id)
+                toBea.status shouldBe ImageViewStatus.PROCESSING
+                toBea.url.shouldBeNull()
+            }
+            shown.getValue(before).describe() shouldBe shown.getValue(after).describe()
+        }
+    }
+
+    /** The same for a voice note: voice notes are moderated too (FR-061; ADR-0051 decision 5). */
+    @Test
+    fun `a voice note held back before it is claimed is attached, and played exactly as one held back after`() {
+        for (verdict in listOf(ModerationVerdict.QUARANTINED, ModerationVerdict.BLOCKED)) {
+            val before = voiceNote(ada)
+            moderate(before, verdict)
+            claim(ada, before, entryId = UUID.randomUUID(), kind = AttachableKind.VOICE) shouldBe true
+
+            val after = voiceNote(ada)
+            claim(ada, after, entryId = UUID.randomUUID(), kind = AttachableKind.VOICE) shouldBe true
+            moderate(after, verdict)
+
+            val heard = voices.heardBy(ada, listOf(before, after))
+            for (id in listOf(before, after)) {
+                heard.getValue(id).status shouldBe VoiceViewStatus.NOT_SHARED
+                voices.heardBy(bea, listOf(id)).getValue(id).status shouldBe VoiceViewStatus.PROCESSING
+            }
+            heard.getValue(before).let { listOf(it.status, it.url == null, it.durationMs, it.sensitive) } shouldBe
+                heard.getValue(after).let { listOf(it.status, it.url == null, it.durationMs, it.sensitive) }
+        }
+    }
+
+    /** A held-back photo is still another user's to anybody else, and attached only once. */
+    @Test
+    fun `a held-back photo is still refused to another user, as a voice note, and when it is on another entry`() {
+        val held = asset(ada)
+        moderate(held, ModerationVerdict.QUARANTINED)
+
+        claim(bea, held) shouldBe false
+        claim(ada, held, kind = AttachableKind.VOICE) shouldBe false
+        attachedTo(held).shouldBeNull()
+
+        val first = UUID.randomUUID()
+        claim(ada, held, entryId = first) shouldBe true
+        claim(ada, held) shouldBe false
+        attachedTo(held) shouldBe first
     }
 
     @Test
@@ -238,6 +311,17 @@ internal class MediaAttachmentsTest(
         )
         return id
     }
+
+    /** Moderation's own verdict statement, as `media.moderate-image` and `-voice` run it (ADR-0051 decision 1). */
+    private fun moderate(
+        id: UUID,
+        verdict: ModerationVerdict,
+    ) {
+        transactions.execute { store.recordVerdict(id, verdict, sensitive = false, scores = "{}", at = Instant.now()) } shouldBe true
+    }
+
+    /** What a person is shown of a photo, but for its own id and the signature of its URL. */
+    private fun com.moyi.media.api.ImageView.describe(): List<Any?> = listOf(status, url == null, width, height, sensitive)
 
     private fun attachedTo(mediaId: UUID): UUID? =
         jdbc.queryForObject("SELECT attached_entry_id FROM media_assets WHERE id = ?", UUID::class.java, mediaId)
