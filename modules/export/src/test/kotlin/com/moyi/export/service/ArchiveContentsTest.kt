@@ -129,6 +129,44 @@ internal class ArchiveContentsTest(
         unzip(storage.archives.values.single()).keys shouldBe setOf("README.txt", "moyi-export.json")
     }
 
+    /**
+     * #149: a photo or voice note moderation blocked can now be attached to its author's own entry
+     * (ADR-0051 decision 8). `media` gives its author no copy of either (`ExportStorageTest`); here,
+     * what the archive makes of that answer: the entry is kept, its `image` and `voice` are null, and
+     * no file of either is in the zip.
+     */
+    @Test
+    fun `a photo and voice note the storage withholds from their author are null in the entry and absent from the zip`() {
+        written()
+        val voice = UUID.randomUUID()
+        people.days[ada to bond] =
+            listOf(
+                ExportedDay(
+                    LocalDate.parse("2026-10-05"),
+                    "REVEALED",
+                    listOf(entry(mine = true, text = WORDS, image = photo, voice = voice)),
+                ),
+            )
+        // Blocked: the objects are still in the storage, held as evidence, but nobody is given a copy.
+        storage.media[photo] = UUID.randomUUID() to "a blocked photo".toByteArray()
+        storage.media[voice] = UUID.randomUUID() to "a blocked voice note".toByteArray()
+
+        requests.request(ada)
+        jobs.prepareDue(5) shouldBe 1
+
+        val files = unzip(storage.archives.values.single())
+        files.keys shouldBe setOf("README.txt", "moyi-export.json")
+        val mine =
+            json
+                .readTree(files.getValue("moyi-export.json"))["bonds"]
+                .single()["days"]
+                .single()["entries"]
+                .single()
+        mine["text"].asString() shouldBe WORDS
+        mine["image"].isNull shouldBe true
+        mine["voice"].isNull shouldBe true
+    }
+
     @Test
     fun `an administrator-access log, once one is kept, is carried as it is`() {
         written()
@@ -224,6 +262,7 @@ internal class ArchiveContentsTest(
         favourited: Boolean = false,
         reaction: String? = null,
         image: UUID? = null,
+        voice: UUID? = null,
     ) = ExportedEntry(
         id = UUID.randomUUID(),
         mine = mine,
@@ -234,7 +273,7 @@ internal class ArchiveContentsTest(
         favourited = favourited,
         reaction = reaction,
         imageId = image,
-        voiceId = null,
+        voiceId = voice,
     )
 
     private fun bondOf() =
