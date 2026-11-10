@@ -3228,3 +3228,19 @@ Then (review of #162): three things a copy does that a reading does not. An arch
          let a build commit READY in between and leave an object nothing named:
          `DELETE … RETURNING` waits on that row instead. The race was proved by holding the build's
          UPDATE open and waiting for the delete to block on it in `pg_stat_activity`, not by a sleep.
+
+## 2026-11-10 · Feature · A voice note's waveform, measured by the server (#165, ADR-0061)
+Expected: the work was the 64 levels: RMS or peak, the scale, silence. And that clearing the
+         levels on deletion meant adding `waveform = NULL` to the statements that delete.
+Reality: there were five such statements, one of them a plpgsql function the operator runs
+         (`media_quarantine_delete`, which a report's takedown also calls), merged and not
+         editable; a CHECK alone would have made the operator's delete of a held-back note
+         fail. A BEFORE trigger clears it on every path, the CHECK stays as its backstop, and a
+         test disables the trigger in a rolled-back transaction to see the CHECK refuse. Two
+         test tools lied first: a fake ffmpeg told to fail on `*s16le*` also failed the
+         transcode, because a WAV's decoder allow-list names `pcm_s16le`; and a mutation script
+         that restored by replacing the mutant's text once restored the wrong line of
+         PlayVoices, since the mutant was a prefix of a line it did not touch.
+Wrong about: "add it to each statement" as the way to make a rule hold on every path. The
+         paths that matter most were the ones not in the Kotlin. And about restoring a
+         mutation by inverse replacement: restore the file's saved text instead.

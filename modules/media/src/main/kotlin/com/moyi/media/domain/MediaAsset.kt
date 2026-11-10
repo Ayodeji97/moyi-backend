@@ -118,6 +118,12 @@ internal class MediaAsset(
     val processingAttempts: Int = 0,
     /** A ready voice note's length in milliseconds (D3); on the asset only, never on the entry (spec D-10). */
     val durationMs: Int? = null,
+    /**
+     * A ready voice note's loudness over time (issue #165, ADR-0061); null
+     * for one processed before it was measured, or whose measuring failed.
+     * Played by the rule its URL is: [heardBy] hands it out with the key.
+     */
+    val waveform: Waveform? = null,
     /** 1 while a photo keeps its full-resolution variant, 2 once only the display variant is kept (D-16, D5). */
     val tier: Int = 1,
     /** Moderation found adult nudity (Q16): passed, and blurred until tapped. Kept whatever the verdict. */
@@ -267,10 +273,21 @@ internal class MediaAsset(
     fun heardBy(owner: Boolean): Heard {
         val key = StorageKey.forVoice(storageKey)
         return when {
-            kind != MediaKind.VOICE || durationMs == null -> Heard.Processing
-            status == MediaStatus.READY && (owner || partnersMaySeeIt) -> Heard.Ready(key, durationMs, sensitive = passedSensitive)
-            status == MediaStatus.QUARANTINED && owner -> if (isBlocked) Heard.NotShared(null, null) else Heard.NotShared(key, durationMs)
-            else -> Heard.Processing
+            kind != MediaKind.VOICE || durationMs == null -> {
+                Heard.Processing
+            }
+
+            status == MediaStatus.READY && (owner || partnersMaySeeIt) -> {
+                Heard.Ready(key, durationMs, waveform, passedSensitive)
+            }
+
+            status == MediaStatus.QUARANTINED && owner -> {
+                if (isBlocked) Heard.NotShared(null, null, null) else Heard.NotShared(key, durationMs, waveform)
+            }
+
+            else -> {
+                Heard.Processing
+            }
         }
     }
 
@@ -319,13 +336,15 @@ internal class MediaAsset(
         data class Ready(
             val key: StorageKey,
             val durationMs: Int,
+            val waveform: Waveform? = null,
             val sensitive: Boolean = false,
         ) : Heard
 
-        /** To its owner only: held back from the partner (Q10). Without the note itself when it is blocked. */
+        /** To its owner only: held back from the partner (Q10). Without the note itself, or its waveform, when it is blocked. */
         data class NotShared(
             val key: StorageKey?,
             val durationMs: Int?,
+            val waveform: Waveform? = null,
         ) : Heard
     }
 
