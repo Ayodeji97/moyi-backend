@@ -31,7 +31,7 @@ outbox (ADR-0035).
 
 **1. The request asks for the current password again** (`{"password": …}`). A session is not
 enough for the one thing that cannot be undone; an unlocked phone in someone else's hand is the
-case. Wrong is `401 INVALID_CREDENTIALS` **without** `WWW-Authenticate` (the session is fine; the
+case. Wrong is `403 INVALID_CREDENTIALS` (was `401` until the 2026-11-10 amendment below) **without** `WWW-Authenticate` (the session is fine; the
 client must not sign out on it); absent, null or blank is `422 VALIDATION_FAILED` naming
 `password`. It is verified outside every transaction, as login's is, and **a wrong one is not
 counted towards the sign-in lock** (ADR-0020's `failed_attempts`): a thief holding a session could
@@ -226,3 +226,29 @@ reports no breaking change.
 Suspension is built (decision 2's pause becomes cheap); the export (FR-009) exists (offer it before
 the request, as the block confirm does); a person reports losing an account they did not delete; or
 the `gratitude` delivery for one account approaches its sixty seconds.
+
+## Amendment 2026-11-10: a wrong password is 403, not 401 (#166)
+
+Decision 1 answered a wrong password `401 INVALID_CREDENTIALS` without `WWW-Authenticate`. On a
+signed-in route a generated client reads `401` as "the access token was refused" and its bearer
+provider refreshes and retries, spending a refresh on a typo; the app had to tell the two `401`s
+apart by the missing challenge (moyi-app PR #63), which works only while no token refusal ever
+lacks one. **A wrong password on a signed-in route is now `403 INVALID_CREDENTIALS`**, still
+without `WWW-Authenticate`: the token was accepted, and the authority this action needs (the
+password, typed again) was not shown. The code stays `INVALID_CREDENTIALS`, so a client's inline
+"that password is not right" is still keyed on the code, not the status. Ruled by the lead for the
+owner.
+
+The rule, so that the next route which re-checks a password follows it: **`401` means the bearer
+token, and carries the challenge; a password re-checked on a signed-in route is `403`; signed-out
+login keeps `401 INVALID_CREDENTIALS` without a challenge** (ADR-0020 decision 1, unchanged: there
+is no bearer token there to be confused with). On 2026-11-10 `POST /me/deletion-request` is the
+only signed-in route that checks a password; there is no change-password route (a forgotten or
+changed password goes through the signed-out reset, ADR-0022).
+
+Not `422`: nothing about the request's shape is wrong, and `422` is what a missing or blank
+password already answers, with an `errors` entry; folding a wrong password into it would make the
+client inspect `errors` to tell "you typed nothing" from "you typed the wrong thing". Not `400`, for
+the same reason. This is a **breaking change** for the generated client (a status moves), so the PR
+carries the `breaking-api-change` label. Everything else in decision 1 stands: the wrong password
+is not counted towards the sign-in lock, and it is counted by the five-an-hour limit.

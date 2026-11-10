@@ -337,7 +337,7 @@ stateDiagram-v2
 
 | Action | `NONE` | `PENDING` | `WINDOW_CLOSED` | `DELETED` |
 |---|---|---|---|---|
-| ask for your account to be deleted<br>`POST /me/deletion-request` | 202 → `PENDING` (the password is right)<br>401 `INVALID_CREDENTIALS` (the password sent is not the account's) | 202 stays (the password is right)<br>401 `INVALID_CREDENTIALS` (the password sent is not the account's) | 202 stays (the password is right)<br>401 `INVALID_CREDENTIALS` (the password sent is not the account's) | 401 `UNAUTHENTICATED` |
+| ask for your account to be deleted<br>`POST /me/deletion-request` | 202 → `PENDING` (the password is right)<br>403 `INVALID_CREDENTIALS` (the password sent is not the account's) | 202 stays (the password is right)<br>403 `INVALID_CREDENTIALS` (the password sent is not the account's) | 202 stays (the password is right)<br>403 `INVALID_CREDENTIALS` (the password sent is not the account's) | 401 `UNAUTHENTICATED` |
 | call off your account's deletion<br>`DELETE /me/deletion-request` | 404 `NOT_FOUND` | 204 → `NONE` | 404 `NOT_FOUND` | 401 `UNAUTHENTICATED` |
 | read your profile<br>`GET /me` | 200 stays | 200 stays | 200 stays | 401 `UNAUTHENTICATED` |
 
@@ -357,9 +357,9 @@ stateDiagram-v2
 
 | In | Action | When | Answer | Why | Rule | Evidence |
 |---|---|---|---|---|---|---|
-| `NONE` | ask for your account to be deleted | the password sent is not the account's | 401 `INVALID_CREDENTIALS` | The password is checked again, and this one is wrong. Nothing is recorded, and it is not counted towards the sign-in lock. No WWW-Authenticate: your session is fine, do not sign out. Five tries an hour, then 429. | FR-008, ADR-0058 | smoke |
-| `PENDING` | ask for your account to be deleted | the password sent is not the account's | 401 `INVALID_CREDENTIALS` | The password is checked before the pending request is looked at; nothing changes. | FR-008, ADR-0058 | never-run |
-| `WINDOW_CLOSED` | ask for your account to be deleted | the password sent is not the account's | 401 `INVALID_CREDENTIALS` | The password is wrong; nothing changes. | FR-008, ADR-0058 | never-run |
+| `NONE` | ask for your account to be deleted | the password sent is not the account's | 403 `INVALID_CREDENTIALS` | The password is checked again, and this one is wrong. Nothing is recorded, and it is not counted towards the sign-in lock. 403, not 401, and no WWW-Authenticate: your session is fine, do not refresh or sign out (#166). Five tries an hour, then 429. | FR-008, ADR-0058 | smoke |
+| `PENDING` | ask for your account to be deleted | the password sent is not the account's | 403 `INVALID_CREDENTIALS` | The password is checked before the pending request is looked at; nothing changes. | FR-008, ADR-0058 | never-run |
+| `WINDOW_CLOSED` | ask for your account to be deleted | the password sent is not the account's | 403 `INVALID_CREDENTIALS` | The password is wrong; nothing changes. | FR-008, ADR-0058 | never-run |
 | `DELETED` | ask for your account to be deleted |  | 401 `UNAUTHENTICATED` | The account is gone: every access token issued before it was deleted is refused, and it cannot sign in for a new one. | FR-008, ADR-0058, ADR-0019 §4 | never-run |
 | `NONE` | call off your account's deletion |  | 404 `NOT_FOUND` | Nothing to cancel. The same bytes as a window that has closed. | FR-008, ADR-0058 | smoke |
 | `WINDOW_CLOSED` | call off your account's deletion |  | 404 `NOT_FOUND` | Too late: from cancellableUntil on it cannot be cancelled. One 404 for this and for nothing pending, because you can do nothing about either. | FR-008, ADR-0058 | test |

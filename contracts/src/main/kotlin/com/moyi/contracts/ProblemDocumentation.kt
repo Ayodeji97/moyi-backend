@@ -115,6 +115,14 @@ private val STATUS_DESCRIPTIONS: Map<Pair<String, HttpStatus>, String> =
         ("login" to HttpStatus.SERVICE_UNAVAILABLE) to HASHING_BUSY,
         ("verify" to HttpStatus.SERVICE_UNAVAILABLE) to "Service Unavailable: $CODE_CHECK_DOWN",
         ("reset" to HttpStatus.SERVICE_UNAVAILABLE) to "$HASHING_BUSY The link or the code is not spent. Or $CODE_CHECK_DOWN",
+        // #166, ADR-0058 amended 2026-11-10: on a signed-in route 401 is the token's, so a wrong password is 403.
+        ("requestAccountDeletion" to HttpStatus.FORBIDDEN) to
+            "Forbidden: `INVALID_CREDENTIALS`, the password sent is not the account's. No `WWW-Authenticate`: the " +
+            "access token was accepted, so do not refresh or sign out; ask for the password again. Nothing is " +
+            "recorded, and the try is not counted towards the sign-in lock.",
+        ("requestAccountDeletion" to HttpStatus.UNAUTHORIZED) to
+            "Unauthorized: `UNAUTHENTICATED`, with a `WWW-Authenticate: Bearer` challenge: the access token was " +
+            "refused. Never a wrong password, which is 403.",
     )
 
 /** `ProblemDetail`'s trace extension member: see [traceIdSchema]. */

@@ -198,6 +198,19 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `a wrong password typed again while signed in is documented as 403, and 401 as the token's alone`() {
+        // #166: a client's bearer provider refreshes on a 401 from a signed-in route. The
+        // deletion request's wrong password is 403 INVALID_CREDENTIALS; sign-in keeps its 401.
+        val deletion = api.paths["/api/v1/me/deletion-request"]!!.post.responses
+        deletion["403"]!!.description shouldContain "INVALID_CREDENTIALS"
+        deletion["401"]!!.description shouldNotContain "INVALID_CREDENTIALS"
+        deletion["401"]!!.description shouldContain "UNAUTHENTICATED"
+        api.paths["/api/v1/auth/login"]!!
+            .post.responses["401"]!!
+            .description shouldContain "INVALID_CREDENTIALS"
+    }
+
+    @Test
     fun `the auth endpoints declare the 401, 410 and 503 they answer, with the codes each carries`() {
         // #137, and the state map's contractGaps, which listed each of these as a status the code answers and the
         // document did not declare. `scripts/state-map-check` now fails if one is undeclared again.

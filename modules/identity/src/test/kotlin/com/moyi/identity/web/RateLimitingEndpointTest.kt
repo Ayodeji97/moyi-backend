@@ -245,7 +245,7 @@ internal class RateLimitingEndpointTest(
         val userId = jdbc.queryForObject("SELECT id FROM users", UUID::class.java)!!
         val token = issuer.issue(userId).token
 
-        repeat(5) { deletionRequest(token).status shouldBe 401 }
+        repeat(5) { deletionRequest(token).status shouldBe 403 }
 
         val refused = deletionRequest(token)
         refused.status shouldBe 429

@@ -4953,7 +4953,7 @@
         "tags" : [ "deletion-request-controller" ]
       },
       "post" : {
-        "description" : "Asks for the signed-in account to be deleted (FR-008). Nothing is destroyed now: `202` answers with `requestedAt`, `cancellableUntil` (14 days later) and `deleteBy` (30 days later, FR-008's bound). Until `cancellableUntil` the person can still sign in and use the app, and `DELETE` calls it off; other sessions are not ended. From `cancellableUntil` it cannot be cancelled, and within the hour the account is deleted: the address and name are erased and the account can no longer sign in; every entry its owner wrote becomes a blank placeholder in each shared archive, so the other person's days and streak stay as they were; their bookmarks, reactions, photos and voice notes, devices and sessions are deleted, their open support messages emptied, and every bond they are still in ends as if they had left it. Asking again while one is pending is the same `202` with the same dates. The current `password` is required: wrong is `401 INVALID_CREDENTIALS` (the session is fine; do not sign out), absent or blank is `422`. A confirmed address is emailed once per request, saying when and how to cancel. Five an hour per account, wrong passwords included: the sixth is `429` with `Retry-After`.",
+        "description" : "Asks for the signed-in account to be deleted (FR-008). Nothing is destroyed now: `202` answers with `requestedAt`, `cancellableUntil` (14 days later) and `deleteBy` (30 days later, FR-008's bound). Until `cancellableUntil` the person can still sign in and use the app, and `DELETE` calls it off; other sessions are not ended. From `cancellableUntil` it cannot be cancelled, and within the hour the account is deleted: the address and name are erased and the account can no longer sign in; every entry its owner wrote becomes a blank placeholder in each shared archive, so the other person's days and streak stay as they were; their bookmarks, reactions, photos and voice notes, devices and sessions are deleted, their open support messages emptied, and every bond they are still in ends as if they had left it. Asking again while one is pending is the same `202` with the same dates. The current `password` is required: wrong is `403 INVALID_CREDENTIALS`, without `WWW-Authenticate` (the session is fine; do not refresh or sign out), absent or blank is `422`. `401` here is only ever the access token refused. A confirmed address is emailed once per request, saying when and how to cancel. Five an hour per account, wrong passwords included: the sixth is `429` with `Retry-After`.",
         "operationId" : "requestAccountDeletion",
         "requestBody" : {
           "content" : {
@@ -4994,7 +4994,7 @@
                 }
               }
             },
-            "description" : "Unauthorized"
+            "description" : "Unauthorized: `UNAUTHENTICATED`, with a `WWW-Authenticate: Bearer` challenge: the access token was refused. Never a wrong password, which is 403."
           },
           "403" : {
             "content" : {
@@ -5004,7 +5004,7 @@
                 }
               }
             },
-            "description" : "Forbidden"
+            "description" : "Forbidden: `INVALID_CREDENTIALS`, the password sent is not the account's. No `WWW-Authenticate`: the access token was accepted, so do not refresh or sign out; ask for the password again. Nothing is recorded, and the try is not counted towards the sign-in lock."
           },
           "415" : {
             "content" : {
@@ -6456,7 +6456,7 @@
         "properties" : {
           "password" : {
             "type" : "string",
-            "description" : "The account's current password, typed again. Absent, null or blank is `422`; wrong is `401`.",
+            "description" : "The account's current password, typed again. Absent, null or blank is `422`; wrong is `403`.",
             "maxLength" : 512,
             "minLength" : 1
           }
