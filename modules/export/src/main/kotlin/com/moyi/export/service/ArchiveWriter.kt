@@ -108,7 +108,9 @@ internal class ArchiveWriter(
         out.writeEndArray()
         out.writePOJOProperty(
             "supportMessages",
-            support.ticketsOf(userId).map { SupportMessageJson(it.id, it.subject, it.body, it.status, it.createdAt, it.closedAt) },
+            support.ticketsOf(userId).map {
+                SupportMessageJson(it.id, it.subject, it.body, it.reference, it.status, it.createdAt, it.closedAt)
+            },
         )
         out.writePOJOProperty("adminAccess", adminAccessOf(userId))
         out.writeEndObject()
@@ -216,7 +218,8 @@ internal class ArchiveWriter(
         |  every entry withdrawn when a bond was ended with a block or a leave, yours or your partner's, because there was one copy
         |  of those words and the withdrawal erased it for both of you. "favourited" is your own bookmark; "reaction" is the
         |  reaction on that entry, which you both see;
-        |- supportMessages: the messages you sent to Moyi's support; a closed one no longer holds its words;
+        |- supportMessages: the messages you sent to Moyi's support, each with the error reference the app sent with it, if
+        |  any; a closed one no longer holds its words or its reference;
         |- adminAccess: any access by a Moyi administrator to your account or what you wrote.
         |
         |The media folder holds each photo and voice note the archive names, in the best copy Moyi keeps: photos as WebP, with

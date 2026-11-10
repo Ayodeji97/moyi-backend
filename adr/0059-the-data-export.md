@@ -44,7 +44,8 @@ depends on the five through their `api` packages only; each of them answers for 
   discreet exit, doc 26 §2.1), and never the name the partner gave them (the partner's words).
 - `gratitude.api.ArchiveExports`: decision 3.
 - `support.api.SupportExports`: the person's tickets with whatever words they still hold (a closed one
-  is emptied, ADR-0057 decision 8); not the operator's log.
+  is emptied, ADR-0057 decision 8), and since 2026-11-10 the error `reference` sent with each (ADR-0057
+  decision 11, emptied with the words); not the operator's log.
 - `media.api.ExportStorage`: decision 6, and the archive's own object.
 
 Nothing depends on `export` but `scheduling` (the job) and `app`.
