@@ -150,6 +150,24 @@ internal class EntryReadabilityTest {
         shouldThrow<IllegalStateException> { unrevealed.erase(now).withImage(photo, now) }
     }
 
+    /** Issue #164: `null` takes a photo or a voice note off; on an entry with none it is the entry as it is. */
+    @Test
+    fun `null takes a photo or a voice note off, only while the entry may change, and on an entry with none changes nothing`() {
+        val photo = UUID.randomUUID()
+        val voice = UUID.randomUUID()
+        val withBoth = unrevealed.withImage(photo, now.plusSeconds(1)).withVoice(voice, now.plusSeconds(1))
+
+        val withNeither = withBoth.withImage(null, now.plusSeconds(2)).withVoice(null, now.plusSeconds(2))
+
+        withNeither.imageMediaId.shouldBeNull()
+        withNeither.voiceMediaId.shouldBeNull()
+        withNeither.text shouldBe withBoth.text
+        withNeither.updatedAt shouldBe now.plusSeconds(2)
+        withNeither.withImage(null, now.plusSeconds(3)).withVoice(null, now.plusSeconds(3)) shouldBe withNeither
+        shouldThrow<IllegalStateException> { revealed.withImage(null, now) }
+        shouldThrow<IllegalStateException> { revealed.withVoice(null, now) }
+    }
+
     /**
      * FR-093, as a table over the same readers: the gate's answer and one
      * thing more, whether the entry has been revealed. `FavouritesTest` holds

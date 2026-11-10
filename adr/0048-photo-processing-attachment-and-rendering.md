@@ -2,6 +2,8 @@
 
 **Status:** Accepted · **Date:** 2026-10-28 · **Deciders:** Daniel
 
+**Amended:** 2026-11-10 (decision 7: `PATCH` removes a photo or a voice note — issue #164)
+
 ## Context
 
 Phase 4 slice D2 (spec `2026-10-27-phase-4-media-and-notifications-design.md` §4 D2, §7) turns an
@@ -226,7 +228,8 @@ sent again.
   photo is ever attached to an entry revealed meanwhile. A new photo in place of another releases
   the old one (`MediaAttachments.release`): it is its owner's alone again, as an upload never
   attached is, for D5's reaper. The same photo again changes nothing. An absent `imageMediaId`
-  leaves the photo as it is; `PATCH` cannot remove one (open question, below).
+  leaves the photo as it is. *(Amended 2026-11-10: `PATCH` can now remove one, `removeImage`;
+  decision 7.)*
 - **`DELETE /media/{id}`** of an attached photo is `409 MEDIA_ATTACHED` (new code): it is the entry's
   now, and leaves with the entry. Deleting an unattached photo removes, after the commit and on a
   best-effort basis, every key it may have: its upload and both variant keys, **derived from the
@@ -265,6 +268,40 @@ SDK's presigner signs as of the moment it is called and offers no other instant,
 a URL so signed up to an hour earlier, refuses one whose time has passed, and gives the same URL for
 the same instant (`R2ObjectStoreTest`). Signing needs no network; a deployment with no storage shows
 a ready photo as `PROCESSING` rather than failing the response it is part of.
+
+**7. `PATCH` removes a photo or a voice note with a flag** *(added 2026-11-10, issue #164; the
+lead's rulings for the owner's batch of 2026-11-08)*. `PatchEntryRequest` gains `removeImage` and
+`removeVoice`, booleans that default to `false`; the voice note follows the photo here as it does
+in ADR-0049 decision 6.
+
+- **A flag, not a JSON `null` on the id.** The server reads an explicit `null` exactly as an absent
+  field, and the client generated from the contract cannot tell them apart either, so
+  "`null` means remove" would be a request no client could make on purpose. Telling them apart on
+  the server (`Optional`, as `PatchBondRequest.revealTimeLocal` does, or a raw `JsonNode`) would
+  still leave the client unable to send it. A flag is unambiguous in both.
+- **A flag with the id it would replace is `422 VALIDATION_FAILED`**, on
+  `removeImageWithoutImageMediaId` (or `removeVoiceWithoutVoiceMediaId`): "attach this" and "take
+  it off" at once is a client that misread the contract, and picking one would be the server
+  guessing. Checked at the edge, as `PatchBondRequest`'s cross-field rules are (private
+  `@AssertTrue` getters, so springdoc publishes no such field); below it the request is a
+  `MediaSlot` per medium — keep, attach, remove — which cannot hold both.
+- **A removed photo goes the one way a replaced one does.** `MediaAttachments.release`, the call a
+  replacement makes, with nothing claimed in its place: the asset is its owner's alone again,
+  `detached_at` is now, and D5's reaper deletes it a day later unless it is attached again
+  (ADR-0050). Not deleted at once, though it was the author's and never revealed: one path to the
+  reaper, not two, and an author who removes by mistake can attach the same id again within the
+  day. `EntryPhotoTest` runs the reaper over a replaced and a removed photo side by side: both kept
+  a second before the day, both deleted a second after.
+- **Removing what is not there is `200` and changes nothing** (not `updated_at` either), as
+  attaching the photo the entry already has changes nothing: the request states what the entry
+  should be, and it already is. A `404`/`409` would make a retry after a lost response an error.
+- **The same window as every edit.** Under the entry's lock, after BR-7: a revealed or erased entry
+  is `409 ENTRY_IMMUTABLE` and keeps its media; an archived bond is `409 BOND_ARCHIVED`.
+- **An entry keeps its words.** There is no rule that an entry must keep *some* content beyond
+  that: `text` is required on every submission and every `PATCH` (FR-041, `EntryText`, at least
+  one visible character), so removing both media leaves an entry its words and can never leave it
+  empty. A `PATCH` with a flag and no `text` is `422` on `text`, as any `PATCH` without it is.
+- No migration and no new error code. Additive in the contract: two optional booleans.
 
 ## Consequences
 

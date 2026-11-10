@@ -2122,7 +2122,7 @@
     "rule": "FR-027, ADR-0030 §7",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#throw TimezoneChangeTooSoonException(requireNotNull(bond.nextTimezoneChangeAt), bond.anchorTimezone)"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#bond.timezoneChangeAllowedFrom(now)?.let { throw TimezoneChangeTooSoonException(it) }"
   },
   {
     "id": "bond-active-timezone-propose",
@@ -2197,7 +2197,7 @@
     "rule": "FR-027, ADR-0030 §7",
     "evidence": "smoke",
     "evidenceRef": "a change within thirty days is 409 TIMEZONE_CHANGE_TOO_SOON",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#throw TimezoneChangeTooSoonException(requireNotNull(bond.nextTimezoneChangeAt), bond.anchorTimezone)"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#bond.timezoneChangeAllowedFrom(now)?.let { throw TimezoneChangeTooSoonException(it) }"
   },
   {
     "id": "bond-pending-deletion-timezone-propose",
@@ -5689,7 +5689,7 @@
     "rule": "FR-027, ADR-0030 §7",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#throw TimezoneChangeTooSoonException(requireNotNull(bond.nextTimezoneChangeAt), bond.anchorTimezone)"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#bond.timezoneChangeAllowedFrom(now)?.let { throw TimezoneChangeTooSoonException(it) }"
   },
   {
     "id": "proposal-proposed-timezone-propose",
@@ -5782,7 +5782,7 @@
     "rule": "FR-027, ADR-0030 §7",
     "evidence": "smoke",
     "evidenceRef": "a change within thirty days is 409 TIMEZONE_CHANGE_TOO_SOON",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#throw TimezoneChangeTooSoonException(requireNotNull(bond.nextTimezoneChangeAt), bond.anchorTimezone)"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#bond.timezoneChangeAllowedFrom(now)?.let { throw TimezoneChangeTooSoonException(it) }"
   },
   {
     "id": "proposal-cancelled-timezone-propose",
@@ -6000,7 +6000,7 @@
     "rule": "ADR-0030 §6",
     "evidence": "test",
     "evidenceRef": "BondTimezoneEndpointTest#the thirty days are re-checked at confirmation, not only at proposal",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!bond.mayChangeTimezoneAt(now)) {"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#bond.timezoneChangeAllowedFrom(now)?.let { throw TimezoneChangeTooSoonException(it) }"
   },
   {
     "id": "bond-active-timezone-confirm-too-soon",
@@ -6025,7 +6025,7 @@
     "rule": "ADR-0030 §6",
     "evidence": "test",
     "evidenceRef": "BondTimezoneEndpointTest#the thirty days are re-checked at confirmation, not only at proposal",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!bond.mayChangeTimezoneAt(now)) {"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#bond.timezoneChangeAllowedFrom(now)?.let { throw TimezoneChangeTooSoonException(it) }"
   },
   {
     "id": "bond-none-semantic-on",

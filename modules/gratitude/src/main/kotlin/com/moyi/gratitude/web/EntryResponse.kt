@@ -211,14 +211,17 @@ internal data class EntryImageResponse(
 
 /**
  * A voice note on an entry, as the caller is played it (spec §4 D3):
- * `{id, status, url?, durationMs?, sensitive}`. [url] and [durationMs] are
+ * `{id, status, url?, durationMs?, waveform?, sensitive}`. [url] and [durationMs] are
  * present when [status] is `READY`, and when it is `NOT_SHARED` (the author's
  * alone, as a photo's, D4) unless it was blocked. [sensitive] as a photo's.
  * [url] is a signed GET of an Ogg Opus file (mono,
  * 24 kbps), valid for at least 24 hours, ending on the hour and the same all
  * hour, as a photo's is; it is a bearer credential for the voice note, so it is
  * never logged and [toString] leaves it out. [durationMs] is the length of what
- * was transcoded, at most 61,000.
+ * was transcoded, at most 61,000. [waveform] is 64 levels, 0 to 255, of its
+ * loudness over equal slices of its length, measured by the server from what
+ * it kept (ADR-0061): given exactly when [url] is, and null for a note
+ * processed before the levels were measured, when the client draws its own.
  *
  * @property url keep it out of logs and analytics; fetch it again after it expires
  */
@@ -227,13 +230,15 @@ internal data class EntryVoiceResponse(
     val status: EntryVoiceStatus,
     val url: String?,
     val durationMs: Int?,
+    val waveform: List<Int>?,
     val sensitive: Boolean,
 ) {
     override fun toString(): String =
-        "EntryVoiceResponse(id=$id, status=$status, url=${url?.let { "<redacted>" }}, durationMs=$durationMs, sensitive=$sensitive)"
+        "EntryVoiceResponse(id=$id, status=$status, url=${url?.let { "<redacted>" }}, durationMs=$durationMs, " +
+            "waveform=${waveform?.let { "<${it.size} levels>" }}, sensitive=$sensitive)"
 
     companion object {
         fun from(voice: EntryVoice): EntryVoiceResponse =
-            EntryVoiceResponse(voice.id, voice.status, voice.url?.toString(), voice.durationMs, voice.sensitive)
+            EntryVoiceResponse(voice.id, voice.status, voice.url?.toString(), voice.durationMs, voice.waveform, voice.sensitive)
     }
 }

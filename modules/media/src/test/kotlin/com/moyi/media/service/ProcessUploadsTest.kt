@@ -274,12 +274,18 @@ internal class ProcessUploadsTest(
 
         val row =
             jdbc.queryForMap(
-                "SELECT status, duration_ms, processing_attempts, variants::text AS variants FROM media_assets WHERE id = ?::uuid",
+                "SELECT status, duration_ms, processing_attempts, variants::text AS variants, waveform " +
+                    "FROM media_assets WHERE id = ?::uuid",
                 mediaId,
             )
         row["status"] shouldBe "READY"
         (row["duration_ms"] as Int) shouldBeInRange 1_900..2_200
         row["processing_attempts"] shouldBe 1
+        // Issue #165, ADR-0061: its waveform, measured from the Opus kept: 64 levels, a steady tone's all loud.
+        val waveform = (row["waveform"] as ByteArray).map { it.toInt() and 0xFF }
+        waveform.size shouldBe 64
+        waveform.max() shouldBe 255
+        waveform.subList(4, 60).all { it >= 200 } shouldBe true
         // Nothing to record: the Opus is at the key derived from the upload's.
         row["variants"] shouldBe "[]"
         // The original bytes, tags and all, are not kept (spec §4 D3).

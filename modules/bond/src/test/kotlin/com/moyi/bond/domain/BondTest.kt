@@ -9,6 +9,7 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
 import java.util.Locale
 import java.util.UUID
@@ -559,33 +560,66 @@ internal class BondTest {
         val original = Locale.getDefault()
         try {
             Locale.setDefault(Locale.FRANCE)
-            val refusal = TimezoneChangeTooSoonException(Instant.parse("2026-10-28T09:00:00Z"), lagos)
+            val refusal = TimezoneChangeTooSoonException(LocalDate.parse("2026-10-29"))
 
-            // The 29th, not the 28th: see the rounding test below.
             refusal.detail shouldBe "The shared time zone can change again from 29 October 2026."
+            // The same date, typed (#142): what a client reads instead of the sentence.
+            refusal.extensions shouldBe mapOf("allowedFrom" to "2026-10-29")
         } finally {
             Locale.setDefault(original)
         }
     }
 
     @Test
-    fun `the too-soon refusal names the first date the change is allowed all day`() {
+    fun `the zone may change again from the first whole day after thirty days, and the date goes at that instant`() {
         // The second review of PR #41. Thirty days from an afternoon lands in an
         // afternoon, so naming *that* calendar date makes the sentence false for
         // most of the day it names — a client reading "28 October" and retrying
         // at 10:00 on the 28th got the identical refusal naming the identical
         // date. Rounding up is the honest direction to be wrong in: the answer
         // may arrive sooner than promised, never later.
-        val midMorning = TimezoneChangeTooSoonException(Instant.parse("2026-10-28T09:00:00Z"), lagos)
-        midMorning.detail shouldBe "The shared time zone can change again from 29 October 2026."
-        // The same date, typed (#142): what a client reads instead of the sentence.
-        midMorning.extensions shouldBe mapOf("allowedFrom" to "2026-10-29")
+        //
+        // #170: the one function both the 409's `allowedFrom` and
+        // `BondResponse.timezoneChangeAllowedFrom` read. Moved at 15:00 in
+        // Lagos (UTC+1) on 28 September, so allowed from 15:00 on 28 October.
+        val moved = create().withAnchorTimezone(lagos, Instant.parse("2026-09-28T14:00:00Z"))
+        val allowedAt = Instant.parse("2026-10-28T14:00:00Z")
 
+        moved.timezoneChangeAllowedFrom(Instant.parse("2026-09-28T14:00:00Z")) shouldBe LocalDate.parse("2026-10-29")
+        // The boundary day, before the instant: the next whole day, never the 28th.
+        moved.timezoneChangeAllowedFrom(Instant.parse("2026-10-27T23:00:00Z")) shouldBe LocalDate.parse("2026-10-29")
+        moved.timezoneChangeAllowedFrom(allowedAt.minusNanos(1_000)) shouldBe LocalDate.parse("2026-10-29")
+        moved.mayChangeTimezoneAt(allowedAt.minusNanos(1_000)) shouldBe false
+        // At the instant itself the change is allowed, and there is no date to name.
+        moved.timezoneChangeAllowedFrom(allowedAt).shouldBeNull()
+        moved.mayChangeTimezoneAt(allowedAt) shouldBe true
+        moved.timezoneChangeAllowedFrom(allowedAt.plusSeconds(86_400)).shouldBeNull()
+    }
+
+    @Test
+    fun `a change allowed from exactly midnight in the bond's zone names that day, not the next`() {
         // Exactly midnight in the bond's own zone is already a whole day, so it
         // is not pushed out by one. Africa/Lagos is UTC+1.
-        val midnightInLagos = TimezoneChangeTooSoonException(Instant.parse("2026-10-27T23:00:00Z"), lagos)
-        midnightInLagos.detail shouldBe "The shared time zone can change again from 28 October 2026."
-        midnightInLagos.extensions shouldBe mapOf("allowedFrom" to "2026-10-28")
+        val moved = create().withAnchorTimezone(lagos, Instant.parse("2026-09-27T23:00:00Z"))
+        val midnightInLagos = Instant.parse("2026-10-27T23:00:00Z")
+
+        moved.timezoneChangeAllowedFrom(midnightInLagos.minusNanos(1_000)) shouldBe LocalDate.parse("2026-10-28")
+        moved.timezoneChangeAllowedFrom(midnightInLagos).shouldBeNull()
+    }
+
+    @Test
+    fun `the date is in the bond's own zone, not the server's or UTC`() {
+        // Tokyo is UTC+9: 20:00 UTC on 27 October is 05:00 on the 28th there,
+        // so the first whole day is the 29th, where UTC would say the 28th.
+        val tokyo = RegionZone.of("Asia/Tokyo")
+        val moved = create().withAnchorTimezone(tokyo, Instant.parse("2026-09-27T20:00:00Z"))
+
+        moved.timezoneChangeAllowedFrom(Instant.parse("2026-10-01T00:00:00Z")) shouldBe LocalDate.parse("2026-10-29")
+    }
+
+    @Test
+    fun `a bond whose zone never moved may move it now, with no date`() {
+        create().timezoneChangeAllowedFrom(now).shouldBeNull()
     }
 
     private fun joiner(bond: Bond): Member = Member.member(MemberId(UUID.randomUUID()), bond.id, UserId(UUID.randomUUID()), lagos, now)

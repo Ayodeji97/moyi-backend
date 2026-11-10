@@ -10,6 +10,7 @@ import com.moyi.bond.service.MemberView
 import com.moyi.bond.service.entityTag
 import java.net.URI
 import java.time.Instant
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 
@@ -48,6 +49,13 @@ internal data class BondResponse(
     val invite: InviteResponse?,
     /** FR-027: the zone change waiting for the other member, if there is one. `states.md` §8 draws it. */
     val pendingTimezoneChange: PendingTimezoneChangeResponse?,
+    /**
+     * FR-027, #170: the first date, in [anchorTimezone], from which the zone may
+     * change again, all day; `null` when it may change now. The same date a
+     * `409 TIMEZONE_CHANGE_TOO_SOON` gives as `allowedFrom`, so `states.md` §8
+     * can name it before the person picks a city rather than after a refusal.
+     */
+    val timezoneChangeAllowedFrom: LocalDate?,
     /** FR-028: the deletion request waiting for the other member. */
     val pendingDeletionRequest: PendingDeletionRequestResponse?,
     /** FR-204: a request to turn semantic search back on, waiting for the other member. */
@@ -76,6 +84,7 @@ internal data class BondResponse(
                 me = MeResponse(view.me.id.value, view.me.role),
                 invite = view.invite?.let(InviteResponse::from),
                 pendingTimezoneChange = view.timezoneChange?.let(PendingTimezoneChangeResponse::from),
+                timezoneChangeAllowedFrom = view.timezoneChangeAllowedFrom,
                 pendingDeletionRequest = view.deletion?.let(PendingDeletionRequestResponse::from),
                 pendingSemanticSearchRequest = view.semanticSearchOn?.let(PendingSemanticSearchRequestResponse::from),
             )

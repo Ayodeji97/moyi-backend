@@ -135,6 +135,8 @@ the row lock". What changed in D2's code to share it:
 **6. FR-044a for a voice note.** `MediaAttachments.claim(owner, id, AttachableKind.VOICE, entryId)`,
 the same conditional update. `POST /entries` claims the voice note after the photo, in the entry's
 transaction; `PATCH` claims it under the entry's lock after BR-7, releasing the one it replaces.
+*(Amended 2026-11-10, issue #164: `removeVoice` takes one off, released the same way; ADR-0048
+decision 7.)*
 One refusal for every cause, `422 VALIDATION_FAILED` on `voiceMediaId`, as `imageMediaId`'s is,
 and a refused voice note rolls back a photo claimed before it. **`MEDIA_NOT_YET_SUPPORTED` leaves
 `ErrorCode`**: nothing throws it any more, and the contract's enum loses it (a breaking change for
