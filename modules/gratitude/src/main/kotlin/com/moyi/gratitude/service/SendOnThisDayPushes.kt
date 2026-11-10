@@ -106,6 +106,8 @@ internal class SendOnThisDayPushes(
                     dedupeKey = PushKeys.onThisDay(member.memberId, member.bondDate),
                     staleAfter = member.bondDayEndsAt,
                     recipient = member.recipient,
+                    // The day remembered, not today (#146): the newest of the answer, which is newest first.
+                    bondDate = memories.first().date,
                 ),
             )
         return if (asked) Outcome.REQUESTED else Outcome.ALREADY_THIS_WEEK
