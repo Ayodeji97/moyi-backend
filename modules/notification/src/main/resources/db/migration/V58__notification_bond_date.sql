@@ -1,0 +1,15 @@
+-- Issue #146 (ADR-0044, amended): the Bond-day a push is about, so that a tap
+-- opens that day. The date is the day's own calendar label in the bond's
+-- anchor zone, as `bond_days.date` holds it, resolved by the caller:
+-- `notification` is a leaf and cannot read a day (spec §2.1).
+--
+-- Kept on the row, not only in the `PushRequested` event, because a push held
+-- by quiet hours is published again from its row alone (ADR-0045), and the
+-- event carries ids only (ADR-0035).
+--
+-- Nullable, and stays so: a push about no day (a partner joining, a proposal)
+-- has none, and every row written before this migration has none either. A
+-- push with no date is sent without one; the app then opens where it did
+-- before. A date is not content: it says which day, never what was written on
+-- it (FR-084, T-14).
+ALTER TABLE notifications ADD COLUMN bond_date date;

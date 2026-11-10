@@ -30,6 +30,7 @@ import org.springframework.transaction.support.TransactionTemplate
 import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.util.UUID
@@ -136,6 +137,23 @@ internal class PushPreferencesBudgetTest(
         status(ada) shouldBe "SENT"
         row(ada)["reserved"] shouldBe true
         provider.sent.size shouldBe 1
+    }
+
+    @Test
+    fun `a held push keeps its Bond-day through the night and names it when released`() {
+        // Issue #146: the release publishes only the push's id, so the date must come back from its row.
+        clock.set(at("22:30"))
+        ask(push(ada, PushCategory.REVEAL, quietHours = night, bondDate = LocalDate.parse("2026-10-14")))
+        dispatcher.dispatchDue(clock.instant(), BUDGET)
+        status(ada) shouldBe "HELD"
+
+        clock.set(Instant.parse("2026-10-15T06:00:00Z"))
+        held.releaseDue(clock.instant(), LIMIT) shouldBe 1
+        dispatcher.dispatchDue(clock.instant(), BUDGET).delivered shouldBe 1
+
+        status(ada) shouldBe "SENT"
+        // Sent on the 15th, about the 14th: the day it was asked about, not the day it went.
+        provider.sent.single().bondDate shouldBe LocalDate.parse("2026-10-14")
     }
 
     @Test
@@ -394,7 +412,8 @@ internal class PushPreferencesBudgetTest(
         quietHours: QuietHoursWindow? = null,
         preferences: NotificationPreferences = NotificationPreferences.DEFAULTS,
         staleAfter: Instant = evening.plus(Duration.ofDays(2)),
-    ) = PushRequest(userId, bondId, category, key, staleAfter, PushRecipient(zone, quietHours, preferences))
+        bondDate: LocalDate? = null,
+    ) = PushRequest(userId, bondId, category, key, staleAfter, PushRecipient(zone, quietHours, preferences), bondDate)
 
     private fun ask(request: PushRequest) {
         transactions.execute { notifications.request(request) } shouldBe true

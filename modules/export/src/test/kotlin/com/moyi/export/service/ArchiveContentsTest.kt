@@ -77,7 +77,7 @@ internal class ArchiveContentsTest(
 
     @AfterEach
     fun clear() {
-        jdbc.execute("TRUNCATE TABLE data_exports")
+        jdbc.execute("TRUNCATE TABLE data_exports, export_archive_deletions")
         people.clear()
         storage.clear()
     }
@@ -111,6 +111,7 @@ internal class ArchiveContentsTest(
         only["days"][1]["entries"][1]["status"].asString() shouldBe "DELETED"
         only["days"][1]["entries"][1]["text"].isNull shouldBe true
         archive["supportMessages"].single()["body"].asString() shouldBe "help me"
+        archive["supportMessages"].single()["reference"].asString() shouldBe "trace-77"
         archive["adminAccess"]["logKept"].asBoolean() shouldBe false
         archive["adminAccess"]["accesses"].isEmpty shouldBe true
         output.all shouldNotContain WORDS
@@ -212,7 +213,7 @@ internal class ArchiveContentsTest(
                 )
             }
         people.tickets[ada] =
-            listOf(ExportedTicket(UUID.randomUUID(), "A question", "help me", "OPEN", ExportTestApplication.START, null))
+            listOf(ExportedTicket(UUID.randomUUID(), "A question", "help me", "trace-77", "OPEN", ExportTestApplication.START, null))
         storage.media[photo] = ada to "a photo".toByteArray()
     }
 

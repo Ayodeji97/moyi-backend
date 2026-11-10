@@ -3,6 +3,7 @@ package com.moyi.export.service
 import com.moyi.common.events.EventPublisher
 import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.events.OutboxEvent
+import com.moyi.common.events.ReceivedEvent
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
 import com.moyi.export.api.DataExportJobs
@@ -48,6 +49,8 @@ internal class ExportErasuresTest(
     @Autowired private val publisher: EventPublisher,
     @Autowired private val transactions: TransactionTemplate,
     @Autowired private val dataSource: DataSource,
+    @Autowired private val erasure: EraseDeletedAccountExports,
+    @Autowired private val withdrawal: ExpireWithdrawnExports,
 ) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
     private val ada = UUID.randomUUID()
@@ -67,7 +70,7 @@ internal class ExportErasuresTest(
 
     @AfterEach
     fun clear() {
-        jdbc.execute("TRUNCATE TABLE data_exports")
+        jdbc.execute("TRUNCATE TABLE data_exports, export_archive_deletions")
         people.clear()
         storage.clear()
         mail.sent.clear()
@@ -151,6 +154,50 @@ internal class ExportErasuresTest(
         storage.deleted shouldBe listOf(key)
         jdbc.queryForObject("SELECT count(*) FROM data_exports WHERE user_id = ?", Int::class.java, ada) shouldBe 0
     }
+
+    @Test
+    fun `a delivery whose transaction rolls back deletes no archive, so a READY export never points at nothing`() {
+        val adas = readyExportOf(ada)
+        val beas = readyExportOf(bea)
+        val keys = setOf(keyOf(adas), keyOf(beas))
+
+        transactions.executeWithoutResult { status ->
+            erasure.handle(received("AccountDeleted", mapOf("userId" to ada)))
+            withdrawal.handle(received("EntriesWithdrawn", mapOf("bondId" to bond)))
+            status.setRollbackOnly()
+        }
+
+        statusOf(adas) shouldBe "READY"
+        statusOf(beas) shouldBe "READY"
+        storage.deleted.shouldBeEmpty()
+        storage.archives.keys shouldBe keys
+        // Nor is anything left owed: the next run's sweep must not delete what the READY rows still name.
+        jobs.prepareDue(5) shouldBe 0
+        storage.archives.keys shouldBe keys
+    }
+
+    @Test
+    fun `an archive the storage could not delete when its delivery committed is deleted by the next run`() {
+        val adas = readyExportOf(ada)
+        val key = keyOf(adas)
+        storage.failingDeletes = true
+
+        withdraw()
+
+        statusOf(adas) shouldBe "EXPIRED"
+        storage.archives.keys shouldBe setOf(key)
+        storage.failingDeletes = false
+
+        jobs.prepareDue(5) shouldBe 0
+
+        storage.archives.keys.shouldBeEmpty()
+        storage.deleted shouldBe listOf(key)
+    }
+
+    private fun received(
+        type: String,
+        references: Map<String, UUID>,
+    ) = ReceivedEvent(UUID.randomUUID(), "Test", UUID.randomUUID(), type, references, clock.instant())
 
     private fun awaitBlockedOn(statement: String) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)

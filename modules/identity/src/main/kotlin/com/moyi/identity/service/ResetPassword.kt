@@ -76,13 +76,41 @@ internal class ResetPassword(
         code: VerificationCode,
         password: Password,
     ) {
-        codes.limit(email)
-        val accepted =
-            codes.checkAlone(email, VerificationPurpose.PASSWORD_RESET, code, clock.instant())
-                ?: throw PasswordResetCodeRejectedException()
+        val accepted = accept(email, code)
 
         val passwordHash = hasher.hash(password)
         if (!apply.apply(accepted.token, passwordHash, clock.instant())) throw PasswordResetCodeRejectedException()
+    }
+
+    /**
+     * Whether a typed reset code is right, before the new password is typed (#169, ADR-0022
+     * amended 2026-11-10). A check, not a grant: a right code is left exactly as it was, live
+     * and uncounted, and [reset] still needs the address, the code and the password. It is
+     * [accept] and nothing else, so a wrong check is a wrong try on the reset's own counter
+     * (the row's five) and its own daily ten, and every refusal is the reset's one answer
+     * after the same work.
+     *
+     * @throws PasswordResetCodeRejectedException no account, no code, a wrong, expired, burned or spent one
+     */
+    fun check(
+        email: Email,
+        code: VerificationCode,
+    ) {
+        accept(email, code)
+    }
+
+    /**
+     * The typed code's whole gate, shared by [check] and [reset] so the two cannot count
+     * apart: the daily limit first, then the code checked, and a wrong one counted and
+     * committed, in a transaction of its own.
+     */
+    private fun accept(
+        email: Email,
+        code: VerificationCode,
+    ): AcceptedCode {
+        codes.limit(email)
+        return codes.checkAlone(email, VerificationPurpose.PASSWORD_RESET, code, clock.instant())
+            ?: throw PasswordResetCodeRejectedException()
     }
 }
 

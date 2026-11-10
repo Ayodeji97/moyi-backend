@@ -112,6 +112,8 @@ internal class NotifyBondMembers(
                 dedupeKey = dedupeKey(member.userId),
                 staleAfter = event.occurredAt.plus(STALE_AFTER),
                 recipient = member.recipient,
+                // A partner joining and a proposal opening are about the Bond, not one of its days (#146).
+                bondDate = null,
             ),
         )
     }

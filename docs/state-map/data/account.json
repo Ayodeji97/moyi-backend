@@ -2239,7 +2239,7 @@
     "to": "ACCESS_VALID",
     "status": 201,
     "code": null,
-    "reason": "The message is a ticket a person reads: 201 with its id and when it arrived, never its words. Once it is stored an acknowledgement email is attempted once, to the account's address if that address is confirmed, with the id as a reference and without the subject or body; it is best effort, not retried if the provider fails. Five a day: the sixth is 429 with Retry-After.",
+    "reason": "The message is a ticket a person reads: 201 with its id and when it arrived, never its words. Once it is stored an acknowledgement email is attempted once, to the account's address if that address is confirmed, with the id as a reference and without the subject or body; it is best effort, not retried if the provider fails. An optional reference (the error that led here, usually its traceId) is stored with the ticket for the operator and never put in the email (ADR-0057 decision 11). Five a day: the sixth is 429 with Retry-After.",
     "rule": "ADR-0057 §2, §5",
     "evidence": "smoke",
     "evidenceRef": "a support message is 201 with its id and time",
@@ -3354,6 +3354,96 @@
     "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#if (!applied) throw PasswordResetTokenExpiredException()"
   },
   {
+    "id": "reset-none-check",
+    "region": "account.reset",
+    "from": "NONE",
+    "action": "POST /api/v1/auth/reset-password/check",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "refused",
+    "to": "NONE",
+    "status": 422,
+    "code": "PASSWORD_RESET_TOKEN_INVALID",
+    "reason": "No reset code is held for the address (no account, or none asked for). The same bytes as a wrong code for an account that holds one, and the same answer reset-password gives.",
+    "rule": "#169, ADR-0022 (amended 2026-11-10)",
+    "evidence": "smoke",
+    "evidenceRef": "reset-code check for an unknown address is 422",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#?: throw PasswordResetCodeRejectedException()"
+  },
+  {
+    "id": "reset-requested-check",
+    "region": "account.reset",
+    "from": "REQUESTED",
+    "action": "POST /api/v1/auth/reset-password/check",
+    "actor": "you",
+    "when": "the code is the one in the newest reset email: under 15 minutes old, fewer than 5 wrong codes tried, and neither it nor its link used",
+    "guards": [],
+    "outcome": "ok",
+    "to": "REQUESTED",
+    "status": 204,
+    "code": null,
+    "reason": "A check, not a grant: the code is right now, and nothing about it changes. It is not spent, its tries are not reset, and the reset still needs the address, the code and the new password. It spends one of the address's ten typed codes today, as the reset will.",
+    "rule": "#169, ADR-0022 (amended 2026-11-10)",
+    "evidence": "smoke",
+    "evidenceRef": "reset-code check with the right code is 204",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#accept(email, code)"
+  },
+  {
+    "id": "reset-requested-check-wrong",
+    "region": "account.reset",
+    "from": "REQUESTED",
+    "action": "POST /api/v1/auth/reset-password/check",
+    "actor": "you",
+    "when": "the code is wrong, older than the newest reset email's, expired (15 minutes) or burned (5 wrong tries)",
+    "guards": [],
+    "outcome": "refused",
+    "to": "REQUESTED",
+    "status": 422,
+    "code": "PASSWORD_RESET_TOKEN_INVALID",
+    "reason": "The one answer for every refused code. A wrong check is a wrong try at the reset code: checks and resets share its five, so three wrong checks and two wrong resets burn it for both. The link beside it still works.",
+    "rule": "#169, ADR-0022 (amended 2026-11-10)",
+    "evidence": "smoke",
+    "evidenceRef": "the right reset-code check after five wrong tries is refused: checks and resets share the five",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#?: throw PasswordResetCodeRejectedException()"
+  },
+  {
+    "id": "reset-used-check",
+    "region": "account.reset",
+    "from": "USED",
+    "action": "POST /api/v1/auth/reset-password/check",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "refused",
+    "to": "USED",
+    "status": 422,
+    "code": "PASSWORD_RESET_TOKEN_INVALID",
+    "reason": "The code was spent with the reset (by the code or by the link beside it). The same 422 as a wrong code, never 410.",
+    "rule": "#169, ADR-0022 (amended 2026-11-10)",
+    "evidence": "smoke",
+    "evidenceRef": "a reset-code check of the spent code is 422",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#?: throw PasswordResetCodeRejectedException()"
+  },
+  {
+    "id": "reset-expired-check",
+    "region": "account.reset",
+    "from": "EXPIRED",
+    "action": "POST /api/v1/auth/reset-password/check",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "refused",
+    "to": "EXPIRED",
+    "status": 422,
+    "code": "PASSWORD_RESET_TOKEN_INVALID",
+    "reason": "The link's hour has passed, and the code's fifteen minutes before it. The same 422 as a wrong code; ask for a new email.",
+    "rule": "#169, ADR-0022 (amended 2026-11-10)",
+    "evidence": "test",
+    "evidenceRef": "ResetCodeCheckEndpointTest#an unknown address, a wrong code, an expired code, a burned code and a spent code are one answer",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#?: throw PasswordResetCodeRejectedException()"
+  },
+  {
     "id": "reset-requested-expires",
     "region": "account.reset",
     "from": "REQUESTED",
@@ -4017,7 +4107,7 @@
     "rule": "FR-029a, BR-10a, T-20, ADR-0059 decision 12",
     "evidence": "smoke",
     "evidenceRef": "the withdrawal expires the READY export that holds the words",
-    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/ExpireWithdrawnExports.kt#exports.invalidateFor(accounts, clock.instant().truncatedTo(ChronoUnit.MICROS)).forEach(storage::deleteArchive)"
+    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/ExpireWithdrawnExports.kt#archives.deleteAfterCommit(exports.invalidateFor(accounts, clock.instant().truncatedTo(ChronoUnit.MICROS)))"
   },
   {
     "id": "export-preparing-withdrawn",
@@ -4035,7 +4125,7 @@
     "rule": "FR-029a, BR-10a, T-20, ADR-0059 decision 12",
     "evidence": "test",
     "evidenceRef": "ExportErasuresTest#a build that read the words before the withdrawal cannot make them READY, and the export is built again",
-    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/ExpireWithdrawnExports.kt#exports.invalidateFor(accounts, clock.instant().truncatedTo(ChronoUnit.MICROS)).forEach(storage::deleteArchive)"
+    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/ExpireWithdrawnExports.kt#archives.deleteAfterCommit(exports.invalidateFor(accounts, clock.instant().truncatedTo(ChronoUnit.MICROS)))"
   },
   {
     "id": "export-any-account-deleted",
@@ -4053,6 +4143,6 @@
     "rule": "FR-009, FR-094, ADR-0059",
     "evidence": "test",
     "evidenceRef": "ArchiveContentsTest#an account deletion deletes every archive of the person and every export row, and a second delivery changes nothing",
-    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/EraseDeletedAccountExports.kt#exports.deleteAllOf(userId).forEach(storage::deleteArchive)"
+    "codeRef": "modules/export/src/main/kotlin/com/moyi/export/service/EraseDeletedAccountExports.kt#archives.deleteAfterCommit(exports.deleteAllOf(userId))"
   }
 ]
