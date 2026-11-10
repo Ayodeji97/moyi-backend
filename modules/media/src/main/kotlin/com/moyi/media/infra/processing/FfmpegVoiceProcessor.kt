@@ -120,6 +120,11 @@ internal class FfmpegVoiceProcessor(
      * its channels, its bytes), never of the upload, so the upload is read and limited once. Best
      * effort: null when it cannot be made within what is left of [deadline], or is not one channel
      * of AAC as long as the Opus ([VoiceRules.isTheSameNote]). The note is kept either way.
+     *
+     * The Opus is read as the result is read back ([Reading.KEPT]), and encoded by ffmpeg's own
+     * encoder (`aac`) as AAC-LC, mono, [VoiceRules.AAC_BITS_PER_SECOND], in MP4 with `+faststart`:
+     * the `moov` index is moved before the audio, so AVPlayer can play while it downloads. No
+     * metadata and no build fingerprint, as the Opus.
      */
     private fun aacOf(
         opus: Path,
@@ -128,8 +133,16 @@ internal class FfmpegVoiceProcessor(
         deadline: Sandbox.Deadline,
     ): Transcoding.AacVariant? {
         val out = workDir.resolve(AAC_OUTPUT)
+        val arguments =
+            QUIET + listOf("-nostdin") + Reading.KEPT.arguments + listOf("-threads", "1", "-i", "file:${opus.toAbsolutePath()}") +
+                listOf("-map", "0:a:0", "-map_metadata", "-1", "-map_chapters", "-1") +
+                listOf("-fflags", "+bitexact", "-flags:a", "+bitexact") +
+                listOf("-c:a", "aac", "-profile:a", "aac_low", "-b:a", VoiceRules.AAC_BITS_PER_SECOND.toString()) +
+                listOf("-ac", VoiceRules.CHANNELS.toString(), "-threads", "1") +
+                listOf("-movflags", "+faststart", "-fs", (maxKeptBytes + 1).toString()) +
+                listOf("-f", "mp4", "file:${out.toAbsolutePath()}")
         val encoded =
-            run(listOf(ffmpeg.toString()) + aacArguments("file:${opus.toAbsolutePath()}", out), workDir, deadline) == null &&
+            run(listOf(ffmpeg.toString()) + arguments, workDir, deadline) == null &&
                 Files.isRegularFile(out) &&
                 Files.size(out) <= maxKeptBytes
         val kept = if (encoded) (probe("file:${out.toAbsolutePath()}", Reading.KEPT_AAC, workDir, deadline) as? Step.Done)?.value else null
@@ -137,24 +150,6 @@ internal class FfmpegVoiceProcessor(
             kept != null && kept.codec == AAC && kept.channels == VoiceRules.CHANNELS && VoiceRules.isTheSameNote(opusMs, kept.durationMs)
         return if (sameNote) Transcoding.AacVariant(out, Files.size(out)) else null
     }
-
-    /**
-     * The kept Opus, read as the result is read back ([Reading.KEPT]), to AAC-LC (ffmpeg's own
-     * encoder, `aac`), mono, [VoiceRules.AAC_BITS_PER_SECOND], in MP4 with `+faststart`: the
-     * `moov` index is moved before the audio, so AVPlayer can play while it downloads. No
-     * metadata and no build fingerprint, as the Opus.
-     */
-    private fun aacArguments(
-        input: String,
-        out: Path,
-    ): List<String> =
-        QUIET + listOf("-nostdin") + Reading.KEPT.arguments + listOf("-threads", "1", "-i", input) +
-            listOf("-map", "0:a:0", "-map_metadata", "-1", "-map_chapters", "-1") +
-            listOf("-fflags", "+bitexact", "-flags:a", "+bitexact") +
-            listOf("-c:a", "aac", "-profile:a", "aac_low", "-b:a", VoiceRules.AAC_BITS_PER_SECOND.toString()) +
-            listOf("-ac", VoiceRules.CHANNELS.toString(), "-threads", "1") +
-            listOf("-movflags", "+faststart", "-fs", (maxKeptBytes + 1).toString()) +
-            listOf("-f", "mp4", "file:${out.toAbsolutePath()}")
 
     private fun transcodeArguments(
         input: String,
