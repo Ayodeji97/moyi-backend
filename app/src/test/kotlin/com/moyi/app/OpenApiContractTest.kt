@@ -527,6 +527,44 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `every @Idempotent handler declares Idempotency-Key, required exactly when the annotation says so`() {
+        // #167: OpenApiConfiguration adds the header from a hand-kept list of
+        // operation ids, because springdoc cannot see `@Idempotent`. The list
+        // missed `reportMember`, and a client generated from the document sent
+        // no key and was refused 422 on every call. The controllers' own
+        // annotations are the authority; this holds the document to them.
+        val idempotent =
+            handlerMapping.handlerMethods.values
+                .mapNotNull { handler -> handler.getMethodAnnotation(Idempotent::class.java)?.let { handler.method.name to it } }
+        idempotent.shouldNotBeEmpty()
+
+        val byId = operations().associate { (_, op) -> op.operationId to op }
+        val wrong =
+            idempotent.mapNotNull { (operationId, annotation) ->
+                val key =
+                    byId[operationId]
+                        ?.parameters
+                        .orEmpty()
+                        .firstOrNull { it.name == IdempotencyInterceptor.HEADER && it.`in` == "header" }
+                when {
+                    byId[operationId] == null -> "$operationId: not in the document"
+                    key == null -> "$operationId: no ${IdempotencyInterceptor.HEADER} header"
+                    key.required != annotation.required -> "$operationId: required=${key.required}, annotation says ${annotation.required}"
+                    else -> null
+                }
+            }
+        wrong.shouldBeEmpty()
+
+        // And the reverse: no operation declares the key without the annotation behind it.
+        val annotated = idempotent.map { it.first }.toSet()
+        operations()
+            .filter { (_, op) -> op.parameters.orEmpty().any { it.name == IdempotencyInterceptor.HEADER } }
+            .map { (_, op) -> op.operationId }
+            .filterNot { it in annotated }
+            .shouldBeEmpty()
+    }
+
+    @Test
     fun `changing an entry documents an optional key, a text that is never null, and its refusals`() {
         val patch = api.paths["/api/v1/entries/{entryId}"]!!.patch
         val delete = api.paths["/api/v1/entries/{entryId}"]!!.delete

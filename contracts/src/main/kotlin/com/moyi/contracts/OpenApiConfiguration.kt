@@ -555,9 +555,11 @@ class OpenApiConfiguration {
          * Operations carrying `@Idempotent` (doc 06 §1), by id — the reason
          * [requireIdempotencyKey] exists at all: springdoc cannot read this
          * off the controller the way it reads an actual `@RequestHeader`.
+         * `OpenApiContractTest` holds this set against every `@Idempotent`
+         * handler, both ways: `reportMember` was once missing from it (#167).
          */
         private val IDEMPOTENT_OPERATIONS =
-            setOf("submitEntry", "patchEntry", "completeMediaUpload", "reportEntry", "sendSupportMessage")
+            setOf("submitEntry", "patchEntry", "completeMediaUpload", "reportEntry", "reportMember", "sendSupportMessage")
 
         /**
          * The [IDEMPOTENT_OPERATIONS] declared `@Idempotent(required = false)`:

@@ -3228,3 +3228,16 @@ Then (review of #162): three things a copy does that a reading does not. An arch
          let a build commit READY in between and leave an object nothing named:
          `DELETE … RETURNING` waits on that row instead. The race was proved by holding the build's
          UPDATE open and waiting for the delete to block on it in `pg_stat_activity`, not by a sleep.
+
+## 2026-11-10 · Fix · The member report's `Idempotency-Key`, missing from the contract (#167)
+
+Expected: a route marked `@Idempotent` shows its required header in the contract.
+Reality: springdoc cannot see `@Idempotent`, so `OpenApiConfiguration` adds the header from a
+         hand-kept list of operation ids, and ADR-0053's `reportMember` was never added to it.
+         The server demanded the key; the generated client had no way to send it, and every call
+         was `422`. The list was the second copy of a fact the annotations already hold.
+Now: `OpenApiContractTest` reads every `@Idempotent` handler from the handler mapping and holds
+         the document to it both ways: each one declares the header, `required` exactly as the
+         annotation says, and no operation declares it without the annotation. It was red on
+         `reportMember` alone; no other route had the gap. The operation also gained the `413` and
+         `Idempotency-Replayed` that every `@Idempotent` operation documents.
