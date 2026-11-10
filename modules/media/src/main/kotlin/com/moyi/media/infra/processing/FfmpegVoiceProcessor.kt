@@ -51,6 +51,11 @@ import java.time.Duration
  *   pure tone came out at 39 kbit/s; constrained, 25), with the `voip`
  *   tuning, which favours speech.
  *
+ * - **Then an AAC variant of what is kept** (ADR-0060), for iOS, which cannot
+ *   stream Ogg: read from the kept Opus, never from the upload, so no limit is
+ *   applied twice; best effort, so a variant that cannot be made never refuses
+ *   the note.
+ *
  * Every program shares one [Deadline][Sandbox.Deadline]: the note's whole
  * processing is limited, not each step.
  */
@@ -107,8 +112,49 @@ internal class FfmpegVoiceProcessor(
             }
         if (kept.codec != OPUS || kept.channels != VoiceRules.CHANNELS) return Transcoding.Refused(MediaRefusal.UNREADABLE)
         if (!VoiceRules.mayKeepTranscoded(kept.durationMs)) return Transcoding.Refused(MediaRefusal.TOO_LONG)
-        return Transcoding.Transcoded(out, kept.durationMs.toInt(), bytes)
+        return Transcoding.Transcoded(out, kept.durationMs.toInt(), bytes, aacOf(out, kept.durationMs, workDir, deadline))
     }
+
+    /**
+     * ADR-0060: the AAC variant iOS streams, made of the kept [opus] (already judged: its length,
+     * its channels, its bytes), never of the upload, so the upload is read and limited once. Best
+     * effort: null when it cannot be made within what is left of [deadline], or is not one channel
+     * of AAC as long as the Opus ([VoiceRules.isTheSameNote]). The note is kept either way.
+     */
+    private fun aacOf(
+        opus: Path,
+        opusMs: Long,
+        workDir: Path,
+        deadline: Sandbox.Deadline,
+    ): Transcoding.AacVariant? {
+        val out = workDir.resolve(AAC_OUTPUT)
+        val encoded =
+            run(listOf(ffmpeg.toString()) + aacArguments("file:${opus.toAbsolutePath()}", out), workDir, deadline) == null &&
+                Files.isRegularFile(out) &&
+                Files.size(out) <= maxKeptBytes
+        val kept = if (encoded) (probe("file:${out.toAbsolutePath()}", Reading.KEPT_AAC, workDir, deadline) as? Step.Done)?.value else null
+        val sameNote =
+            kept != null && kept.codec == AAC && kept.channels == VoiceRules.CHANNELS && VoiceRules.isTheSameNote(opusMs, kept.durationMs)
+        return if (sameNote) Transcoding.AacVariant(out, Files.size(out)) else null
+    }
+
+    /**
+     * The kept Opus, read as the result is read back ([Reading.KEPT]), to AAC-LC (ffmpeg's own
+     * encoder, `aac`), mono, [VoiceRules.AAC_BITS_PER_SECOND], in MP4 with `+faststart`: the
+     * `moov` index is moved before the audio, so AVPlayer can play while it downloads. No
+     * metadata and no build fingerprint, as the Opus.
+     */
+    private fun aacArguments(
+        input: String,
+        out: Path,
+    ): List<String> =
+        QUIET + listOf("-nostdin") + Reading.KEPT.arguments + listOf("-threads", "1", "-i", input) +
+            listOf("-map", "0:a:0", "-map_metadata", "-1", "-map_chapters", "-1") +
+            listOf("-fflags", "+bitexact", "-flags:a", "+bitexact") +
+            listOf("-c:a", "aac", "-profile:a", "aac_low", "-b:a", VoiceRules.AAC_BITS_PER_SECOND.toString()) +
+            listOf("-ac", VoiceRules.CHANNELS.toString(), "-threads", "1") +
+            listOf("-movflags", "+faststart", "-fs", (maxKeptBytes + 1).toString()) +
+            listOf("-f", "mp4", "file:${out.toAbsolutePath()}")
 
     private fun transcodeArguments(
         input: String,
@@ -207,6 +253,9 @@ internal class FfmpegVoiceProcessor(
 
         /** The result, read back: Ogg, Opus. */
         KEPT("ogg", listOf("opus")),
+
+        /** The AAC variant, read back (ADR-0060): MP4, AAC. */
+        KEPT_AAC("mov", listOf("aac")),
         ;
 
         /** Input options, before the input they apply to. */
@@ -247,10 +296,14 @@ internal class FfmpegVoiceProcessor(
         /** The kept voice note, in the work directory. */
         const val OUTPUT = "voice.ogg"
 
+        /** Its AAC variant, in the work directory (ADR-0060). */
+        const val AAC_OUTPUT = "voice.m4a"
+
         /** How far past the limit the transcode may run, so that a note longer than its container said is seen to be. */
         const val RUN_ON_MS: Long = 1_000
 
         private const val OPUS = "opus"
+        private const val AAC = "aac"
         private const val MILLIS_DIGITS = 3
 
         /** Nothing printed but errors (ffmpeg is also given `-nostdin`, which ffprobe does not take). */
