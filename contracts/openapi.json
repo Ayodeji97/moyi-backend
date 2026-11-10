@@ -2833,6 +2833,16 @@
             },
             "description" : "Not Found"
           },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Conflict"
+          },
           "413" : {
             "content" : {
               "application/problem+json" : {

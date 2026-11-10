@@ -3240,4 +3240,7 @@ Now: `OpenApiContractTest` reads every `@Idempotent` handler from the handler ma
          the document to it both ways: each one declares the header, `required` exactly as the
          annotation says, and no operation declares it without the annotation. It was red on
          `reportMember` alone; no other route had the gap. The operation also gained the `413` and
-         `Idempotency-Replayed` that every `@Idempotent` operation documents.
+         `Idempotency-Replayed` that every `@Idempotent` operation documents, and the `409`
+         (`IDEMPOTENCY_KEY_IN_FLIGHT`) is now added for every `@Idempotent` operation by rule
+         rather than by its own entry in the conflict list. The state map had already listed
+         that route's `409` and `413` as contract gaps; both are closed.

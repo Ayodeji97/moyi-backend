@@ -546,10 +546,17 @@ class OpenApiContractTest(
                         ?.parameters
                         .orEmpty()
                         .firstOrNull { it.name == IdempotencyInterceptor.HEADER && it.`in` == "header" }
+                val statuses = byId[operationId]?.responses?.keys.orEmpty()
                 when {
                     byId[operationId] == null -> "$operationId: not in the document"
+
                     key == null -> "$operationId: no ${IdempotencyInterceptor.HEADER} header"
+
                     key.required != annotation.required -> "$operationId: required=${key.required}, annotation says ${annotation.required}"
+
+                    // The interceptor's own answers: a key in flight, a body past its bound.
+                    !statuses.containsAll(listOf("409", "413", "422")) -> "$operationId: answers 409, 413 and 422, declares $statuses"
+
                     else -> null
                 }
             }

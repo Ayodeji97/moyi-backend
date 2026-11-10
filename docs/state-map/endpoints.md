@@ -1581,13 +1581,6 @@ curl -X POST "$API/bonds/$BOND/members/other/report" -H "Authorization: Bearer $
 | 413 | `MALFORMED_REQUEST` | The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is filed. | never-run |
 | 429 | `RATE_LIMITED` | reports:create:user, ten a day, shared with the entry report route: one queue, one person reading it. Refused attempts count. | test |
 
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 409 | IDEMPOTENCY_KEY_IN_FLIGHT, when a request with the same Idempotency-Key is still being processed: the shared idempotency interceptor's answer, which springdoc does not read off this route. |
-| 413 | MALFORMED_REQUEST, for a body over one mebibyte: the shared idempotency interceptor refuses it before it is read, which springdoc does not read off this route. |
-
 ## Day
 
 ### POST /bonds/{bondId}/entries
