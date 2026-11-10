@@ -68,6 +68,7 @@ import java.time.Duration
  * Every program shares one [Deadline][Sandbox.Deadline]: the note's whole
  * processing is limited, not each step.
  */
+@Suppress("TooManyFunctions") // One per ffmpeg step; the waveform (ADR-0061) and the AAC copy (ADR-0060) made the eleventh.
 internal class FfmpegVoiceProcessor(
     private val ffmpeg: Path,
     private val ffprobe: Path,

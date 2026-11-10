@@ -36,6 +36,7 @@ interface VoiceViews {
  * photo's is (doc 05:169, ADR-0048). It is a bearer credential: never logged,
  * and redacted from [toString].
  */
+@Suppress("LongParameterList") // Seven facts of one played note, each named where PlayVoices builds it.
 class VoiceView(
     val id: UUID,
     val status: VoiceViewStatus,
