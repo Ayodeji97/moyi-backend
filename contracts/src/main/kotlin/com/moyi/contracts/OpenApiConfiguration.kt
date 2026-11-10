@@ -178,6 +178,7 @@ class OpenApiConfiguration {
             documentOnThisDay(api)
             documentMilestones(api)
             documentStreak(api)
+            documentTimezoneChangeAllowedFrom(api)
             documentReports(api)
             documentRemember(api)
             documentSemanticSearch(api)

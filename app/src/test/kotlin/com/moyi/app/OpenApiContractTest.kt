@@ -198,6 +198,18 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `a bond declares the date its time zone may change again, always sent, null when it may change now`() {
+        // #170: the same date as the refusal's allowedFrom, on the resource, so the screen can name it up front.
+        val bond = api.components.schemas["BondResponse"]!!
+        val allowedFrom = bond.properties["timezoneChangeAllowedFrom"]!!
+        allowedFrom.format shouldBe "date"
+        allowedFrom.types shouldBe setOf("string", "null")
+        bond.required shouldContain "timezoneChangeAllowedFrom"
+        allowedFrom.description shouldContain "allowedFrom"
+        allowedFrom.description shouldContain "anchorTimezone"
+    }
+
+    @Test
     fun `the auth endpoints declare the 401, 410 and 503 they answer, with the codes each carries`() {
         // #137, and the state map's contractGaps, which listed each of these as a status the code answers and the
         // document did not declare. `scripts/state-map-check` now fails if one is undeclared again.
