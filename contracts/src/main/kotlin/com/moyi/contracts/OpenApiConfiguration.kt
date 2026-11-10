@@ -164,6 +164,7 @@ class OpenApiConfiguration {
                 }
             }
             documentEntryTextLimits(api)
+            documentMediaRemoval(api)
             documentEndingDefaults(api)
             documentBondNamePattern(api)
             documentDisplayName(api)
@@ -637,6 +638,24 @@ class OpenApiConfiguration {
  * name the two still agree.
  */
 private const val NOT_ONLY_SPACE_DOCUMENTED_PATTERN = "[\\s\\S]*\\S[\\s\\S]*"
+
+/**
+ * `PatchEntryRequest.removeImage` and `removeVoice` (issue #164, ADR-0048
+ * decision 7): what each does, and that absent is `false`. springdoc gives a
+ * Kotlin `Boolean = false` only its type.
+ */
+private fun documentMediaRemoval(api: OpenAPI) {
+    val properties = api.components.schemas["PatchEntryRequest"]?.properties ?: return
+    mapOf("removeImage" to ("photo" to "imageMediaId"), "removeVoice" to ("voice note" to "voiceMediaId")).forEach { (flag, what) ->
+        val (medium, id) = what
+        val property = properties[flag] ?: return@forEach
+        property.setDefault(false)
+        property.description =
+            "`true` takes the entry's $medium off; it is then attached to nothing and deleted a day later unless " +
+            "attached again, as a replaced one is. Removing a $medium the entry does not have changes nothing (`200`). " +
+            "`true` together with `$id` is `422 VALIDATION_FAILED`. Before the reveal only, as every edit."
+    }
+}
 
 /** `CreateBondRequest`'s schema name and its `name` property — see [documentBondNamePattern]. */
 private const val CREATE_BOND_REQUEST = "CreateBondRequest"

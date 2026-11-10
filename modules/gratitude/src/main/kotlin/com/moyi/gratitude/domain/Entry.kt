@@ -260,10 +260,13 @@ internal data class Entry(
     /**
      * Gives the entry [image] as its photo, before anyone else has been entitled
      * to read it (BR-7, as [edit]). Whether the photo may be attached is
-     * `media`'s rule (FR-044a), asked by the caller before this.
+     * `media`'s rule (FR-044a), asked by the caller before this. `null` takes
+     * the photo off (issue #164); what becomes of it is `media`'s, told by the
+     * caller. The photo it has already, or `null` on an entry with none, is
+     * the entry as it is, `updatedAt` and all. The words stay either way.
      */
     fun withImage(
-        image: UUID,
+        image: UUID?,
         now: Instant,
     ): Entry {
         check(isEditable) { "a revealed or erased entry is immutable" }
@@ -273,10 +276,10 @@ internal data class Entry(
     /**
      * Gives the entry [voice] as its voice note, as [withImage] gives it a
      * photo: before anyone else has been entitled to read it (BR-7), and only
-     * once `media` has let the caller claim it (FR-044a).
+     * once `media` has let the caller claim it (FR-044a); `null` takes it off.
      */
     fun withVoice(
-        voice: UUID,
+        voice: UUID?,
         now: Instant,
     ): Entry {
         check(isEditable) { "a revealed or erased entry is immutable" }

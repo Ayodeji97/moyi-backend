@@ -3313,3 +3313,17 @@ Now: `OpenApiContractTest` reads every `@Idempotent` handler from the handler ma
          (`IDEMPOTENCY_KEY_IN_FLIGHT`) is now added for every `@Idempotent` operation by rule
          rather than by its own entry in the conflict list. The state map had already listed
          that route's `409` and `413` as contract gaps; both are closed.
+
+## 2026-11-10 · Feature · PATCH takes a photo or a voice note off, with a flag (issue #164, ADR-0048 decision 7)
+
+Expected: a JSON `null` on `imageMediaId` would mean "remove", as the issue's second option says.
+Reality: the generated Kotlin client cannot send a `null` it means, any more than the server can
+         read one: both treat it as absent. So `removeImage` and `removeVoice`, and below the edge
+         a `MediaSlot` per medium (keep, attach, remove) that cannot hold "attach and remove" at
+         once. A removed asset takes the one road a replaced one does, `MediaAttachments.release`,
+         and the test runs the reaper over both side by side.
+Wrong about: where the no-op lived. The first cut checked "is there a photo?" in the service
+         before calling a new `Entry.withoutImage`, so deleting that function's own "nothing to
+         remove" guard broke no test: the guard was dead. Now removal is `withImage(null)`, whose
+         one equality check is the no-op for attach and remove alike (and kept `Entry` under
+         detekt's function limit), and that mutation goes red.

@@ -137,10 +137,18 @@
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "imageMediaId names no photo, or voiceMediaId no voice note, media will attach to this entry: not yours, not READY, of the other kind, or on another entry; one answer on the field it names. Asked under the entry's lock, after ENTRY_IMMUTABLE, the photo first; nothing changes. A new one in place of the entry's lets the old one go; an absent field leaves the entry's as it is.",
+        "reason": "imageMediaId names no photo, or voiceMediaId no voice note, media will attach to this entry: not yours, not READY, of the other kind, or on another entry; one answer on the field it names. Asked under the entry's lock, after ENTRY_IMMUTABLE, the photo first; nothing changes. A new one in place of the entry's lets the old one go; an absent field leaves the entry's as it is. removeImage or removeVoice takes the entry's off instead, letting it go the same way (ADR-0048 decision 7); removing one that is not there is 200 and changes nothing.",
         "evidence": "test",
         "evidenceRef": "EntryVoiceTest#PATCH with another user's voice note is refused on voiceMediaId, and the entry is unchanged",
         "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (!attachments.claim(userId, claimed, kind, entryId.value)) throw MediaNotAttachableException(kind)"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "removeImage is true and imageMediaId is given too, or removeVoice and voiceMediaId: take it off, or attach one in its place, not both. One answer on removeImageWithoutImageMediaId or removeVoiceWithoutVoiceMediaId; nothing changes (ADR-0048 decision 7).",
+        "evidence": "smoke",
+        "evidenceRef": "entry media: removeImage with an imageMediaId is 422 on removeImageWithoutImageMediaId",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/EntryChangesController.kt#private val removeImageWithoutImageMediaId: Boolean get() = !(removeImage && imageMediaId != null)"
       }
     ],
     "curl": "curl -X PATCH \"$API/entries/$ENTRY\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"text\": \"...\"}'"

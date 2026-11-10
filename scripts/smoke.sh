@@ -29,6 +29,16 @@
 # close, reminders, held-pushes, account-deletion and data-export crons at */5) and --attach, on a
 # fresh database: 1604 passed, 0 failed, 0 skipped.
 #
+# Issue #164 adds eleven entry-media probes in the voice section: removeImage or removeVoice with the
+# id it would replace is 422 on removeImageWithoutImageMediaId / removeVoiceWithoutVoiceMediaId and
+# changes nothing; removeImage, then removeVoice, take each off, released as a replaced one is (on no
+# entry, detached_at set, still READY); removing both again is 200; both go back on. Last run on
+# 2026-11-10, on feat/entry-media-remove, from a jar of the branch's tree on e273a41, on a fresh
+# database, against its own compose project (moyi-42e: Postgres 55650, Valkey 56650, MinIO 57650),
+# the jar booted by hand (local profile, the five crons at */5) and --attach: 1612 passed, 1 failed
+# (typed codes' Retry-After, 8639 for 8640, a one-second boundary this change does not touch),
+# 1 skipped (the tag across the erasure, the poller having won the race).
+#
 # Issue #126 adds the data-export section: 401 without a token, 404 for a latest never asked for,
 # 202 PREPARING and the same export again, one 404 for someone else's id and a missing one, the job
 # (on a five-second cron) making it READY with a URL good for exactly 24 hours, the zip downloaded
@@ -3268,6 +3278,21 @@ db_is "voice: …and its length is the asset's, not the entry's (spec D-10)" "$(
 expect "voice: the listener's locked entry says nothing of the voice note" 200 '"status":"LOCKED"' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_B"
 if printf '%s' "$LAST_BODY" | grep -q -e "$VO_NOTE" -e '"voice"' -e 'durationMs' -e 'waveform' -e 'X-Amz'; then fail "voice: …no id, no voice field, no length, no waveform, no URL" "the locked day carries something of the voice note"; else pass "voice: …no id, no voice field, no length, no waveform, no URL"; fi
 expect "voice: deleting a voice note on an entry is 409 MEDIA_ATTACHED" 409 '"code":"MEDIA_ATTACHED"' -- -X DELETE "$API/media/$VO_NOTE" -H "Authorization: Bearer $VO_A"
+# Issue #164 (ADR-0048 decision 7): PATCH takes a photo or a voice note off with a flag, and lets it
+# go as a replacement does, to the reaper of unattached media; a flag with the id it would replace is
+# 422. Then both go back on, since the reveal below needs them: a removed asset is its owner's again.
+VO_ENTRY_ID="$(python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" <<<"$VO_ENTRY")"
+expect "entry media: removeImage with an imageMediaId is 422 on removeImageWithoutImageMediaId" 422 '"field":"removeImageWithoutImageMediaId"' -- -X PATCH "$API/entries/$VO_ENTRY_ID" -H "Authorization: Bearer $VO_A" -d "{\"text\":\"hear the rain\",\"removeImage\":true,\"imageMediaId\":\"$VO_PHOTO\"}"
+expect "entry media: removeVoice with a voiceMediaId is 422 on removeVoiceWithoutVoiceMediaId" 422 '"field":"removeVoiceWithoutVoiceMediaId"' -- -X PATCH "$API/entries/$VO_ENTRY_ID" -H "Authorization: Bearer $VO_A" -d "{\"text\":\"hear the rain\",\"removeVoice\":true,\"voiceMediaId\":\"$VO_NOTE\"}"
+db_is "entry media: …and after both refusals the entry still has its photo and its voice note" "$(sql "SELECT image_media_id='$VO_PHOTO' AND voice_media_id='$VO_NOTE' FROM entries WHERE id='$VO_ENTRY_ID'")" "t"
+expect "entry media: PATCH removeImage takes the photo off" 200 '"image":null' -- -X PATCH "$API/entries/$VO_ENTRY_ID" -H "Authorization: Bearer $VO_A" -d '{"text":"hear the rain","removeImage":true}'
+is "entry media: …and leaves the voice note" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['id'])" <<<"$LAST_BODY")" "$VO_NOTE"
+db_is "entry media: …the photo is let go to the reaper, as a replaced one is: on no entry, detached now" "$(sql "SELECT attached_entry_id IS NULL AND detached_at IS NOT NULL AND status='READY' FROM media_assets WHERE id='$VO_PHOTO'")" "t"
+expect "entry media: PATCH removeVoice takes the voice note off" 200 '"voice":null' -- -X PATCH "$API/entries/$VO_ENTRY_ID" -H "Authorization: Bearer $VO_A" -d '{"text":"hear the rain","removeVoice":true}'
+db_is "entry media: …the voice note is let go the same way" "$(sql "SELECT attached_entry_id IS NULL AND detached_at IS NOT NULL AND status='READY' FROM media_assets WHERE id='$VO_NOTE'")" "t"
+expect "entry media: removing both again, when neither is there, is 200 and the words stay" 200 '"text":"hear the rain"' -- -X PATCH "$API/entries/$VO_ENTRY_ID" -H "Authorization: Bearer $VO_A" -d '{"text":"hear the rain","removeImage":true,"removeVoice":true}'
+expect "entry media: …and both go back on, the owner's again" 200 '"durationMs":' -- -X PATCH "$API/entries/$VO_ENTRY_ID" -H "Authorization: Bearer $VO_A" -d "{\"text\":\"hear the rain\",\"imageMediaId\":\"$VO_PHOTO\",\"voiceMediaId\":\"$VO_NOTE\"}"
+db_is "entry media: …attached to the entry again" "$(sql "SELECT count(*) FROM media_assets WHERE attached_entry_id='$VO_ENTRY_ID'")" "2"
 expect "voice: the listener writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_B" -H "Idempotency-Key: $(uuidgen)" -d '{"text":"and mine, in words"}'
 # The listener hears it only once it has passed moderation (FR-061, ADR-0049 decision 7); the local
 # profile's stand-in passes every voice note, and this photo, within seconds (D4, ADR-0051).

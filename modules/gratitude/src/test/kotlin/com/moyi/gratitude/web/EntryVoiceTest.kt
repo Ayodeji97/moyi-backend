@@ -271,6 +271,77 @@ internal class EntryVoiceTest(
         voices.attachedTo(first).shouldBeNull()
     }
 
+    /** Issue #164: as `removeImage` does for a photo (EntryPhotoTest has the reaper's side of it). */
+    @Test
+    fun `PATCH removeVoice takes the voice note off, lets it go as a replaced one is, and leaves the photo`() {
+        val photo = photos.ready(owner = ada)
+        val voice = voices.ready(owner = ada)
+        val entry = body(submit(ada, bondId, """{"text":"words","imageMediaId":"$photo","voiceMediaId":"$voice"}"""))["id"].asString()
+
+        val response = patch(ada, entry, """{"text":"words","removeVoice":true}""")
+
+        response.status shouldBe 200
+        body(response)["voice"].isNull shouldBe true
+        body(response)["image"]["id"].asString() shouldBe photo.toString()
+        jdbc.queryForObject("SELECT voice_media_id FROM entries WHERE id = ?::uuid", UUID::class.java, entry).shouldBeNull()
+        voices.attachedTo(voice).shouldBeNull()
+        jdbc.queryForMap("SELECT status, detached_at FROM media_assets WHERE id = ?", voice) shouldBe
+            mapOf("status" to "READY", "detached_at" to java.sql.Timestamp.from(clock.instant()))
+        photos.attachedTo(photo) shouldBe UUID.fromString(entry)
+    }
+
+    @Test
+    fun `PATCH removeImage and removeVoice together leave the entry its words alone`() {
+        val photo = photos.ready(owner = ada)
+        val voice = voices.ready(owner = ada)
+        val entry = body(submit(ada, bondId, """{"text":"words","imageMediaId":"$photo","voiceMediaId":"$voice"}"""))["id"].asString()
+
+        val response = patch(ada, entry, """{"text":"only words","removeImage":true,"removeVoice":true}""")
+
+        response.status shouldBe 200
+        body(response)["image"].isNull shouldBe true
+        body(response)["voice"].isNull shouldBe true
+        body(response)["text"].asString() shouldBe "only words"
+        photos.attachedTo(photo).shouldBeNull()
+        voices.attachedTo(voice).shouldBeNull()
+    }
+
+    @Test
+    fun `PATCH removeVoice on an entry with no voice note is a 200 that changes nothing`() {
+        val entry = body(submit(ada, bondId, """{"text":"words"}"""))["id"].asString()
+
+        val response = patch(ada, entry, """{"text":"words","removeVoice":true}""")
+
+        response.status shouldBe 200
+        body(response)["voice"].isNull shouldBe true
+    }
+
+    @Test
+    fun `PATCH removeVoice with a voiceMediaId is refused 422, and neither is done`() {
+        val kept = voices.ready(owner = ada)
+        val entry = body(submit(ada, bondId, """{"text":"words","voiceMediaId":"$kept"}"""))["id"].asString()
+        val named = voices.ready(owner = ada)
+
+        val refused = patch(ada, entry, """{"text":"words","removeVoice":true,"voiceMediaId":"$named"}""")
+
+        refused.status shouldBe 422
+        refused.contentAsString shouldContain "\"code\":\"VALIDATION_FAILED\""
+        refused.contentAsString shouldContain "\"field\":\"removeVoiceWithoutVoiceMediaId\""
+        voices.attachedTo(kept) shouldBe UUID.fromString(entry)
+        voices.attachedTo(named).shouldBeNull()
+    }
+
+    @Test
+    fun `PATCH removeVoice of a revealed entry is immutable, and the voice note stays on it`() {
+        val voice = voices.ready(owner = ada)
+        val entry = body(submit(ada, bondId, """{"text":"words","voiceMediaId":"$voice"}"""))["id"].asString()
+        submit(bea, bondId, """{"text":"hers"}""").status shouldBe 201
+
+        patch(ada, entry, """{"text":"words","removeVoice":true}""").status shouldBe 409
+
+        voices.attachedTo(voice) shouldBe UUID.fromString(entry)
+    }
+
     @Test
     fun `PATCH of a revealed entry is immutable, and the voice note it named is not claimed`() {
         val entry = body(submit(ada, bondId, """{"text":"words"}"""))["id"].asString()
