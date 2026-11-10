@@ -4,8 +4,10 @@ import com.moyi.media.domain.MediaRefusal
 import com.moyi.media.domain.VoiceFormat
 import com.sun.net.httpserver.HttpServer
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldBeIn
 import io.kotest.matchers.ints.shouldBeInRange
 import io.kotest.matchers.longs.shouldBeLessThan
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
@@ -63,8 +65,65 @@ internal class FfmpegVoiceProcessorTest {
                 kept["streams.stream.0.sample_rate"] shouldBe "48000"
                 kept["format.format_name"] shouldBe "ogg"
                 kept.keys.none { it.startsWith("streams.stream.1.") } shouldBe true
+                // Its waveform, measured from what was kept (ADR-0061): 64 levels, the loudest 255, or a silent note's zeros.
+                val levels = transcoded.waveform.shouldNotBeNull().levels
+                levels.size shouldBe 64
+                levels.all { it in 0..255 } shouldBe true
+                levels.max() shouldBeIn listOf(0, 255)
             }
         }
+    }
+
+    /** Issue #165, ADR-0061: the levels follow the note's loudness over time, measured after the transcode. */
+    @Test
+    fun `the waveform of a note loud for its first second and quiet for its second follows it, slice by slice`() {
+        val note = TestVoices.wavOf(2.0, sampleRate = 16_000) { at -> if (at < 1.0) 20_000.0 else 2_000.0 }
+
+        val levels =
+            transcode(note, VoiceFormat.WAV)
+                .shouldBeInstanceOf<Transcoding.Transcoded>()
+                .waveform
+                .shouldNotBeNull()
+                .levels
+
+        withClue(levels) {
+            // Away from the step (and from the encoder's onset), the loud half is near 255 and the quiet half near a tenth of it.
+            levels.subList(4, 28).all { it >= 230 } shouldBe true
+            levels.subList(36, 60).all { it in 10..45 } shouldBe true
+            levels.max() shouldBe 255
+        }
+    }
+
+    @Test
+    fun `a silent note's waveform is all zeros`() {
+        val levels =
+            transcode(TestVoices.wavOf(2.0) { 0.0 }, VoiceFormat.WAV)
+                .shouldBeInstanceOf<Transcoding.Transcoded>()
+                .waveform
+                .shouldNotBeNull()
+                .levels
+
+        levels shouldBe List(64) { 0 }
+    }
+
+    /** ADR-0061: the drawing is not worth the note. A measurement that fails keeps the note, without its waveform. */
+    @Test
+    fun `a waveform that cannot be measured leaves the note kept, without one`() {
+        val real = Ffmpegs.binDir
+        val fakes =
+            Ffmpegs.fake(
+                dir.resolve("bin"),
+                ffprobe = "exec \"${real.resolve("ffprobe")}\" \"$@\"",
+                ffmpeg = "case \"$*\" in *\"-f s16le\"*) exit 1;; esac; exec \"${real.resolve("ffmpeg")}\" \"$@\"",
+            )
+        val failing = FfmpegVoiceProcessor(fakes.resolve("ffmpeg"), fakes.resolve("ffprobe"), Ffmpegs.sandbox, Duration.ofSeconds(30))
+        work = Files.createTempDirectory(dir, "work-")
+
+        val outcome = failing.transcode(Files.write(work.resolve("upload"), TestVoices.wav(2.0)), VoiceFormat.WAV, work)
+
+        val transcoded = outcome.shouldBeInstanceOf<Transcoding.Transcoded>()
+        transcoded.waveform shouldBe null
+        transcoded.durationMs shouldBeInRange 1_900..2_200
     }
 
     /** Owner's ruling Q4: 24 kbps. A ten-second note is long enough for the average to mean something. */

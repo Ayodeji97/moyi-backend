@@ -14,7 +14,10 @@ import org.springframework.jdbc.core.JdbcTemplate
 import java.util.UUID
 import javax.sql.DataSource
 
-/** support's share of a data export (ADR-0059): the person's own tickets, an emptied one without words, nobody else's. */
+/**
+ * support's share of a data export (ADR-0059): the person's own tickets, an emptied one without words,
+ * the reference while the ticket keeps it, nobody else's.
+ */
 @SpringBootTest(classes = [SupportTestApplication::class])
 internal class SupportExportsTest(
     @Autowired private val exports: SupportExports,
@@ -38,7 +41,9 @@ internal class SupportExportsTest(
 
         tickets.map { it.subject to it.status } shouldBe listOf(null to "CLOSED", "Second" to "OPEN")
         tickets.last().body shouldBe "Ada's second words"
+        tickets.map { it.reference } shouldBe listOf(null, "ada-trace-2")
         tickets.toString() shouldNotContain "words"
+        tickets.toString() shouldNotContain "ada-trace"
         exports.ticketsOf(UUID.randomUUID()).shouldBeEmpty()
     }
 
@@ -50,12 +55,13 @@ internal class SupportExportsTest(
         open: Boolean,
     ) {
         jdbc.update(
-            "INSERT INTO support_tickets (id, user_id, subject, body, status, created_at, closed_at) " +
-                "VALUES (?, ?, ?, ?, ?, ?::timestamptz, ?::timestamptz)",
+            "INSERT INTO support_tickets (id, user_id, subject, body, reference, status, created_at, closed_at) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?::timestamptz, ?::timestamptz)",
             UUID.randomUUID(),
             user,
             subject.takeIf { open },
             body.takeIf { open },
+            "ada-trace-2".takeIf { open && subject == "Second" },
             if (open) "OPEN" else "CLOSED",
             at,
             if (open) null else at,

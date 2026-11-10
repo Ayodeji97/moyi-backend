@@ -6011,7 +6011,7 @@
     },
     "/api/v1/support/messages" : {
       "post" : {
-        "description" : "Writes to Moyi's support, as the signed-in account: the message becomes a ticket a person reads, and `201` answers with its id and when it arrived. Once it is stored, an acknowledgement email is attempted once, to the account's address if that address has been confirmed; it gives the id as a reference and never repeats the subject or the body. It is best effort and not promised: it is not retried if the email provider fails. A signed-out person cannot use this route. An `Idempotency-Key` is optional: repeating the request with the same key is the same ticket, `201` again with `Idempotency-Replayed: true`, filed once and acknowledged at most once; without a key, each request is a new ticket. A replay spends one of the five a day as well, so a retry can be `429`: wait for `Retry-After`, then the same key returns the same ticket. A `subject` or `body` that is absent, null, blank or too long is `422` naming the field. Five messages a day per account, refused ones and replays included: the sixth is `429` with `Retry-After`.",
+        "description" : "Writes to Moyi's support, as the signed-in account: the message becomes a ticket a person reads, and `201` answers with its id and when it arrived. Once it is stored, an acknowledgement email is attempted once, to the account's address if that address has been confirmed; it gives the id as a reference and never repeats the subject or the body. It is best effort and not promised: it is not retried if the email provider fails. A signed-out person cannot use this route. An `Idempotency-Key` is optional: repeating the request with the same key is the same ticket, `201` again with `Idempotency-Replayed: true`, filed once and acknowledged at most once; without a key, each request is a new ticket. A replay spends one of the five a day as well, so a retry can be `429`: wait for `Retry-After`, then the same key returns the same ticket. A `subject` or `body` that is absent, null, blank or too long is `422` naming the field; so is a `reference` that is empty, too long or not visible ASCII. Five messages a day per account, refused ones and replays included: the sixth is `429` with `Retry-After`.",
         "operationId" : "sendSupportMessage",
         "parameters" : [ {
           "description" : "A client-chosen key, unique per retried request (doc 06 §1). A replay of the same key with the same request returns the first attempt's status and the same resource, re-read and rendered from its current state — never a stored copy. A replay is authorised as a read of the result: a caller who may still read it gets it back even if a new write would now be refused, a caller who may no longer read it gets the read's refusal, and a resource erased since is returned as its tombstone. Only a success is recorded; a request that was refused may be corrected and retried under the same key. The same key with a different method, path or body is 422; the same key while the first attempt is still in flight is 409. The key itself is 1 to 255 visible ASCII characters (a UUID is the usual choice); a malformed one is 422 VALIDATION_FAILED with an `errors` entry naming this header, and so is a missing one wherever this parameter is marked required. Where it is optional, leaving it out makes an ordinary, unrecorded request.",
@@ -6678,9 +6678,21 @@
           },
           "url" : {
             "type" : [ "string", "null" ]
+          },
+          "waveform" : {
+            "type" : [ "array", "null" ],
+            "description" : "The voice note's loudness over time, to draw: 64 levels, each 0 to 255, one per equal slice of its length in order, the RMS of that slice scaled so that the loudest is 255 (all 0 for a silent note). Measured by the server from the note it keeps, never sent by a client. Given exactly when url is; null when url is, and for a note processed before levels were measured, when the client draws its own stand-in.",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32",
+              "maximum" : 255,
+              "minimum" : 0
+            },
+            "maxItems" : 64,
+            "minItems" : 64
           }
         },
-        "required" : [ "durationMs", "id", "sensitive", "status", "url" ]
+        "required" : [ "durationMs", "id", "sensitive", "status", "url", "waveform" ]
       },
       "FieldViolation" : {
         "type" : "object",
@@ -7781,6 +7793,13 @@
             "description" : "At most 5000 characters (Unicode code points), not blank, U+0000 refused. Kept exactly as sent, read by a person, never shown back and never repeated in the acknowledgement email.",
             "maxLength" : 5000,
             "minLength" : 1
+          },
+          "reference" : {
+            "type" : [ "string", "null" ],
+            "description" : "Optional: the reference of the error that led the person here, usually that error's `traceId`, when support was opened from an error; absent or null otherwise. 1 to 64 visible ASCII characters (0x21 to 0x7E: no space, nothing past ASCII), else `422` naming `reference`. Stored with the ticket and shown to the person answering it; never repeated in the acknowledgement email, and deleted with the words when the ticket is closed.",
+            "maxLength" : 64,
+            "minLength" : 1,
+            "pattern" : "^[!-~]{1,64}$"
           },
           "subject" : {
             "type" : "string",
