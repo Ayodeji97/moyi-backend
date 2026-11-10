@@ -315,6 +315,29 @@ internal class FcmPushSenderTest {
     }
 
     @Test
+    fun `the key reads the same however the vault and Kamal's env file wrote its line breaks`() {
+        // 2026-11-10: the vault held Google's `\n`; Kamal's env file doubled the
+        // backslash, the container read `\\n`, and the API would not start.
+        listOf(
+            PRIVATE_KEY_PEM,
+            PRIVATE_KEY_PEM.replace("\n", "\\n"),
+            PRIVATE_KEY_PEM.replace("\n", "\\\\n"),
+            PRIVATE_KEY_PEM.replace("\n", ""),
+        ).forEach { pem -> FcmPushSender.create(fcm(pem = pem), builder, clock).shouldBeInstanceOf<FcmPushSender>() }
+    }
+
+    @Test
+    fun `a key that will not decode is refused without the key in any message`() {
+        val body = Base64.getEncoder().encodeToString(KEYS.private.encoded)
+        val truncated = "$PEM_HEADER\\\\n${body.take(body.length / 2)}\\\\n$PEM_FOOTER"
+        val failure = shouldThrow<IllegalStateException> { FcmPushSender.create(fcm(pem = truncated), builder, clock) }
+
+        val messages = generateSequence<Throwable>(failure) { it.cause }.mapNotNull { it.message }.toList()
+        messages.first() shouldContain "moyi.notification.push.fcm.private-key-pem"
+        messages.forEach { it shouldNotContain body.take(16) }
+    }
+
+    @Test
     fun `the properties never print the private key`() {
         fcm().toString() shouldNotContain "PRIVATE KEY"
         fcm().toString() shouldContain "privateKeyPem=<redacted>"

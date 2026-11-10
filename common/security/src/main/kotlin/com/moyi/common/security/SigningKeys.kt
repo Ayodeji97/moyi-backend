@@ -1,5 +1,6 @@
 package com.moyi.common.security
 
+import com.moyi.common.core.Pem
 import com.nimbusds.jose.jwk.RSAKey
 import org.slf4j.LoggerFactory
 import java.security.KeyFactory
@@ -55,7 +56,8 @@ class SigningKeys(
             val keyFactory = KeyFactory.getInstance("RSA")
             val privateKey =
                 try {
-                    keyFactory.generatePrivate(PKCS8EncodedKeySpec(decodePem(privatePem, "PRIVATE KEY"))) as RSAPrivateKey
+                    val der = decodePem(privatePem, "PRIVATE KEY", PRIVATE_KEY_PROPERTY)
+                    keyFactory.generatePrivate(PKCS8EncodedKeySpec(der)) as RSAPrivateKey
                 } catch (unusable: InvalidKeySpecException) {
                     throw IllegalStateException(
                         "moyi.security.jwt.private-key-pem is not a PKCS#8 RSA private key (-----BEGIN PRIVATE KEY-----). " +
@@ -65,7 +67,7 @@ class SigningKeys(
                 }
             val publicKey =
                 try {
-                    keyFactory.generatePublic(X509EncodedKeySpec(decodePem(publicPem, "PUBLIC KEY"))) as RSAPublicKey
+                    keyFactory.generatePublic(X509EncodedKeySpec(decodePem(publicPem, "PUBLIC KEY", PUBLIC_KEY_PROPERTY))) as RSAPublicKey
                 } catch (unusable: InvalidKeySpecException) {
                     throw IllegalStateException("moyi.security.jwt.public-key-pem is not an X.509 RSA public key", unusable)
                 }
@@ -103,26 +105,31 @@ class SigningKeys(
         }
 
         /**
-         * Strips the armour and decodes. Tolerates the line breaks a PEM has
-         * and the ones an environment variable may have lost; refuses a block
-         * of the wrong kind so a public key in the private-key slot is a
-         * message, not a cast failure.
+         * Strips the armour and decodes. Tolerates the line breaks a PEM has,
+         * the ones an environment variable may have lost, and the `\n` and
+         * `\\n` a vault and Kamal's env file may have written in their place
+         * ([Pem]); refuses a block of the wrong kind so a public key in the
+         * private-key slot is a message, not a cast failure. A body that is
+         * not base64 is named by its property, never quoted.
          */
         private fun decodePem(
             pem: String,
             kind: String,
+            property: String,
         ): ByteArray {
-            val header = "-----BEGIN $kind-----"
-            val footer = "-----END $kind-----"
-            check(pem.contains(header) && pem.contains(footer)) {
-                "Expected a PEM block delimited by $header / $footer"
-            }
             val body =
-                pem
-                    .substringAfter(header)
-                    .substringBefore(footer)
-                    .replace(Regex("\\s"), "")
-            return Base64.getDecoder().decode(body)
+                checkNotNull(Pem.body(pem, kind)) {
+                    "Expected a PEM block delimited by -----BEGIN $kind----- / -----END $kind-----"
+                }
+            return try {
+                Base64.getDecoder().decode(body)
+            } catch (unusable: IllegalArgumentException) {
+                // The decoder names only the offending character's code, never the key.
+                throw IllegalStateException("$property is not valid base64.", unusable)
+            }
         }
+
+        private const val PRIVATE_KEY_PROPERTY = "moyi.security.jwt.private-key-pem"
+        private const val PUBLIC_KEY_PROPERTY = "moyi.security.jwt.public-key-pem"
     }
 }

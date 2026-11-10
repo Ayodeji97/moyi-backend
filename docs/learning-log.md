@@ -3228,3 +3228,20 @@ Then (review of #162): three things a copy does that a reading does not. An arch
          let a build commit READY in between and leave an object nothing named:
          `DELETE … RETURNING` waits on that row instead. The race was proved by holding the build's
          UPDATE open and waiting for the delete to block on it in `pg_stat_activity`, not by a sleep.
+
+## 2026-11-10 · Ops · The first FCM deploy: a backslash doubled on the way in
+
+Expected: steps 3 to 5 of the FCM runbook to put the key in the container as the vault held it.
+Reality: two stops, no outage (the old container served throughout). The first attempt stopped
+         at `kamal secrets fetch`: the vault field was ` FCM_PRIVATE_KEY_PEM`, a leading space.
+         The second ran `e273a41`'s migrations, so the database went to V53 under the old app,
+         and the new API crash-looped: `private-key-pem is not valid base64`. The runbook had
+         said to paste Google's `private_key` with its `\n`; Kamal 2.12 writes its env file with
+         `String#dump`, which doubles each backslash, docker reads the file literally, and the
+         container got `\\n`. The parser turned `\n` into a newline and left a `\` in the base64.
+         The owner stored the key on one line with no `\n`, and the deploy went through.
+Wrong about: "reads both real and escaped line breaks" being enough. It was tested against the
+         JSON's spelling, not against what arrives after the vault and the env file; nothing
+         between the two had been run. Now `Pem` reads all four shapes for FCM and the JWT keys
+         (which read no `\n` at all, and were safe only because they were stored on one line),
+         and the runbook checks the field as Kamal reads it, printing flags, never the key.
