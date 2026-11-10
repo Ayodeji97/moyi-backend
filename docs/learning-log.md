@@ -3297,3 +3297,19 @@ Wrong about: the first brief said no migration, and the work stopped until V58 w
 Also: the boundary is the point. At 18:00Z a bond in Auckland is already on the next day. A
          mutant that read the reveal's date in UTC passed the Lagos test and failed only the
          Auckland one.
+
+## 2026-11-10 · Fix · The member report's `Idempotency-Key`, missing from the contract (#167)
+
+Expected: a route marked `@Idempotent` shows its required header in the contract.
+Reality: springdoc cannot see `@Idempotent`, so `OpenApiConfiguration` adds the header from a
+         hand-kept list of operation ids, and ADR-0053's `reportMember` was never added to it.
+         The server demanded the key; the generated client had no way to send it, and every call
+         was `422`. The list was the second copy of a fact the annotations already hold.
+Now: `OpenApiContractTest` reads every `@Idempotent` handler from the handler mapping and holds
+         the document to it both ways: each one declares the header, `required` exactly as the
+         annotation says, and no operation declares it without the annotation. It was red on
+         `reportMember` alone; no other route had the gap. The operation also gained the `413` and
+         `Idempotency-Replayed` that every `@Idempotent` operation documents, and the `409`
+         (`IDEMPOTENCY_KEY_IN_FLIGHT`) is now added for every `@Idempotent` operation by rule
+         rather than by its own entry in the conflict list. The state map had already listed
+         that route's `409` and `413` as contract gaps; both are closed.

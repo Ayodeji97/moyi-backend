@@ -488,5 +488,3 @@ The code answers these and `contracts/openapi.json` does not document them.
 | Endpoint | Status | What the code does |
 |---|---|---|
 | `GET /bonds/{bondId}` | 304 | Sent with an If-None-Match that equals the bond's current ETag, the answer is 304 with no body, for as long as what you would be shown has not changed. Asserted by BondSettingsEndpointTest (rotating and expiring an invite invalidate a cached bond without a row version change) and BondTimezoneEndpointTest (proposal creation cancellation and expiry invalidate the other member's cached view). |
-| `POST /bonds/{bondId}/members/other/report` | 409 | IDEMPOTENCY_KEY_IN_FLIGHT, when a request with the same Idempotency-Key is still being processed: the shared idempotency interceptor's answer, which springdoc does not read off this route. |
-| `POST /bonds/{bondId}/members/other/report` | 413 | MALFORMED_REQUEST, for a body over one mebibyte: the shared idempotency interceptor refuses it before it is read, which springdoc does not read off this route. |
