@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# Issue #152 adds, in the voice notes section, the AAC copy iOS streams (ADR-0060): the author's
+# entry carries urlAac beside url, the listener's too once passed; it downloads as audio/mp4, starts
+# with an MP4 `ftyp` box, has its `moov` index before `mdat`, is one channel of AAC-LC by ffprobe,
+# holds nothing of the upload's title, and is in no log line; the deleted fake voice note leaves no
+# voice.m4a either. Last run on 2026-11-10, on feat/voice-aac-variant, from a jar of 29a35044's tree,
+# against its own compose project (moyi-42d: Postgres 55640, Valkey 56640, MinIO 57640), the jar
+# booted by hand (local profile, the close, reminders, held-pushes, account-deletion and data-export
+# crons at */5) and --attach: on a fresh database 1611 passed, 0 failed, 0 skipped.
+#
 # Issue #126 adds the data-export section: 401 without a token, 404 for a latest never asked for,
 # 202 PREPARING and the same export again, one 404 for someone else's id and a missing one, the job
 # (on a five-second cron) making it READY with a URL good for exactly 24 hours, the zip downloaded
