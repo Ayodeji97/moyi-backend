@@ -206,6 +206,13 @@ that says so and how to switch. `LoggingPushSender` prints the category and the 
 token, and reports `Accepted("not-sent:log")` so a row it settled cannot pass for a delivery.
 `PushProperties.Fcm` redacts the private key in its `toString`.
 
+*Amended 2026-11-10 (the first FCM deploy).* The key's line breaks are read in every shape they
+reach the container: real, `\n`, `\\n` and none (`com.moyi.common.core.Pem`, shared with
+ADR-0019's keys). `\\n` is what a vault's `\n` becomes, because Kamal writes its env file with
+`String#dump`, which doubles each backslash, and docker reads that file literally. The parser
+read only `\n`, and the API would not start. The vault holds the key on one line with no `\n`
+(ops/notification/README.md step 3, which also has a check that runs before the deploy).
+
 ## Consequences
 
 **Positive.** No cycle, and the module meant to be extracted first stays the one with no inbound

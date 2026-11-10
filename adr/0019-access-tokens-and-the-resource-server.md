@@ -19,7 +19,7 @@ openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out private.pem
 openssl pkey -in private.pem -pubout -out public.pem
 ```
 
-Both files' contents go into the environment as the two properties; the parser tolerates the line breaks an environment variable loses, and refuses a public key that is not the private key's own — the failure that would otherwise present as every request being a 401 with nothing in any log saying why.
+Both files' contents go into the environment as the two properties; the parser tolerates the line breaks an environment variable loses, and the `\n` or `\\n` a vault and Kamal's env file write in their place (`com.moyi.common.core.Pem`, amended 2026-11-10: it had read neither, and a body that is not base64 now names its property), and refuses a public key that is not the private key's own — the failure that would otherwise present as every request being a 401 with nothing in any log saying why.
 
 **3. `kid` is the RFC 7638 thumbprint of the public key.** Derived, not configured, so it cannot drift from the key it names. Rotation later is additive: a second key gets a second thumbprint, the encoder stamps the new one, the decoder is handed both, and tokens signed by either verify until the old one is withdrawn. Nothing rotates yet; the claim exists so that rotation is a configuration change and not a token-format change.
 

@@ -1,5 +1,6 @@
 package com.moyi.notification.infra.push
 
+import com.moyi.common.core.Pem
 import com.moyi.notification.api.PushCategory
 import com.moyi.notification.api.PushDelivery
 import com.moyi.notification.api.PushMessage
@@ -408,14 +409,12 @@ internal class FcmPushSender(
             return FcmPushSender(builder.build(), account, fcm.tokenUri, clock)
         }
 
-        /** PKCS#8, as Google's key file holds it, with its line breaks either real or written as `\n`. */
+        /**
+         * PKCS#8, as Google's key file holds it. Its line breaks may be real, spelt `\n`, doubled
+         * to `\\n` by Kamal's env file, or gone: [Pem] reads them all (ops/notification step 3).
+         */
         private fun privateKeyOf(pem: String): RSAPrivateKey {
-            val body =
-                pem
-                    .replace("\\n", "\n")
-                    .substringAfter(PEM_HEADER, missingDelimiterValue = "")
-                    .substringBefore(PEM_FOOTER, missingDelimiterValue = "")
-                    .filterNot(Char::isWhitespace)
+            val body = Pem.body(pem, "PRIVATE KEY").orEmpty()
             check(body.isNotEmpty()) { "moyi.notification.push.fcm.private-key-pem is not a PEM block ($PEM_HEADER … $PEM_FOOTER)." }
             return try {
                 KeyFactory.getInstance("RSA").generatePrivate(PKCS8EncodedKeySpec(Base64.getDecoder().decode(body))) as RSAPrivateKey

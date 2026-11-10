@@ -1,0 +1,10 @@
+# One finding per line, by gitleaks fingerprint (commit:file:rule:line). Each
+# entry is a single occurrence in a single commit: nothing here weakens a rule,
+# and the same text in any other commit or file is still reported.
+#
+# PR #178, commit 5116b62: PemTest's armour lines written out around base64 of
+# Random(7).nextBytes(300), generated at test time. Random bytes, not a key. The
+# next commit assembles the armour from its kind, so the file no longer matches;
+# this line exists because the PR scan reads every commit, and history is not
+# rewritten here (force-push is blocked).
+5116b6222f70a451436c196737b23b218be30812:common/core/src/test/kotlin/com/moyi/common/core/PemTest.kt:private-key:14
