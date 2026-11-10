@@ -115,7 +115,8 @@
 #
 #   moyi support list                        the open messages, oldest first: id, sender, how long the subject
 #                                            and body are, when. Never what they say
-#   moyi support show <ticketId>             one message: its subject and body, and the address to answer at,
+#   moyi support show <ticketId>             one message: its subject and body, the error reference the app sent
+#                                            with it (if any), and the address to answer at,
 #                                            read from the account now, marked if it was never confirmed
 #                                            (the look is recorded)
 #   moyi support close <ticketId> "<note>"   answered, or nothing to answer: its words are deleted, your note kept
@@ -666,7 +667,7 @@ case "$cmd" in
         need_uuid ticketId "$1"
         # The words as JSON strings, so that what the sender typed (a tab, a new line) cannot break a row here.
         out="$(ops_sql "SELECT ticket_id, status, user_id, coalesce(reply_to, '-'), coalesce(reply_to_confirmed::text, '-'), received_at,
-                               coalesce(to_json(subject)::text, '-'), coalesce(to_json(body)::text, '-')
+                               coalesce(to_json(subject)::text, '-'), coalesce(to_json(body)::text, '-'), coalesce(reference, '-')
                         FROM support_ticket_read(:'ticket'::uuid, :'actor');" "ticket=$1" "actor=$OPERATOR")" ||
           die "the database refused (see above)"
         [ -n "$out" ] || die "that id names no support message"
@@ -674,6 +675,7 @@ case "$cmd" in
           print "ticket:     " $1; print "status:     " $2; print "from:       " $3
           print "reply to:   " $4 ($5 == "f" ? "   NOT CONFIRMED: it may not be the sender'"'"'s (ADR-0015)" : ($4 == "-" ? "   the account is gone" : ""))
           print "received:   " $6; print "subject:    " $7; print "body:       " $8
+          print "reference:  " $9 ($9 == "-" ? "" : "   the error the app showed them: find it in the logs by this")
         }'
         ;;
       close)
@@ -683,7 +685,7 @@ case "$cmd" in
         result="$(ops_sql "SELECT support_ticket_close(:'ticket'::uuid, :'actor', :'note');" "ticket=$1" "actor=$OPERATOR" "note=$2")" ||
           die "the database refused (see above)"
         case "$result" in
-          CLOSED)   echo "Closed: its subject and body are deleted; your note is kept in support_ticket_log." ;;
+          CLOSED)   echo "Closed: its subject, body and reference are deleted; your note is kept in support_ticket_log." ;;
           NOT_OPEN) die "that id names no open support message (never sent, or already closed)" ;;
           *)        die "unexpected answer from the database: $result" ;;
         esac

@@ -4,6 +4,11 @@
 T-20 and doc 06 §3.2; decisions 4, 5, 7 (the archive's shape), 8, 10, 11 and 12 were made without him, as
 defaults issue #126 left to the backend, and are **his to overrule** (Open questions, below).
 
+**Amended:** 2026-11-10 (decision 13, the three minors of #162's re-review: an archive's object is
+deleted only after the change that forgets its key commits, from a debt written in that change; a
+build's ready email that throws no longer fails the build; decision 9's account-deletion sentence
+follows)
+
 ## Context
 
 FR-009 (MUST): "A user MUST be able to export all their data (JSON + media) on demand." FR-094 (MUST):
@@ -39,7 +44,8 @@ depends on the five through their `api` packages only; each of them answers for 
   discreet exit, doc 26 §2.1), and never the name the partner gave them (the partner's words).
 - `gratitude.api.ArchiveExports`: decision 3.
 - `support.api.SupportExports`: the person's tickets with whatever words they still hold (a closed one
-  is emptied, ADR-0057 decision 8); not the operator's log.
+  is emptied, ADR-0057 decision 8), and since 2026-11-10 the error `reference` sent with each (ADR-0057
+  decision 11, emptied with the words); not the operator's log.
 - `media.api.ExportStorage`: decision 6, and the archive's own object.
 
 Nothing depends on `export` but `scheduling` (the job) and `app`.
@@ -135,8 +141,8 @@ it marks the row `EXPIRED`, so an archive is never forgotten while stored; one i
 `READY` (the route already answers `EXPIRED`) and is tried again next hour. The media worker turns both
 timers off (`application-media-worker.yml`). **Account deletion** (ADR-0058): a consumer
 `export.account-deletion` of `AccountDeleted` deletes every export row of the person **in one
-statement, `DELETE … RETURNING storage_key`**, and then each archive those rows held, inside the
-delivery's transaction, so a storage outage makes the delivery retry. One statement, because a read of
+statement, `DELETE … RETURNING storage_key`**, and then each archive those rows held, once the
+delivery commits (decision 13; until 2026-11-10 inside its transaction). One statement, because a read of
 the keys followed by a delete let a build that made an export READY in between leave its archive
 stored with nothing naming it (review of #162): now the delete waits on that row and returns its key,
 or the build finds its row gone and deletes its own archive. The ready email cannot reach a deleted
@@ -173,6 +179,29 @@ make it `READY` (decision 9's claim token), and deletes what it stored. The pers
 remains** is the outbox's own: between the withdrawal's commit and the consumer's delivery (the poller
 runs every two seconds) a `READY` export's URL still works. *Owner may ask for the route to check the
 bond's withdrawals itself, at the cost of a read across modules on every `GET`.*
+
+**13. An archive's object goes after the commit that forgets it, from a debt written in that commit
+(re-review of #162, follow-up PR).** The storage is not in the database's transaction, so there are two
+wrong orders. Deleting the object first, inside the delivery (decision 9 and 12 as merged), leaves a
+`READY` row naming nothing if the delivery then rolls back (it recovers on redelivery, but the route
+hands out a URL to a missing object meanwhile). Deleting it after the commit with nothing written down
+leaves it stored for ever if the storage refuses then: no row names it, the `x/` prefix has no
+lifecycle rule, and a URL signed before stays good for its 24 hours, which T-20 forbids after a
+withdrawal. So V54's `export_archive_deletions` holds the **keys owed a deletion**: both consumers write
+the keys there in the delivery's transaction, together with the change that forgets them, and delete
+the objects in `afterCommit`, each paid (its row deleted) in a transaction of its own once it is gone.
+A delivery that rolls back owes nothing and deletes nothing. A build that finds its row gone or
+restarted owes its key before deleting it, so a storage refusal there no longer orphans the object
+either (it was caught as a failed attempt, and the object forgotten). Every build run starts by trying
+up to twenty owed deletions, oldest first; a refusal stays owed and is logged by exception class only.
+The table holds an opaque key and an instant, never a user id. Separately, **a ready email that throws
+is not a failed build**: the export is already `READY` and its claim already cleared, so the throw
+was counted as an attempt spent and the export as not made; now it is logged, the export counts as
+made, and the email is not retried (the app shows `READY` whether or not it went). *Not covered:* an
+archive stored whose `READY` statement then throws (Codex's P2 on #162) is still not owed: the build
+does not know whether that statement committed, and owing the key of a row that did become `READY`
+would delete a live archive. A lifecycle rule on `x/` longer than the 24 hours would cover it; that is
+the owner's to set in R2.
 
 ## Consequences
 
