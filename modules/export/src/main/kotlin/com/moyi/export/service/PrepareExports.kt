@@ -31,19 +31,22 @@ internal class PrepareExports(
     private val exports: DataExports,
     private val writer: ArchiveWriter,
     private val storage: ExportStorage,
+    private val archives: ArchiveDisposal,
     private val mail: AccountMail,
     private val clock: Clock,
 ) : DataExportJobs {
     private val log = LoggerFactory.getLogger(javaClass)
 
     /**
-     * First, every export whose attempts are spent and whose last claim has lapsed is FAILED: a
-     * process that died mid-build leaves its row PREPARING, and it must not stay so for ever.
-     * Then each claimable export is tried, **each on its own**: nothing one export throws stops
-     * the rest of the batch.
+     * First, the archives still owed a deletion are deleted ([ArchiveDisposal]): ones the storage
+     * refused when their rows let them go. Then every export whose attempts are spent and whose last
+     * claim has lapsed is FAILED: a process that died mid-build leaves its row PREPARING, and it must
+     * not stay so for ever. Then each claimable export is tried, **each on its own**: nothing one
+     * export throws stops the rest of the batch.
      */
     @Suppress("TooGenericExceptionCaught") // One export's failure, whatever it is, must not stop the rest.
     override fun prepareDue(limit: Int): Int {
+        archives.sweep(OWED_PER_RUN)
         val exhausted = exports.failExhausted(now(), DataExport.MAX_ATTEMPTS)
         if (exhausted > 0) log.warn("{} exports had used their attempts and are FAILED", exhausted)
         return exports.claimable(now(), DataExport.MAX_ATTEMPTS, limit).count { export ->
@@ -98,14 +101,13 @@ internal class PrepareExports(
             val made = exports.ready(export.id, claim, key, Files.size(zip), readyAt, expiresAt)
             if (made) {
                 if (missing > 0) log.warn("Export {}: {} media files were gone before they could be copied", export.id, missing)
-                // identity sends nothing to an account that is deleted or being deleted (AccountMail's NO_ACCOUNT).
-                val emailed = mail.sendToAccountHolder(export.userId, ExportReadyMail.of(export.id, expiresAt))
-                log.info("Export {} is ready, attempt {}: email {}", export.id, attempt, emailed)
+                tell(export, attempt, expiresAt)
             } else {
                 // An account deletion took the row, or a withdrawal restarted it, while this built: what was
-                // stored goes again, and nobody is told.
-                storage.deleteArchive(key)
-                log.info("Export {} was no longer this build's; its archive was deleted again", export.id)
+                // stored goes again, and nobody is told. Owed first, so a storage that refuses now cannot
+                // leave it stored with nothing naming it (ADR-0059 decision 13).
+                archives.deleteNow(key)
+                log.info("Export {} was no longer this build's; its archive is deleted again", export.id)
             }
             made
         } catch (interrupted: InterruptedException) {
@@ -115,6 +117,26 @@ internal class PrepareExports(
             spent(export, attempt, claim, failure)
         } finally {
             zip?.let { runCatching { Files.deleteIfExists(it) } }
+        }
+    }
+
+    /**
+     * The ready email, for an export already READY. **A send that throws is not a failed build**: the
+     * export is READY, its row no longer this build's to give back, and the app shows it whether or
+     * not the email went. Logged and counted as made; the email is not tried again.
+     */
+    @Suppress("TooGenericExceptionCaught") // Whatever the mail throws, the export it is about is already made.
+    private fun tell(
+        export: DataExport,
+        attempt: Int,
+        expiresAt: Instant,
+    ) {
+        try {
+            // identity sends nothing to an account that is deleted or being deleted (AccountMail's NO_ACCOUNT).
+            val emailed = mail.sendToAccountHolder(export.userId, ExportReadyMail.of(export.id, expiresAt))
+            log.info("Export {} is ready, attempt {}: email {}", export.id, attempt, emailed)
+        } catch (failure: Exception) {
+            log.warn("Export {} is ready, attempt {}, but its email could not be sent: {}", export.id, attempt, failure.javaClass.name)
         }
     }
 
@@ -131,4 +153,9 @@ internal class PrepareExports(
     }
 
     private fun now() = clock.instant().truncatedTo(ChronoUnit.MICROS)
+
+    private companion object {
+        /** Owed deletions tried per build run: a storage outage leaves at most a handful, and the next minute takes the rest. */
+        const val OWED_PER_RUN = 20
+    }
 }

@@ -84,6 +84,8 @@ internal class SendDailyReminders(
                     dedupeKey = dedupeKey(reminder),
                     staleAfter = reminder.bondDayEndsAt,
                     recipient = reminder.recipient,
+                    // The Bond-day it reminds of (#146): the app opens Today when it is the current one.
+                    bondDate = reminder.bondDate,
                 ),
             )
         return if (asked) Outcome.REQUESTED else Outcome.ALREADY_ASKED

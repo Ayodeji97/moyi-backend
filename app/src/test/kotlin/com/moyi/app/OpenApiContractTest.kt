@@ -539,6 +539,51 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `every @Idempotent handler declares Idempotency-Key, required exactly when the annotation says so`() {
+        // #167: OpenApiConfiguration adds the header from a hand-kept list of
+        // operation ids, because springdoc cannot see `@Idempotent`. The list
+        // missed `reportMember`, and a client generated from the document sent
+        // no key and was refused 422 on every call. The controllers' own
+        // annotations are the authority; this holds the document to them.
+        val idempotent =
+            handlerMapping.handlerMethods.values
+                .mapNotNull { handler -> handler.getMethodAnnotation(Idempotent::class.java)?.let { handler.method.name to it } }
+        idempotent.shouldNotBeEmpty()
+
+        val byId = operations().associate { (_, op) -> op.operationId to op }
+        val wrong =
+            idempotent.mapNotNull { (operationId, annotation) ->
+                val key =
+                    byId[operationId]
+                        ?.parameters
+                        .orEmpty()
+                        .firstOrNull { it.name == IdempotencyInterceptor.HEADER && it.`in` == "header" }
+                val statuses = byId[operationId]?.responses?.keys.orEmpty()
+                when {
+                    byId[operationId] == null -> "$operationId: not in the document"
+
+                    key == null -> "$operationId: no ${IdempotencyInterceptor.HEADER} header"
+
+                    key.required != annotation.required -> "$operationId: required=${key.required}, annotation says ${annotation.required}"
+
+                    // The interceptor's own answers: a key in flight, a body past its bound.
+                    !statuses.containsAll(listOf("409", "413", "422")) -> "$operationId: answers 409, 413 and 422, declares $statuses"
+
+                    else -> null
+                }
+            }
+        wrong.shouldBeEmpty()
+
+        // And the reverse: no operation declares the key without the annotation behind it.
+        val annotated = idempotent.map { it.first }.toSet()
+        operations()
+            .filter { (_, op) -> op.parameters.orEmpty().any { it.name == IdempotencyInterceptor.HEADER } }
+            .map { (_, op) -> op.operationId }
+            .filterNot { it in annotated }
+            .shouldBeEmpty()
+    }
+
+    @Test
     fun `changing an entry documents an optional key, a text that is never null, and its refusals`() {
         val patch = api.paths["/api/v1/entries/{entryId}"]!!.patch
         val delete = api.paths["/api/v1/entries/{entryId}"]!!.delete
@@ -1109,15 +1154,27 @@ class OpenApiContractTest(
             .properties.keys shouldBe setOf("authorMemberId", "status")
     }
 
-    /** Phase 4 D3, ADR-0049, D4, ADR-0051: `{id, status, url?, durationMs?, sensitive}`, and nowhere on a locked entry (BR-8). */
+    /**
+     * Phase 4 D3, ADR-0049, D4, ADR-0051, #165 (ADR-0061): `{id, status, url?, durationMs?, waveform?, sensitive}`,
+     * and nowhere on a locked entry (BR-8).
+     */
     @Test
     fun `an entry's voice note is an id, a status and, once playable, a URL and a length, every field always sent`() {
         val voice = api.components.schemas["EntryVoiceResponse"]!!
-        voice.properties.keys shouldBe setOf("id", "status", "url", "durationMs", "sensitive")
+        voice.properties.keys shouldBe setOf("id", "status", "url", "durationMs", "waveform", "sensitive")
         voice.required.toSet() shouldBe voice.properties.keys
         voice.properties["status"]!!.enum.map { it.toString() } shouldBe listOf("READY", "PROCESSING", "NOT_SHARED")
-        listOf("url", "durationMs").forEach { voice.properties[it]!!.types shouldContain "null" }
+        listOf("url", "durationMs", "waveform").forEach { voice.properties[it]!!.types shouldContain "null" }
         voice.description.shouldNotBeNull() shouldContain "to the other member only once it has passed moderation"
+        // Issue #165, ADR-0061: exactly 64 integers, each 0 to 255, when it is not null.
+        val waveform = voice.properties["waveform"]!!
+        waveform.types shouldContain "array"
+        waveform.minItems shouldBe 64
+        waveform.maxItems shouldBe 64
+        waveform.items.types shouldContain "integer"
+        waveform.items.minimum.toInt() shouldBe 0
+        waveform.items.maximum.toInt() shouldBe 255
+        waveform.description.shouldNotBeNull() shouldContain "Given exactly when url is"
 
         val full =
             fieldsOf("EntryResponse")

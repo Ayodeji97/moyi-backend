@@ -4,6 +4,7 @@ import com.moyi.common.security.ratelimit.RateLimitBucket
 import com.moyi.common.security.ratelimit.RateLimited
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
+import com.moyi.identity.domain.VerificationCode
 import com.moyi.identity.service.RequestPasswordReset
 import com.moyi.identity.service.ResetPassword
 import jakarta.validation.Valid
@@ -46,6 +47,33 @@ internal class PasswordResetController(
             is PresentedCredential.Code -> resetPassword.reset(presented.email, presented.code, password)
         }
     }
+
+    /**
+     * Whether a typed reset code is right, so the app can say so before the new password is
+     * typed (#169, ADR-0022 amended 2026-11-10). 204 and nothing spent for a right code; the
+     * reset's one 422 for every refusal. A wrong check is a try at the same code, and both
+     * buckets are the reset's: this per-address one, and ten a day per address in the service.
+     */
+    @PostMapping("/reset-password/check")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @RateLimited(RateLimitBucket.AUTH_CODE_IP)
+    fun checkResetCode(
+        @Valid @RequestBody request: ResetCodeCheckRequest,
+    ) {
+        resetPassword.check(Email(request.email.trim()), VerificationCode(request.code.trim()))
+    }
+}
+
+/** The address and the six digits from the reset email; no token (a link needs no check) and no password. */
+internal data class ResetCodeCheckRequest(
+    @field:NotBlank
+    @field:ValidEmail
+    val email: String,
+    @field:NotBlank
+    @field:ValidVerificationCode
+    val code: String,
+) {
+    override fun toString(): String = "ResetCodeCheckRequest(code=redacted)"
 }
 
 internal data class ForgotPasswordRequest(

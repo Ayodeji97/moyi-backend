@@ -140,6 +140,30 @@ internal class TypedCodeRedisOutageTest(
         unknown.getHeader(HttpHeaders.RETRY_AFTER) shouldBe known.getHeader(HttpHeaders.RETRY_AFTER)
     }
 
+    /** #169: the check is a typed code, so it is refused with the reset; the link still resets. */
+    @Test
+    fun `a reset-code check is 503, counts nothing, and is the same bytes for an address with no account`() {
+        register().status shouldBe 201
+        forgot().status shouldBe 202
+        val email = awaitEmails(2).last()
+        val code = codeIn(email)
+
+        val known = post(CHECK, """{"email": "$ADA", "code": "$code"}""")
+        val unknown = post(CHECK, """{"email": "nobody@example.com", "code": "$code"}""")
+
+        known.status shouldBe 503
+        known.contentAsString shouldContain "\"code\":\"CODE_CHECK_UNAVAILABLE\""
+        known.getHeader(HttpHeaders.RETRY_AFTER) shouldBe "60"
+        unknown.status shouldBe 503
+        withoutTraceId(unknown.contentAsString) shouldBe withoutTraceId(known.contentAsString)
+        jdbc.queryForObject(
+            "SELECT code_attempts FROM verification_tokens WHERE purpose = 'PASSWORD_RESET'",
+            Int::class.java,
+        ) shouldBe 0
+
+        resetByToken(secretIn(email), NEW_PASSWORD).status shouldBe 200
+    }
+
     private fun awaitEmails(count: Int): List<EmailMessage> {
         await().atMost(WAIT).untilAsserted { emails.sent shouldHaveSize count }
         return emails.sent.toList()
@@ -196,6 +220,7 @@ internal class TypedCodeRedisOutageTest(
             .response
 
     private companion object {
+        const val CHECK = "/api/v1/auth/reset-password/check"
         const val ADA = "ada@example.com"
         const val PASSWORD = "correct horse battery"
         const val NEW_PASSWORD = "a different good password"

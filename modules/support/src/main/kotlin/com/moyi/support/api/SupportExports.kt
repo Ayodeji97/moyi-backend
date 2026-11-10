@@ -14,11 +14,14 @@ interface SupportExports {
     fun ticketsOf(userId: UUID): List<ExportedTicket>
 }
 
-/** One ticket. [toString] never prints the subject or body. */
+/** One ticket. [toString] never prints the subject, body or reference. */
+@Suppress("LongParameterList") // One field per column the person is owed.
 class ExportedTicket(
     val id: UUID,
     val subject: String?,
     val body: String?,
+    /** The error reference the person sent with it (ADR-0057 decision 11), while the ticket keeps it; emptied with the words. */
+    val reference: String?,
     /** `OPEN` or `CLOSED`. */
     val status: String,
     val createdAt: Instant,

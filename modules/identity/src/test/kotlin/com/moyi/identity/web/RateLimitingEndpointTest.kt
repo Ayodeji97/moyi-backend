@@ -202,6 +202,25 @@ internal class RateLimitingEndpointTest(
         verifyByCode("somebody-else@example.com", from = "203.0.113.32").status shouldBe 422
     }
 
+    /** #169: the reset-code check is a typed code like the others, on the same daily ten and hourly twenty. */
+    @Test
+    fun `the reset-code check spends the same ten a day per address and twenty an hour per client address`() {
+        repeat(4) { checkResetCode("nobody@example.com", from = "203.0.113.${it + 40}").status shouldBe 422 }
+        repeat(3) { resetByCode("nobody@example.com", from = "203.0.113.${it + 50}").status shouldBe 422 }
+        repeat(3) { verifyByCode("nobody@example.com", from = "203.0.113.${it + 60}").status shouldBe 422 }
+
+        val refused = checkResetCode("NOBODY@example.com", from = "203.0.113.70")
+        refused.status shouldBe 429
+        refused.getHeader("X-RateLimit-Limit") shouldBe "10"
+        refused.getHeader(HttpHeaders.RETRY_AFTER) shouldBe "8640"
+        resetByCode("nobody@example.com", from = "203.0.113.71").status shouldBe 429
+
+        repeat(20) { checkResetCode("someone$it@example.com", from = "198.51.100.7").status shouldBe 422 }
+        val perAddress = verifyByToken("one-more", from = "198.51.100.7")
+        perAddress.status shouldBe 429
+        perAddress.getHeader("X-RateLimit-Limit") shouldBe "20"
+    }
+
     @Test
     fun `twenty presentations an hour from one client address, codes and links on both endpoints`() {
         repeat(10) { verifyByCode("user$it@example.com").status shouldBe 422 }
@@ -313,7 +332,15 @@ internal class RateLimitingEndpointTest(
         from: String = "127.0.0.1",
     ) = post("/api/v1/auth/verify-email", """{"email":"$email","code":"123456"}""", from)
 
-    private fun verifyByToken(token: String) = post("/api/v1/auth/verify-email", """{"token":"$token"}""", "127.0.0.1")
+    private fun verifyByToken(
+        token: String,
+        from: String = "127.0.0.1",
+    ) = post("/api/v1/auth/verify-email", """{"token":"$token"}""", from)
+
+    private fun checkResetCode(
+        email: String,
+        from: String = "127.0.0.1",
+    ) = post("/api/v1/auth/reset-password/check", """{"email":"$email","code":"123456"}""", from)
 
     private fun resetByCode(
         email: String,

@@ -37,7 +37,8 @@ internal val SERVERS: List<Server> =
  *   `PASSWORD_RESET_TOKEN_EXPIRED`.
  * - **503 `HASHING_CAPACITY_EXCEEDED`**, with `Retry-After: 1` (NFR-005a): every operation that hashes a password.
  * - **503 `CODE_CHECK_UNAVAILABLE`**, with `Retry-After: 60` (owner's ruling 2026-11-09, ADR-0023 amended): `verify`
- *   and `reset` given an `email` and a `code` while the typed-code limit cannot be read. Never for a `token`.
+ *   and `reset` given an `email` and a `code` while the typed-code limit cannot be read. Never for a `token`. And
+ *   `checkResetCode` (#169), which takes only a code.
  * - ADR-0047's media statuses: an upload declared too large (413 `MEDIA_QUOTA_EXCEEDED`) or of a type its kind does
  *   not take (415 `MEDIA_TYPE_UNSUPPORTED`); and no storage configured, or none reachable (503
  *   `MEDIA_STORAGE_UNAVAILABLE`).
@@ -50,6 +51,7 @@ private val OPERATION_STATUSES: Map<String, List<HttpStatus>> =
     mapOf(
         "verify" to listOf(HttpStatus.GONE, HttpStatus.SERVICE_UNAVAILABLE),
         "reset" to listOf(HttpStatus.GONE, HttpStatus.SERVICE_UNAVAILABLE),
+        "checkResetCode" to listOf(HttpStatus.SERVICE_UNAVAILABLE),
         "register" to listOf(HttpStatus.SERVICE_UNAVAILABLE),
         "login" to listOf(HttpStatus.SERVICE_UNAVAILABLE),
         "createMediaUploadIntent" to
@@ -112,6 +114,12 @@ private val STATUS_DESCRIPTIONS: Map<Pair<String, HttpStatus>, String> =
             "nothing. `PASSWORD_RESET_TOKEN_INVALID` for a token that matches nothing, and for every refused code: " +
             "no such account, a wrong code, or one expired (15 minutes), burned (5 wrong tries) or spent. One answer " +
             "for all of them, on purpose; ask for a new email.",
+        ("checkResetCode" to HttpStatus.UNPROCESSABLE_ENTITY) to
+            "Unprocessable: `VALIDATION_FAILED` for an `email` or `code` of the wrong shape; that spends no try. " +
+            "`PASSWORD_RESET_TOKEN_INVALID` for every refused code: no such account, a wrong code, or one expired " +
+            "(15 minutes), burned (5 wrong tries) or spent. One answer for all of them, on purpose, and the same " +
+            "one `reset-password` gives; a wrong code here is one of the code's 5 tries.",
+        ("checkResetCode" to HttpStatus.SERVICE_UNAVAILABLE) to "Service Unavailable: $CODE_CHECK_DOWN",
         ("register" to HttpStatus.SERVICE_UNAVAILABLE) to HASHING_BUSY,
         ("login" to HttpStatus.SERVICE_UNAVAILABLE) to HASHING_BUSY,
         ("verify" to HttpStatus.SERVICE_UNAVAILABLE) to "Service Unavailable: $CODE_CHECK_DOWN",
