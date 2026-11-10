@@ -482,11 +482,11 @@ curl -X POST "$API/me/deletion-request" -H "Authorization: Bearer $TOKEN" -H 'Co
 | Region | In | When | Answer | Why | Rule | Evidence |
 |---|---|---|---|---|---|---|
 | `account.deletion` | `NONE` | the password is right | 202 → `PENDING` | With your current password: the request is recorded and 202 answers requestedAt, cancellableUntil (14 days on) and deleteBy (30 days on). Nothing is destroyed now. Your status, your sign-in and your other sessions are as they were. A confirmed address is emailed once, saying when it will happen and how to cancel. | FR-008, ADR-0058 | smoke |
-| `account.deletion` | `NONE` | the password sent is not the account's | 401 `INVALID_CREDENTIALS` | The password is checked again, and this one is wrong. Nothing is recorded, and it is not counted towards the sign-in lock. No WWW-Authenticate: your session is fine, do not sign out. Five tries an hour, then 429. | FR-008, ADR-0058 | smoke |
+| `account.deletion` | `NONE` | the password sent is not the account's | 403 `INVALID_CREDENTIALS` | The password is checked again, and this one is wrong. Nothing is recorded, and it is not counted towards the sign-in lock. 403, not 401, and no WWW-Authenticate: your session is fine, do not refresh or sign out (#166). Five tries an hour, then 429. | FR-008, ADR-0058 | smoke |
 | `account.deletion` | `PENDING` | the password is right | 202 stays | The same request: 202 with the same three dates, byte for byte, and no second email. | FR-008, ADR-0058 | smoke |
-| `account.deletion` | `PENDING` | the password sent is not the account's | 401 `INVALID_CREDENTIALS` | The password is checked before the pending request is looked at; nothing changes. | FR-008, ADR-0058 | never-run |
+| `account.deletion` | `PENDING` | the password sent is not the account's | 403 `INVALID_CREDENTIALS` | The password is checked before the pending request is looked at; nothing changes. | FR-008, ADR-0058 | never-run |
 | `account.deletion` | `WINDOW_CLOSED` | the password is right | 202 stays | Still the same pending request until the job has run: 202 with the same dates. It can no longer be cancelled. | FR-008, ADR-0058 | never-run |
-| `account.deletion` | `WINDOW_CLOSED` | the password sent is not the account's | 401 `INVALID_CREDENTIALS` | The password is wrong; nothing changes. | FR-008, ADR-0058 | never-run |
+| `account.deletion` | `WINDOW_CLOSED` | the password sent is not the account's | 403 `INVALID_CREDENTIALS` | The password is wrong; nothing changes. | FR-008, ADR-0058 | never-run |
 | `account.deletion` | `DELETED` |  | 401 `UNAUTHENTICATED` | The account is gone: every access token issued before it was deleted is refused, and it cannot sign in for a new one. | FR-008, ADR-0058, ADR-0019 §4 | never-run |
 
 ### DELETE /me/deletion-request

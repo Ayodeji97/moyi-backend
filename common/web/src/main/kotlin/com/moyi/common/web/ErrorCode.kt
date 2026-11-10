@@ -64,6 +64,11 @@ enum class ErrorCode {
      * address, a locked account and an account in a state that cannot sign in,
      * because telling them apart is exactly the oracle T-18 and ADR-0015 close.
      * 401, without `WWW-Authenticate`: no bearer credential was presented.
+     *
+     * Also a password typed again on a signed-in route (`POST /me/deletion-request`)
+     * that is wrong, and there **403**, still without `WWW-Authenticate`: the bearer
+     * token was accepted, and a client reads a 401 on a signed-in route as that token
+     * refused (#166, ADR-0058 decision 1 as amended 2026-11-10).
      */
     INVALID_CREDENTIALS,
 

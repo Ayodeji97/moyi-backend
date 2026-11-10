@@ -9,6 +9,7 @@ import com.moyi.identity.infra.security.TestBreachCorpus
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -121,15 +122,20 @@ internal class AccountDeletionEndpointTest(
     }
 
     @Test
-    fun `a wrong password is 401 INVALID_CREDENTIALS and records nothing, nor counts towards the sign-in lock`() {
+    fun `a wrong password is 403 INVALID_CREDENTIALS and records nothing, nor counts towards the sign-in lock`() {
         val ada = signUp("ada@example.com")
 
         val refused = request(ada.access, "not the password at all")
 
-        refused.status shouldBe 401
+        // #166: 403, not 401. On a signed-in route a client reads 401 as "the access
+        // token was refused" and refreshes; the token here is fine, the password typed
+        // is not (ADR-0058 decision 1, amended 2026-11-10).
+        refused.status shouldBe 403
         refused.contentAsString shouldContain "\"code\":\"INVALID_CREDENTIALS\""
-        // Not the bearer's refusal: the client must not take this for "sign in again".
+        // Not the bearer's refusal: no challenge, which only a refused token carries.
         refused.getHeader(HttpHeaders.WWW_AUTHENTICATE).shouldBeNull()
+        // And the session it was sent on still works.
+        meResponse(ada.access).status shouldBe 200
         jdbc.queryForObject("SELECT count(*) FROM deletion_requests", Int::class.java) shouldBe 0
         jdbc.queryForObject("SELECT failed_attempts FROM credentials", Int::class.java) shouldBe 0
         me(ada.access)["deletionRequest"].isNull shouldBe true
@@ -150,12 +156,17 @@ internal class AccountDeletionEndpointTest(
 
     @Test
     fun `no token is 401 UNAUTHENTICATED on both routes`() {
-        mockMvc
-            .post("/api/v1/me/deletion-request") {
-                contentType = MediaType.APPLICATION_JSON
-                content = """{"password":"$PASSWORD"}"""
-            }.andReturn()
-            .response.status shouldBe 401
+        val noToken =
+            mockMvc
+                .post("/api/v1/me/deletion-request") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = """{"password":"$PASSWORD"}"""
+                }.andReturn()
+                .response
+        noToken.status shouldBe 401
+        // #166: the challenge belongs to a refused token, and only to one; the wrong
+        // password above is a 403 without it.
+        noToken.getHeader(HttpHeaders.WWW_AUTHENTICATE).shouldNotBeNull()
         mockMvc
             .delete("/api/v1/me/deletion-request")
             .andReturn()

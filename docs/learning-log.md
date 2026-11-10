@@ -3386,3 +3386,15 @@ Reality: moderation runs *after* `READY`, so the rule only decided whether a hel
          each reader is shown: no thread, no sleep.
 Also: taking `QUARANTINED` but refusing `BLOCKED` would have told the uploader, by a 422, which of
          the two it was: the tipping-off ADR-0051's question 2 is about.
+
+## 2026-11-10 · Fix · A wrong password on a signed-in route is 403 (#166, ADR-0058 amended)
+
+Expected: `401` is the status for a wrong password, wherever it is typed.
+Reality: a client's bearer provider owns `401` on a signed-in route: it refreshes the access token
+         and retries. The deletion request's wrong password was a `401` too, so the app had to tell
+         them apart by the absent `WWW-Authenticate`, a rule that held only while every token
+         refusal carried the challenge. Now `401` means the token (with its challenge), a password
+         re-checked while signed in is `403 INVALID_CREDENTIALS` (without one), and signed-out
+         login keeps its `401`. The deletion request is the only signed-in route that re-checks a
+         password today; the rule is written into ADR-0058 for the next one. Breaking for the
+         generated client: a status moved.

@@ -102,9 +102,15 @@ internal class AccountDeletion(
     fun pendingOf(userId: UserId): DeletionRequest? = requests.findPending(userId)
 }
 
-/** `401 INVALID_CREDENTIALS`, without `WWW-Authenticate`: the session is fine, the password typed is not (ADR-0020 decision 1). */
+/**
+ * `403 INVALID_CREDENTIALS`, without `WWW-Authenticate`: the session is fine, the password typed is
+ * not (ADR-0058 decision 1, amended 2026-11-10, #166). Not `401`: on a signed-in route a client reads
+ * `401` as its access token refused, and refreshes and retries. A signed-in route that re-checks the
+ * password answers a wrong one `403` with this code; `401` stays with the refused token (with its
+ * challenge) and with signed-out login (without one, ADR-0020 decision 1).
+ */
 internal class DeletionPasswordRefusedException :
-    ApiException(HttpStatus.UNAUTHORIZED, ErrorCode.INVALID_CREDENTIALS, "That password is not the one for this account.")
+    ApiException(HttpStatus.FORBIDDEN, ErrorCode.INVALID_CREDENTIALS, "That password is not the one for this account.")
 
 /** One `404` for "nothing pending" and "too late to cancel" (ADR-0058 decision 3). */
 internal class NoCancellableDeletionException : NotFoundException("There is no account deletion that can still be cancelled.")

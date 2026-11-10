@@ -75,7 +75,7 @@
 # export's), 0 skipped; again on the same server, 1603 passed, 0 failed, 0 skipped.
 #
 # Issue #125 adds the account-deletion section: the password asked for again (422 absent or blank,
-# 401 INVALID_CREDENTIALS wrong, without WWW-Authenticate), the 202 with its two windows, the
+# 403 INVALID_CREDENTIALS wrong, without WWW-Authenticate), the 202 with its two windows, the
 # idempotent repeat, the pending request on GET /me, one email, sign-in kept, a cancel and the one
 # 404, then the window moved back by SQL and the job (on a five-second cron, held 30 s by ShedLock)
 # carrying it out: the account anonymised and shut, the partner's bond archived, the person's entry a
@@ -3883,7 +3883,7 @@ DL_BOND="$RB_BOND"; DL_A_ENTRY="$RB_A_ENTRY"; DL_B_ENTRY="$RB_B_ENTRY"
 expect "account deletion without a token is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHENTICATED"' -- -X POST "$API/me/deletion-request" -d "{\"password\":\"$PASSWORD\"}"
 expect "account deletion with no password is 422 on password" 422 '"field":"password"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d '{}'
 expect "account deletion with a blank password is 422 on password" 422 '"field":"password"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d '{"password":"  "}'
-expect "account deletion with a wrong password is 401 INVALID_CREDENTIALS" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d '{"password":"not the password"}'
+expect "account deletion with a wrong password is 403 INVALID_CREDENTIALS" 403 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d '{"password":"not the password"}'
 header_is "…without WWW-Authenticate: the session is fine" "WWW-Authenticate" ""
 expect "GET /me says no deletion is pending" 200 '"deletionRequest":null' -- "$API/me" -H "Authorization: Bearer $DL_A"
 expect "cancelling with nothing pending is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/me/deletion-request" -H "Authorization: Bearer $DL_A"
