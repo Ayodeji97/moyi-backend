@@ -3228,3 +3228,19 @@ Then (review of #162): three things a copy does that a reading does not. An arch
          let a build commit READY in between and leave an object nothing named:
          `DELETE … RETURNING` waits on that row instead. The race was proved by holding the build's
          UPDATE open and waiting for the delete to block on it in `pg_stat_activity`, not by a sleep.
+
+## 2026-11-10 · Feature · A support message carries the error that led to it (#168, ADR-0057 decision 11)
+
+Expected: one optional field and one column.
+Reality: the field reaches four places besides the insert, and each had to be decided: the
+         operator's read (a function whose result gains a column, so V55 drops and recreates it;
+         `CREATE OR REPLACE` cannot), the close and the account deletion (both empty it, and V55's
+         widened `CHECK` refuses a closed ticket that keeps one), the person's export (it already
+         carries their tickets, so it carries this too), and the acknowledgement (which cannot reach
+         it: the event is ids only). The rule is visible ASCII, 0x21 to 0x7E, stated once in the
+         domain and once as the table's `CHECK`; seven mutants (validator off, a space let in by the
+         domain or by the `CHECK`, the deletion or the close keeping it, the `CHECK` alone, the export
+         dropping it) each turned the right test red.
+Wrong about: a JSON number being refused. Jackson's default coercion files `"reference": 12345` as
+         the string "12345", as it would for `subject`; the test that assumed otherwise was dropped
+         and the ADR says so.
