@@ -3398,3 +3398,21 @@ Reality: a client's bearer provider owns `401` on a signed-in route: it refreshe
          login keeps its `401`. The deletion request is the only signed-in route that re-checks a
          password today; the rule is written into ADR-0058 for the next one. Breaking for the
          generated client: a status moved.
+
+## 2026-11-10 · Feature · Voice notes also kept as AAC in MP4, so that iOS can stream them (#152, ADR-0060)
+
+Expected: a second ffmpeg output and a second URL; the work is in the encoder flags.
+Reality: the encoder was one function. The work was finding every place a voice object is deleted
+         or copied, and the answer was mostly already right: every deletion ends in `media.purge`,
+         which deletes `MediaAsset.objectKeys`, *derived* from the upload's key rather than read
+         from the row. Adding `voice.m4a` to that one list covered the owner's delete, the reaper,
+         erasure, account deletion and the operator's SQL functions at once; the row's `aac_key`
+         only says what is *played*. The mirror copies the prefix `v/`, so it needed nothing either.
+Wrong about: the restore runbook (ops/media-mirror/README.md). Its "re-apply the erasures" SQL listed
+         `full.webp` and `display.webp` for every deleted asset, so a restore would have brought back
+         every deleted voice note's `voice.ogg` since D3, before this change added a second one. A
+         hand-written copy of `objectKeys` had drifted from it, as CLAUDE.md says copies do.
+Also: the AAC is made from the kept Opus, never from the upload, so the hostile bytes are decoded
+         once and the 61 s limit is judged once; the AAC is checked only to be the same note (its
+         length within 200 ms of the Opus's). `+faststart` was mutation-tested: without it the `moov`
+         box sat at byte 8382, after `mdat` at 40, and the test that iOS can start early went red.

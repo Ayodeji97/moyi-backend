@@ -175,4 +175,29 @@ internal object VoiceRules {
 
     /** Whether a transcoded voice note this long, in milliseconds, may be kept: [mayKeep], allowing [ENCODER_SLACK_MS]. */
     fun mayKeepTranscoded(durationMs: Long): Boolean = durationMs in 1..(LIMIT_MS + ENCODER_SLACK_MS)
+
+    /**
+     * The AAC variant iOS streams (ADR-0060): AAC-LC, mono, at about 32 kbit/s, in MP4 with its
+     * index first. Made from the kept Opus, never from the upload, so it is the note already
+     * judged: no limit is applied to it a second time, only [isTheSameNote].
+     */
+    const val AAC_BITS_PER_SECOND: Int = 32_000
+
+    /** The content type the AAC variant is stored and served under: MP4 audio (RFC 4337), what `.m4a` is. */
+    const val AAC_CONTENT_TYPE = "audio/mp4"
+
+    /**
+     * How far the AAC variant's length may be from the Opus it was made of: AAC's priming and its
+     * last frame's padding (1024 samples, about 21 ms each at 48 kHz). Measured on ffmpeg 9.0.2
+     * (ADR-0060): 6.5 ms shorter than the Opus, at 2 s and at 61 s; CI runs the tests on 6.1.
+     * Not a limit on the note, which [mayKeepTranscoded] judged once; a variant further off
+     * than this is not the same note, and is not kept.
+     */
+    const val AAC_SLACK_MS: Long = 200
+
+    /** Whether an AAC variant of [aacMs] is the note whose Opus is [opusMs] long. */
+    fun isTheSameNote(
+        opusMs: Long,
+        aacMs: Long,
+    ): Boolean = aacMs > 0 && kotlin.math.abs(aacMs - opusMs) <= AAC_SLACK_MS
 }

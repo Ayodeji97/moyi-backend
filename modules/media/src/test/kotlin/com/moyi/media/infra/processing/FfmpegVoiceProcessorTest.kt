@@ -2,6 +2,7 @@ package com.moyi.media.infra.processing
 
 import com.moyi.media.domain.MediaRefusal
 import com.moyi.media.domain.VoiceFormat
+import com.moyi.media.domain.VoiceRules
 import com.sun.net.httpserver.HttpServer
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeIn
@@ -9,6 +10,7 @@ import io.kotest.matchers.ints.shouldBeInRange
 import io.kotest.matchers.longs.shouldBeLessThan
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -316,6 +318,90 @@ internal class FfmpegVoiceProcessorTest {
         withClue("took $took") { took.toSeconds() shouldBeLessThan 10L }
         val sleeper = Files.readString(pid).trim().toLong()
         ProcessHandle.of(sleeper).map { it.isAlive }.orElse(false) shouldBe false
+    }
+
+    /**
+     * ADR-0060: beside the Opus, the AAC variant iOS streams: AAC-LC, mono, in MP4 whose index
+     * (`moov`) comes before the audio (`mdat`), so AVPlayer can start before the whole file has
+     * arrived. Made of the kept Opus, so its length is the Opus's, not a second reading of the upload.
+     */
+    @Test
+    fun `each note is also kept as AAC-LC in MP4, mono, its index first, as long as its Opus`() {
+        for ((name, recording) in mapOf(
+            "WAV" to (VoiceFormat.WAV to TestVoices.wav(2.0)),
+            "M4A" to (VoiceFormat.MP4 to TestVoices.m4a(dir)),
+        )) {
+            withClue(name) {
+                val (format, bytes) = recording
+                val transcoded = transcode(bytes, format).shouldBeInstanceOf<Transcoding.Transcoded>()
+                val aac = transcoded.aac.shouldNotBeNull()
+
+                aac.bytes shouldBe Files.size(aac.file)
+                val kept = Ffmpegs.probe(aac.file, "stream=codec_name,profile,channels", "format=format_name,duration")
+                kept["streams.stream.0.codec_name"] shouldBe "aac"
+                kept["streams.stream.0.profile"] shouldBe "LC"
+                kept["streams.stream.0.channels"] shouldBe "1"
+                kept["format.format_name"]!! shouldContain "mp4"
+                kept.keys.none { it.startsWith("streams.stream.1.") } shouldBe true
+                val aacMs = (kept["format.duration"]!!.toDouble() * 1000).toLong()
+                withClue("AAC $aacMs ms, Opus ${transcoded.durationMs} ms") {
+                    VoiceRules.isTheSameNote(transcoded.durationMs.toLong(), aacMs) shouldBe true
+                }
+
+                val file = Files.readAllBytes(aac.file)
+                String(file, 4, 4, Charsets.US_ASCII) shouldBe "ftyp"
+                val text = String(file, Charsets.ISO_8859_1)
+                withClue("moov at ${text.indexOf("moov")}, mdat at ${text.indexOf("mdat")}") {
+                    (text.indexOf("moov") in 0 until text.indexOf("mdat")) shouldBe true
+                }
+            }
+        }
+    }
+
+    /** ADR-0060: about 32 kbit/s. Ten seconds, so that the average means something. */
+    @Test
+    fun `the AAC variant is at about 32 kbit per second`() {
+        val transcoded = transcode(TestVoices.wav(10.0, sampleRate = 16_000), VoiceFormat.WAV).shouldBeInstanceOf<Transcoding.Transcoded>()
+        val aac = transcoded.aac.shouldNotBeNull()
+
+        val bitsPerSecond = aac.bytes * 8 * 1000 / transcoded.durationMs
+        withClue("$bitsPerSecond bit/s") { (bitsPerSecond in 24_000..44_000) shouldBe true }
+    }
+
+    /** As the Opus: no tag, chapter or build version of the upload or of this server in the AAC variant. */
+    @Test
+    fun `the AAC variant carries nothing of the upload but its sound, and no fingerprint of the build`() {
+        val transcoded = transcode(TestVoices.m4aWithTagsAndChapters(dir), VoiceFormat.MP4).shouldBeInstanceOf<Transcoding.Transcoded>()
+        val aac = transcoded.aac.shouldNotBeNull()
+
+        val bytes = String(Files.readAllBytes(aac.file), Charsets.ISO_8859_1)
+        bytes.contains(TestVoices.MARKER) shouldBe false
+        withClue(bytes.take(200)) { Regex("Lav[fc][0-9]").containsMatchIn(bytes) shouldBe false }
+    }
+
+    /**
+     * ADR-0060: the AAC variant is best effort. An encoder that fails on it leaves the note kept as
+     * Opus, and without the variant; it never refuses a note the Opus step kept.
+     */
+    @Test
+    fun `an AAC encode that fails keeps the Opus and no variant`() {
+        val real = Ffmpegs.binDir.resolve("ffmpeg")
+        val fakes =
+            Ffmpegs.fake(
+                dir.resolve("bin"),
+                ffprobe = "exec \"${Ffmpegs.binDir.resolve("ffprobe")}\" \"$@\"",
+                ffmpeg = "case \"$*\" in *${FfmpegVoiceProcessor.AAC_OUTPUT}*) exit 1;; esac; exec \"$real\" \"$@\"",
+            )
+        val failing = FfmpegVoiceProcessor(fakes.resolve("ffmpeg"), fakes.resolve("ffprobe"), Ffmpegs.sandbox, Duration.ofSeconds(30))
+        work = Files.createTempDirectory(dir, "work-")
+
+        val transcoded =
+            failing
+                .transcode(Files.write(work.resolve("upload"), TestVoices.wav(2.0)), VoiceFormat.WAV, work)
+                .shouldBeInstanceOf<Transcoding.Transcoded>()
+
+        transcoded.durationMs shouldBeInRange 1_900..2_200
+        transcoded.aac shouldBe null
     }
 
     /** In a work directory of its own, as the pipeline gives each upload: [work] is the last one. */

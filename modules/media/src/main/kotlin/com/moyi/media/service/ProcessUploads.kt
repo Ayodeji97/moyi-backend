@@ -233,8 +233,30 @@ internal class ProcessUploads(
 
             is Transcoding.Transcoded -> {
                 storage.put(StorageKey.forVoice(asset.storageKey), transcoding.file, VoiceRules.KEPT_CONTENT_TYPE)
-                Result.VoiceReady(transcoding.durationMs, transcoding.waveform)
+                Result.VoiceReady(transcoding.durationMs, transcoding.waveform, transcoding.aac?.let { storeAac(asset, it) })
             }
+        }
+    }
+
+    /**
+     * ADR-0060: the AAC variant iOS streams, stored; its key, or null when the storage cannot take it.
+     * Best effort, an outage included (review of #182): the note is kept with its Opus alone rather
+     * than the delivery retried for a copy iOS can live without. Whatever of the object did arrive is
+     * at a key [MediaAsset.objectKeys] derives, so the note's deletion takes it.
+     */
+    @Suppress("SwallowedException") // On purpose: the copy is best effort, and the line below says so, without the key.
+    private fun storeAac(
+        asset: MediaAsset,
+        aac: Transcoding.AacVariant,
+    ): StorageKey? {
+        val key = StorageKey.forVoiceAac(asset.storageKey)
+        return try {
+            storage.put(key, aac.file, VoiceRules.AAC_CONTENT_TYPE)
+            key
+        } catch (unavailable: ObjectStoreUnavailableException) {
+            // The id, never the key: the key reaches the bytes.
+            log.warn("Media {}: its AAC copy could not be stored; the note is kept with its Opus alone", asset.id)
+            null
         }
     }
 
@@ -311,7 +333,7 @@ internal class ProcessUploads(
             // what was made here was written (D5).
             when (result) {
                 is Result.Ready -> result.variants.forEach { bestEffortDelete(it.key, asset) }
-                is Result.VoiceReady -> bestEffortDelete(StorageKey.forVoice(asset.storageKey), asset)
+                is Result.VoiceReady -> result.madeOf(asset).forEach { bestEffortDelete(it, asset) }
                 is Result.Refused -> Unit
             }
             if (current?.isGone == true) releases.released(asset.id, now)
@@ -328,10 +350,11 @@ internal class ProcessUploads(
                 }
 
                 is Result.VoiceReady -> {
-                    check(assets.markVoiceReady(asset.id, result.durationMs, result.waveform, now)) {
+                    check(assets.markVoiceReady(asset.id, result.durationMs, result.waveform, result.aacKey, now)) {
                         "a voice note under its row lock, PROCESSING, becomes READY"
                     }
-                    log.info("Media {} is ready ({} ms)", asset.id, result.durationMs)
+                    val kept = if (result.aacKey == null) "Opus only" else "Opus and AAC"
+                    log.info("Media {} is ready ({} ms, {})", asset.id, result.durationMs, kept)
                     // Kept without it: the client draws its stand-in (ADR-0061). Nothing of the note in the line.
                     if (result.waveform == null) log.warn("Media {} is ready without its waveform: it could not be measured", asset.id)
                     releases.ready(asset.id, now)
@@ -386,7 +409,12 @@ internal class ProcessUploads(
         data class VoiceReady(
             val durationMs: Int,
             val waveform: Waveform?,
-        ) : Result
+            /** Where its AAC variant was stored (ADR-0060), or null when none was made. */
+            val aacKey: StorageKey?,
+        ) : Result {
+            /** What this attempt stored for [asset]: its Opus and, when one was made, its AAC variant. */
+            fun madeOf(asset: MediaAsset): List<StorageKey> = listOf(StorageKey.forVoice(asset.storageKey)) + listOfNotNull(aacKey)
+        }
 
         data class Refused(
             val reason: MediaRefusal,

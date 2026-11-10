@@ -106,9 +106,11 @@ What you do:
    record that it was reported; write the reference. Its objects leave the storage within seconds.
    **[legal: confirm]** how long it must be kept before deletion if the authority says nothing.
 5. **The mirror** (ADR-0050 decision 7): if the asset was ever made READY before it was blocked (it
-   is moderated seconds after processing, but a mirror run in that window would copy it), its
-   display and full variants may be in the media mirror bucket until that copy's 31-day expiry. The
-   mirror's lock prevents deleting them early. Tell the authority that a copy exists in a locked
+   is moderated seconds after processing, but a mirror run in that window would copy it), what was
+   kept of it may be in the media mirror bucket until that copy's 31-day expiry: a photo's display
+   and full variants (`display.webp`, `full.webp`), a voice note's Opus and its AAC copy
+   (`voice.ogg`, `voice.m4a`, ADR-0060), all under `v/<the part after in/>/`. The mirror's lock
+   prevents deleting them early. Tell the authority that a copy exists in a locked
    backup and when it expires.
 
 ## 3. A member reports an entry, its photo or its voice note (FR-100, ADR-0053)

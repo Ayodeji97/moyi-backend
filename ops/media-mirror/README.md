@@ -204,7 +204,7 @@ since then is gone from the mirror.
 ## Restoring from the mirror, and re-applying the erasures
 
 Only when `moyi-media` itself is lost or damaged. The mirror holds `v/` objects only, so it
-restores photos that were made, never raw uploads.
+restores photos and voice notes that were made, never raw uploads.
 
 1. **Restore the database first** (ADR-0043's restore drill, then the real restore), so the
    restored `media_assets` says which assets exist and which are erased. A restore of objects
@@ -216,9 +216,13 @@ restores photos that were made, never raw uploads.
    deleted again. List the keys in `psql` on the server, never pasting them anywhere else:
 
    ```sql
-   -- One line per key the asset may have had: its variants under v/ (the mirror holds nothing else).
-   SELECT 'v/' || substr(storage_key, 4) || '/' || v || '.webp'
-   FROM media_assets, unnest(ARRAY['full', 'display']) AS v
+   -- One line per key the asset may have had under v/ (the mirror holds nothing else): a photo's
+   -- two variants; a voice note's Opus and its AAC variant (ADR-0049, ADR-0060), the same list
+   -- as MediaAsset.objectKeys less the upload.
+   SELECT 'v/' || substr(storage_key, 4) || '/' || f
+   FROM media_assets,
+        unnest(CASE kind WHEN 'VOICE' THEN ARRAY['voice.ogg', 'voice.m4a']
+                         ELSE ARRAY['full.webp', 'display.webp'] END) AS f
    WHERE status = 'DELETED';
    ```
 

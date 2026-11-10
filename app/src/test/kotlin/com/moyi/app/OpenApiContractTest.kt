@@ -1174,11 +1174,14 @@ class OpenApiContractTest(
     @Test
     fun `an entry's voice note is an id, a status and, once playable, a URL and a length, every field always sent`() {
         val voice = api.components.schemas["EntryVoiceResponse"]!!
-        voice.properties.keys shouldBe setOf("id", "status", "url", "durationMs", "waveform", "sensitive")
+        voice.properties.keys shouldBe setOf("id", "status", "url", "durationMs", "waveform", "sensitive", "urlAac")
         voice.required.toSet() shouldBe voice.properties.keys
         voice.properties["status"]!!.enum.map { it.toString() } shouldBe listOf("READY", "PROCESSING", "NOT_SHARED")
-        listOf("url", "durationMs", "waveform").forEach { voice.properties[it]!!.types shouldContain "null" }
+        listOf("url", "durationMs", "waveform", "urlAac").forEach { voice.properties[it]!!.types shouldContain "null" }
         voice.description.shouldNotBeNull() shouldContain "to the other member only once it has passed moderation"
+        // Issue #152, ADR-0060: the AAC copy iOS streams, by url's rule.
+        voice.description shouldContain "urlAac is the same note as AAC-LC in MP4"
+        voice.description shouldContain "given to exactly whoever is given url"
         // Issue #165, ADR-0061: exactly 64 integers, each 0 to 255, when it is not null.
         val waveform = voice.properties["waveform"]!!
         waveform.types shouldContain "array"

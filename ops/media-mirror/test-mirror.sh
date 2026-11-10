@@ -90,9 +90,11 @@ mcx admin policy attach src mirror-read --user "$RO_USER" >/dev/null
 mcx mb --quiet --with-lock "dst/$DST_BUCKET" >/dev/null
 mcx retention set --quiet --default GOVERNANCE 30d "dst/$DST_BUCKET" >/dev/null
 
-# Keys shaped like the app's: random UUIDs under v/ and in/.
+# Keys shaped like the app's: random UUIDs under v/ and in/. K2 is a voice
+# note's AAC variant (ADR-0060): kept under v/ beside its Opus, so mirrored as
+# every kept object is, with nothing in mirror.sh naming it.
 K1="v/$(uuidgen | tr '[:upper:]' '[:lower:]')/full.webp"
-K2="v/$(uuidgen | tr '[:upper:]' '[:lower:]')/display.webp"
+K2="v/$(uuidgen | tr '[:upper:]' '[:lower:]')/voice.m4a"
 K3="in/$(uuidgen | tr '[:upper:]' '[:lower:]')"
 for k in "$K1" "$K2" "$K3"; do put "src/$SRC_BUCKET" "$k"; done
 

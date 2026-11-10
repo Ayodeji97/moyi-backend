@@ -461,7 +461,7 @@
     "to": "READY",
     "status": null,
     "code": null,
-    "reason": "The bytes are the declared ones (length, SHA-256) and one of the four allowed formats, the one declared; the header is within the pixel ceiling; libvips, in a sandbox with a time and a memory limit, makes a full and a display WebP with no metadata, within 350 and 150 KiB. READY under the row lock; the upload itself is deleted after the commit. A voice note: its bytes are one of the seven recorder containers, the one declared; ffmpeg, in the same sandbox, reads it through that container's demuxer and allowed decoders only, from a file only; its length is at most 61 s, by its container and by what it transcodes to; it is kept as one Ogg Opus file, mono, 24 kbit/s, with no tags or chapters, at most 500 KiB, under v/{uuid}/voice.ogg, and READY with durationMs. The upload is deleted after the commit.",
+    "reason": "The bytes are the declared ones (length, SHA-256) and one of the four allowed formats, the one declared; the header is within the pixel ceiling; libvips, in a sandbox with a time and a memory limit, makes a full and a display WebP with no metadata, within 350 and 150 KiB. READY under the row lock; the upload itself is deleted after the commit. A voice note: its bytes are one of the seven recorder containers, the one declared; ffmpeg, in the same sandbox, reads it through that container's demuxer and allowed decoders only, from a file only; its length is at most 61 s, by its container and by what it transcodes to; it is kept as one Ogg Opus file, mono, 24 kbit/s, with no tags or chapters, at most 500 KiB, under v/{uuid}/voice.ogg; and, made of that Opus, best effort, one AAC-LC MP4 file, mono, about 32 kbit/s, its index first, under v/{uuid}/voice.m4a (ADR-0060); and READY with durationMs. The upload is deleted after the commit.",
     "rule": "spec §4 D2, T-07, Q2, ADR-0048 §2-3, spec §4 D3, ADR-0049",
     "evidence": "smoke",
     "evidenceRef": "photos: …and its owner is given a URL and its size",
@@ -717,7 +717,7 @@
     "rule": "doc 06:184, ADR-0048 §2, ADR-0049",
     "evidence": "test",
     "evidenceRef": "ProcessingInterleavingTest#a photo deleted while it is processed is not made ready, and what was made of it is removed",
-    "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/ProcessUploads.kt#is Result.VoiceReady -> bestEffortDelete(StorageKey.forVoice(asset.storageKey), asset)"
+    "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/ProcessUploads.kt#is Result.VoiceReady -> result.madeOf(asset).forEach { bestEffortDelete(it, asset) }"
   },
   {
     "id": "media-ready-delete",

@@ -11,6 +11,7 @@ import com.moyi.media.infra.AssetRows
 import com.moyi.media.infra.MediaIntegrationTest
 import com.moyi.media.infra.MediaTestApplication
 import com.moyi.media.infra.processing.TestImages
+import com.moyi.media.infra.processing.TestVoices
 import com.moyi.media.web.MediaClient
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
@@ -72,7 +73,9 @@ internal class MediaAccountDeletionTest(
         transactions.execute { attachments.claim(ada, attached, AttachableKind.IMAGE, UUID.randomUUID()) } shouldBe true
         val loose = readyPhoto(ada)
         val beas = readyPhoto(bea)
-        val keys = listOf(attached, loose).map(::displayOf)
+        // ADR-0060: a voice note's Opus and its AAC variant go too.
+        val voice = readyVoice(ada)
+        val keys = listOf(attached, loose).map(::displayOf) + listOf("voice.ogg", "voice.m4a").map { keyOf(voice, it) }
         keys.forEach { stored(it) shouldBe true }
 
         deleteAccount(ada)
@@ -103,6 +106,23 @@ internal class MediaAccountDeletionTest(
         rows.statusOf(mediaId) shouldBe "READY"
         return mediaId
     }
+
+    private fun readyVoice(owner: UUID): UUID {
+        val mediaId = UUID.fromString(client.upload(owner, TestVoices.wav(2.0), declaredType = "audio/wav", kind = "VOICE"))
+        dispatcher.dispatchDue(clock.instant(), BUDGET)
+        rows.statusOf(mediaId) shouldBe "READY"
+        return mediaId
+    }
+
+    private fun keyOf(
+        mediaId: UUID,
+        name: String,
+    ): String =
+        "v/${jdbc.queryForObject(
+            "SELECT storage_key FROM media_assets WHERE id = ?",
+            String::class.java,
+            mediaId,
+        )!!.removePrefix("in/")}/$name"
 
     private fun deleteAccount(userId: UUID) {
         transactions.executeWithoutResult {

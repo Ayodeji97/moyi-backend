@@ -92,7 +92,9 @@ internal class EntryVoiceTest(
         val entry = body(created)
         voices.attachedTo(voice) shouldBe UUID.fromString(entry["id"].asString())
         val played = entry["voice"]
-        played.propertyNames().asSequence().toList() shouldBe listOf("id", "status", "url", "durationMs", "waveform", "sensitive")
+        played.propertyNames().asSequence().toList() shouldBe listOf("id", "status", "url", "durationMs", "waveform", "sensitive", "urlAac")
+        // ADR-0060: a note made without an AAC variant (before it existed) is played from its Opus alone.
+        played["urlAac"].isNull shouldBe true
         played["id"].asString() shouldBe voice.toString()
         played["status"].asString() shouldBe "READY"
         played["durationMs"].asInt() shouldBe ProcessedVoices.DURATION_MS
@@ -188,6 +190,38 @@ internal class EntryVoiceTest(
         played["url"].asString() shouldContain "X-Amz-Signature="
         played.has("waveform") shouldBe true
         played["waveform"].isNull shouldBe true
+    }
+
+    /**
+     * ADR-0060: the AAC variant iOS streams goes with the Opus, to exactly whoever is played the Opus: its author
+     * once it is ready, the partner only once it has passed moderation. Signed at the same moment for as long.
+     */
+    @Test
+    fun `the AAC variant is given with the Opus, to the author at once and to the partner once it has passed, signed alike`() {
+        val voice = voices.ready(owner = bea, withAac = true)
+        submit(bea, bondId, """{"text":"a secret kindness","voiceMediaId":"$voice"}""").status shouldBe 201
+        submit(ada, bondId, """{"text":"and mine"}""").status shouldBe 201
+
+        val own = body(getToday(bea, bondId))["myEntry"]["voice"]
+        val url = own["url"].asString()
+        val urlAac = own["urlAac"].asString()
+        urlAac.substringBefore("?") shouldEndWith "/voice.m4a"
+        urlAac shouldContain "X-Amz-Signature="
+        // The same signing instant and lifetime as the Opus's: one expiry for both.
+        signing(urlAac) shouldBe signing(url)
+        // The same object directory: the same note.
+        urlAac.substringBefore("?").substringBeforeLast("/") shouldBe url.substringBefore("?").substringBeforeLast("/")
+
+        val unmoderated = body(getToday(ada, bondId))["partnerEntry"]["voice"]
+        unmoderated["status"].asString() shouldBe "PROCESSING"
+        unmoderated["urlAac"].isNull shouldBe true
+        getToday(ada, bondId).contentAsString shouldNotContain "voice.m4a"
+
+        jdbc.update("UPDATE media_assets SET moderation_verdict = 'PASSED', moderated_at = now() WHERE id = ?", voice)
+        val passed = body(getToday(ada, bondId))["partnerEntry"]["voice"]
+        passed["status"].asString() shouldBe "READY"
+        passed["urlAac"].asString().substringBefore("?") shouldEndWith "/voice.m4a"
+        signing(passed["urlAac"].asString()) shouldBe signing(passed["url"].asString())
     }
 
     @Test
@@ -450,6 +484,12 @@ internal class EntryVoiceTest(
         mockMvc.get("/api/v1/bonds/$bondId/days/$date") { header(HttpHeaders.AUTHORIZATION, bearer(caller)) }.andReturn().response
 
     private fun bearer(user: UUID) = "Bearer ${tokens.issue(user).token}"
+
+    /** A signed URL's signing instant and lifetime, which two URLs signed alike share. */
+    private fun signing(url: String): Pair<String?, String?> {
+        val query = url.substringAfter("?").split("&").associate { it.substringBefore("=") to it.substringAfter("=") }
+        return query["X-Amz-Date"] to query["X-Amz-Expires"]
+    }
 
     private fun body(response: MockHttpServletResponse): JsonNode = json.readTree(response.contentAsString)
 

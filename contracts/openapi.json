@@ -6757,7 +6757,7 @@
       },
       "EntryVoiceResponse" : {
         "type" : "object",
-        "description" : "An entry's voice note as the caller is played it. url and durationMs are present when status is READY, to its author once it is transcoded, to the other member only once it has passed moderation; until then it is PROCESSING to them, whatever the reason. NOT_SHARED is its author's alone, as a photo's: held back from the other member for review, whether before or after the entry was sent; url and durationMs are still given unless it was blocked outright. sensitive as a photo's. The url is a signed GET of an Ogg Opus file (mono, 24 kbit/s), valid for at least 24 hours, ending on the hour and the same all hour, so it may be cached by; it is a credential for the voice note. durationMs is the length of what was transcoded, at most 61.1 seconds.",
+        "description" : "An entry's voice note as the caller is played it. url and durationMs are present when status is READY, to its author once it is transcoded, to the other member only once it has passed moderation; until then it is PROCESSING to them, whatever the reason. NOT_SHARED is its author's alone, as a photo's: held back from the other member for review, whether before or after the entry was sent; url and durationMs are still given unless it was blocked outright. sensitive as a photo's. The url is a signed GET of an Ogg Opus file (mono, 24 kbit/s), valid for at least 24 hours, ending on the hour and the same all hour, so it may be cached by; it is a credential for the voice note. durationMs is the length of what was transcoded, at most 61.1 seconds. urlAac is the same note as AAC-LC in MP4 (.m4a, mono, about 32 kbit/s, its index first), which iOS can stream: given to exactly whoever is given url, signed at the same moment and valid as long, and a credential as url is. It is null whenever url is, and also for a note processed before it existed or whose AAC copy could not be made; play url then.",
         "properties" : {
           "durationMs" : {
             "type" : [ "integer", "null" ],
@@ -6777,6 +6777,9 @@
           "url" : {
             "type" : [ "string", "null" ]
           },
+          "urlAac" : {
+            "type" : [ "string", "null" ]
+          },
           "waveform" : {
             "type" : [ "array", "null" ],
             "description" : "The voice note's loudness over time, to draw: 64 levels, each 0 to 255, one per equal slice of its length in order, the RMS of that slice scaled so that the loudest is 255 (all 0 for a silent note). Measured by the server from the note it keeps, never sent by a client. Given exactly when url is; null when url is, and for a note processed before levels were measured, when the client draws its own stand-in.",
@@ -6790,7 +6793,7 @@
             "minItems" : 64
           }
         },
-        "required" : [ "durationMs", "id", "sensitive", "status", "url", "waveform" ]
+        "required" : [ "durationMs", "id", "sensitive", "status", "url", "urlAac", "waveform" ]
       },
       "FieldViolation" : {
         "type" : "object",
