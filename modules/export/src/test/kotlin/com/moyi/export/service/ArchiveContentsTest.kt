@@ -77,7 +77,7 @@ internal class ArchiveContentsTest(
 
     @AfterEach
     fun clear() {
-        jdbc.execute("TRUNCATE TABLE data_exports")
+        jdbc.execute("TRUNCATE TABLE data_exports, export_archive_deletions")
         people.clear()
         storage.clear()
     }
