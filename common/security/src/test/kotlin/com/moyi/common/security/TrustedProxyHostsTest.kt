@@ -47,6 +47,16 @@ internal class TrustedProxyHostsTest {
     }
 
     @Test
+    fun `a blank name from a stray comma trusts nothing, least of all loopback`() {
+        // `InetAddress.getAllByName("")` is loopback: "kamal-proxy, " must not make every
+        // process in the app's own container a trusted proxy.
+        dns.answers[""] = listOf("127.0.0.1")
+        dns.answers[" "] = listOf("127.0.0.1")
+        resolver(listOf("kamal-proxy", "", " ")).resolve(request(remote = "127.0.0.1", forwardedFor = "10.9.1.1")).hostAddress shouldBe
+            "127.0.0.1"
+    }
+
+    @Test
     fun `a neighbour on the same Docker network is not believed, whatever it writes in the header`() {
         // The whole point of ruling 5: with 172.18.0.0/16 trusted this was "10.9.1.1", an
         // address the admin console's allow-list would admit.

@@ -24,7 +24,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  *   [ttl] plus 30 s.
  * - **Fails closed.** A name that does not resolve contributes no address, and its previous
  *   addresses are dropped rather than kept: an address kamal-proxy has given up can be handed
- *   to the next container Docker starts. Until the name resolves again its requests resolve to
+ *   to the next container Docker starts. "Does not resolve" is as the JDK sees it: its 30 s
+ *   positive cache can keep answering with a removed proxy's address, so a removed or
+ *   recreated proxy's old address stays trusted for up to about [ttl] plus 30 s. Until the name resolves again its requests resolve to
  *   the proxy's own address — every client in one rate-limit bucket and the admin console
  *   refusing everyone — which is over-strict and visible, never over-trusting.
  * - **Never resolves anything a client sent.** The names come from configuration only; the
@@ -33,11 +35,16 @@ import java.util.concurrent.atomic.AtomicBoolean
  * With no names configured (every profile but production) nothing is ever looked up.
  */
 class TrustedProxyHosts(
-    private val hosts: List<String>,
+    configured: List<String>,
     private val lookup: (String) -> List<InetAddress> = { InetAddress.getAllByName(it).toList() },
     private val nanoTime: () -> Long = System::nanoTime,
     private val ttl: Duration = DEFAULT_TTL,
 ) {
+    // A blank name must never reach the lookup: `InetAddress.getAllByName("")` answers loopback,
+    // so `"kamal-proxy, "` (a stray comma in the environment) would trust every process in the
+    // app's own container. Blanks are dropped, the rest trimmed.
+    private val hosts: List<String> = configured.map(String::trim).filter(String::isNotEmpty)
+
     private class Answer(
         val addresses: Set<InetAddress>,
         val resolvedAt: Long,

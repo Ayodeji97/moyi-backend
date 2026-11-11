@@ -50,7 +50,11 @@ negative one 10 s), so a kamal-proxy recreated at a new address is believed with
 no address, and the addresses it resolved to before are dropped: decision 1's measurement is that
 an address given up is handed to the next container. Until the name resolves again, a request
 through kamal-proxy resolves to kamal-proxy's own address. That is ADR-0023's "over-strict and
-visible" posture: every client in one rate-limit bucket, and the console refusing everyone. A WARN
+visible" posture: every client in one rate-limit bucket, and the console refusing everyone.
+"Does not resolve" is as the JDK sees it: its 30 s positive cache can go on answering with the
+address of a proxy that has been removed, so a removed proxy's old address, like a recreated
+one's, stays trusted for up to about 35 s (Negative, below). Blank names (a stray comma in the
+environment variable) are dropped before any lookup, because the JDK resolves `""` to loopback. A WARN
 is written once when a name stops resolving and an INFO once when it resolves again.
 
 **4. Only configuration is ever resolved.** The names come from deploy-time configuration. The
@@ -70,12 +74,20 @@ is recreated, no proxy rebooted, no address read and copied into the repository,
 server needs nothing re-read (ADR-0042's neutral consequence no longer applies).
 
 **Negative:** a DNS lookup now sits in the request path, once per five seconds, on one request.
-After `kamal proxy reboot` gives kamal-proxy a new address there is a window of up to about 35 s
+After `kamal proxy reboot` gives kamal-proxy a new address, or after it is stopped, there is a window of up to about 35 s
 in which (a) its requests are not believed, so all clients share one bucket and the console
 refuses, and (b) its old address is still trusted, so a container started in that window and
 given the old address would be believed. (b) needs a container to start during a proxy reboot,
 which the owner does by hand and rarely; it is a window of seconds, where the `/16` was always
-open. A Docker host where `kamal-proxy` resolves to something else is a host already lost.
+open. While no `kamal-proxy` container exists, Docker's embedded DNS forwards the name upstream
+(and through any `search` domain the host passes on), so for that time a resolver outside the
+host could answer it. The deploy check confirms the web container's `/etc/resolv.conf` carries no
+`search` line; an upstream that lies about `kamal-proxy` is accepted as out of reach.
+
+**Rollback:** `kamal rollback` runs the old image with the environment of the checkout it is run
+from. From main after this change no range comes back (the old image then trusts nobody:
+over-strict, all clients in one bucket). From a checkout before it, `172.18.0.0/16` comes back,
+which once the console is on reopens the forgery; roll back from main.
 
 **Neutral:** IPv6 is handled as IPv4 is: whatever addresses the name has, each trusted exactly.
 `kamal` has no IPv6 today.
