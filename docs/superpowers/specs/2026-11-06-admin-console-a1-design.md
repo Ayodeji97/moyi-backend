@@ -293,8 +293,8 @@ only `modules/admin` may depend on them.
 
 ## 10. Operations
 
-- Migration **V42** (`modules/admin`): `admin_accounts`, `admin_invitations`, `audit_log`
-  plus its trigger, and the `admin_invite` and `admin_disable` functions. Rollback past V42 drops an unused console. No other module's data changes.
+- Migration **V60** (`modules/admin`): `admin_accounts`, `admin_invitations`, `audit_log`
+  plus its trigger, and the `admin_invite` and `admin_disable` functions. Rollback past V60 drops an unused console. No other module's data changes.
 - New secret `MOYI_ADMIN_TOTP_KEY`, and new config `MOYI_ADMIN_ENABLED` and
   `MOYI_ADMIN_ALLOWED_NETWORKS`, added to `config/deploy.yml` under `servers.web` only (never
   the media worker), with `ENABLED` `"false"`. The app's own startup check (§4) is the guard.

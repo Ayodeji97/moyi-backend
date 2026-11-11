@@ -11,7 +11,7 @@ import javax.sql.DataSource
 
 /**
  * The rule that an audit action is one of a closed set lives once, in
- * [AuditAction]. V42's `CHECK` repeats it for the database; this holds the SQL
+ * [AuditAction]. V60's `CHECK` repeats it for the database; this holds the SQL
  * to the enum, so a value added to one and not the other fails here.
  */
 @SpringBootTest

@@ -19,7 +19,7 @@ import java.util.UUID
  * run gains nothing.
  *
  * As [V25BackfillTest]: a database of its own in the shared container, taken to V41 by Flyway
- * (V42 is another branch's), given rows, then taken to V43. No Spring context: what is tested is
+ * (no migration is numbered V42), given rows, then taken to V43. No Spring context: what is tested is
  * the migration as Flyway runs it in production, against rows written before it.
  */
 class V43BackfillTest : PostgresIntegrationTest() {

@@ -21,13 +21,13 @@ import java.util.UUID
 import javax.sql.DataSource
 
 /**
- * V42 against a real Postgres, through the full Flyway chain: the operator's
+ * V60 against a real Postgres, through the full Flyway chain: the operator's
  * functions, the append-only trigger, and the TOTP compare-and-set. Audit rows
  * cannot be cleaned up (that is the point of them), so each test uses an email
  * of its own.
  */
 @SpringBootTest
-internal class V42MigrationTest(
+internal class V60MigrationTest(
     @Autowired private val accounts: AdminAccountRepository,
     @Autowired private val transactions: TransactionTemplate,
     @Autowired dataSource: DataSource,

@@ -24,7 +24,7 @@ console is unreachable in production until the owner switches it on.
 
 ## Decision
 
-**1. Admins are not users.** Their own tables (`admin_accounts`, `admin_invitations`, V42), never
+**1. Admins are not users.** Their own tables (`admin_accounts`, `admin_invitations`, V60), never
 `users`. No user-side bug can grant admin and no admin-side bug can touch a user's credentials.
 
 **2. Bootstrap is a SQL function, not a page.** `admin_invite(email, role)` and `admin_disable(email)`
@@ -127,7 +127,7 @@ secrets are readable by anyone holding both the database and the key. Without th
 only throttle on sign-in is the lockout, which can lock a real operator out for 15 minutes by an
 attacker who is already inside the allowlist and knows the email.
 
-**Neutral.** V42 only; no other module's data changes. Metrics `moyi_admin_sign_in_total{outcome}`
+**Neutral.** V60 only; no other module's data changes. Metrics `moyi_admin_sign_in_total{outcome}`
 and `moyi_admin_lookup_total`. `PasswordHashing`, `UserAdminLookup` and `BondAdminLookup` are new `api`
 ports of identity and bond.
 
