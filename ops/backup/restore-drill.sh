@@ -23,7 +23,8 @@
 #
 #   ops/backup/restore-drill.sh --email <an account in the backup> [--object daily/<name>] [--version <commit>]
 #
-# --version is the commit whose image boots (default: origin/main). Use the
+# --version is the commit whose image boots (default: origin/main); a short SHA,
+# branch or tag is resolved to the full one CI tags images with. Use the
 # commit production runs when main has migrations the backup predates, or the
 # drill tests a migration as well as a restore.
 #
@@ -58,6 +59,13 @@ if [ -z "$VERSION" ]; then
   git -C "$ROOT" fetch --quiet origin main
   VERSION="$(git -C "$ROOT" rev-parse origin/main)"
 fi
+# CI tags images with the full 40-character commit only, so a short one, a branch or
+# a tag would stop at the image pull. Resolve whatever names a commit to its full SHA.
+if ! FULL="$(git -C "$ROOT" rev-parse --verify --quiet "${VERSION}^{commit}")"; then
+  git -C "$ROOT" fetch --quiet origin
+  FULL="$(git -C "$ROOT" rev-parse --verify --quiet "${VERSION}^{commit}")" || die "--version $VERSION names no commit in this repository"
+fi
+VERSION="$FULL"
 IMAGE="ghcr.io/ayodeji97/moyi-backend:$VERSION"
 
 START="$(date +%s)"
