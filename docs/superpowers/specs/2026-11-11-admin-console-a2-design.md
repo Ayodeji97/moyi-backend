@@ -716,6 +716,28 @@ rule; the `admin:` actor prefix.
    member. The purpose is in the audit row and an `ADMIN` can read it, but nothing stops the
    choice, and with one operator nobody checks it.
 
+### 14a. The owner's rulings (2026-11-11)
+
+The owner adopted all six recommendations after asking for them to be scrutinised first. The
+scrutiny kept four as written and tightened two:
+
+1. **Adopted as written** (show only member-request/operations lookups and moderation removals;
+   one sentence for everyone). **[legal: confirm]** stays open: the GDPR Art. 15/23 and DSA Art.
+   16(5)/17 checks are owed before real members use the console, and the console stays off until
+   then. Added: a withholding is justified only while its case is open, so withheld rows are owed
+   a review for release once the case closes (not built in A2; recorded in ADR-0063's Owed list).
+2. **Adopted.** Word reports are decided from the reporter's detail; `psql` reading of entry text
+   stops when the console is switched on (runbook §3.3 amended in the A2 code PR); A5 is built
+   before A3.
+3. **Adopted.** `NON_CONSENSUAL` (and `MINOR_SEXUAL_CONTENT`) media is never shown in the console.
+4. **Adopted.** `BLOCKED` evidence is deleted only on the server; blocking stays in the console.
+5. **Adopted.** One moderator decides alone; a second pair of eyes on `BLOCK` is revisited when a
+   second moderator is invited.
+6. **Adopted, tightened.** A lookup for `SAFETY` or `LEGAL` (the withheld purposes) requires a
+   typed note (1–400 characters), written to the audit row's `justification`, so a hidden lookup
+   always says why and an `ADMIN` can check it later. `MEMBER_REQUEST` and `OPERATIONS` take no
+   note. The note is never disclosed (§9.3's `justification = null` holds).
+
 ## 15. Where the sources disagree, or leave a gap
 
 - **A1 keeps an audit log but does not implement `AdminAccessLog`**, which ADR-0059 decision 8

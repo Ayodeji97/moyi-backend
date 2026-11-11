@@ -198,7 +198,7 @@
 **Files:**
 - Modify: `modules/admin/build.gradle.kts` (`projects.modules.export`)
 - Create: `modules/admin/src/main/kotlin/com/moyi/admin/service/AdminAccessDisclosure.kt` (implements `export.api.AdminAccessLog`; **not** `@ConditionalOnAdminConsole`, ADR-0055 ruling D)
-- Modify: `modules/admin/src/main/kotlin/com/moyi/admin/service/UserLookup.kt`, `web/UserLookupController.kt`, `templates/admin/users.html` (a required purpose select; `metadata.purpose`)
+- Modify: `modules/admin/src/main/kotlin/com/moyi/admin/service/UserLookup.kt`, `web/UserLookupController.kt`, `templates/admin/users.html` (a required purpose select; `metadata.purpose`; a required note of 1–400 characters for `SAFETY`/`LEGAL`, written to `justification`, owner ruling 6, spec §14a)
 - Modify: `modules/export/src/main/kotlin/com/moyi/export/service/ArchiveWriter.kt` (the three statements become the one sentence of spec §9.3, shown whether or not anything was withheld; `NO_ADMIN_LOG` stays for no bean), `api/AdminAccessLog.kt` (KDoc: implemented by admin; some access is withheld by rule)
 - Test: `app/src/test/kotlin/com/moyi/app/admin/AdminAccessDisclosureTest.kt`, `ConsoleMatchesScriptTest.kt`; A1's `UserLookupTest` (now passes a purpose); any export test asserting `logKept = false` or the old sentences
 
@@ -209,7 +209,7 @@
     - A lookup of A for `MEMBER_REQUEST` and the removal of A's moderation-quarantined photo: A's export lists `ACCOUNT_LOOKED_UP` and `MEDIA_REMOVED`, `justification: null`. B's lists nothing.
     - **A view and a release of A's photo list nothing**, and two exports built either side of a later block of a viewed photo have byte-identical `adminAccess` (the re-review's finding 2: no tip-off by disappearance).
     - A view under a `VIOLENCE_OR_SELF_HARM` report, an uphold that took A's photo down, and an operator's `REPORTED` hold then deleted: nothing for A.
-    - Lookups for `SAFETY` and `LEGAL`: nothing.
+    - Lookups for `SAFETY` and `LEGAL`: nothing. Without a note they are refused (400 on the form, nothing audited as `SUCCEEDED`); with one, the audit row's `justification` holds it. Mutation: drop the note check; the refusal test goes red.
     - `logKept` is `true` with the console off too.
     - **Through `PrepareExports`, with no surrounding transaction.** The test class is **not** `@Transactional`: it calls the job's `prepareDue` as the scheduler does and asserts the export is `READY` and its archive's `adminAccess`. A test inside a test transaction would hide a `MANDATORY` method (the re-review's finding 1). Mutation: make `ownedBy` `MANDATORY`; this test goes red.
     - The `::text` binding: a seeded `MEDIA_DELETED` row on A's asset is found. Mutation: bind the ids as `uuid[]`; the query fails and the test goes red.
