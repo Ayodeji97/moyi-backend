@@ -65,7 +65,8 @@ functions use the same tables, and conditional Spring Data repositories add frag
 by the existing `ClientAddressResolver` (trusted proxies only, ADR-0023). A refused address gets the
 byte-identical `401` the API entry point writes for a missing token, with or without a bearer, and
 never a session. Deploy-time configuration only. Production's DNS is "DNS only" and the only trusted
-proxy is kamal-proxy's `172.18.0.0/16`, so the resolved address is the operator's own; behind
+proxy is kamal-proxy (its `172.18.0.0/16` until ADR-0062 narrowed it to kamal-proxy by name), so
+the resolved address is the operator's own; behind
 Cloudflare it would be Cloudflare's (runbook).
 
 **7. Sessions: the container's own `HttpSession`, in memory** (builder check, finding 5, replacing
@@ -169,14 +170,16 @@ who agreed to each recommendation on 2026-11-11.
    Docker network kamal-proxy shares with every other container) to kamal-proxy alone, so that no
    other container on that network can claim an allowlisted address through `X-Forwarded-For`.
    That is a separate follow-up pull request, not this one; until it merges the console stays
-   **off** in production, as this pull request ships it.
+   **off** in production, as this pull request ships it. *(Done by ADR-0062, 2026-11-11:
+   kamal-proxy is trusted by its container name and the range is gone; met once deployed.)*
 
 ## Owed
 
 - A2 to A5 (spec §11): the report queue, suspension, jobs and flags, content access with
   justification, then the `audit_log` retention job.
-- **A follow-up pull request:** narrow the trusted proxies to kamal-proxy alone (ruling 5). The
-  console is not switched on before it merges.
+- ~~**A follow-up pull request:** narrow the trusted proxies to kamal-proxy alone (ruling 5). The
+  console is not switched on before it merges.~~ Done by ADR-0062 (2026-11-11); the console is
+  not switched on before that is deployed.
 - **The owner:** then switch it on following `ops/admin/README.md` (key, allowlist, the
   `admin.getmoyi.app` host, invite); a deploy hook cannot do it for him.
 - Deferred minor review findings are in the build ledger, not repeated here.

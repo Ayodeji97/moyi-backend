@@ -138,6 +138,21 @@ internal class ProductionStartsWithoutMediaSecretsTest {
     }
 
     /**
+     * kamal-proxy is the only proxy the API believes, trusted by name (ADR-0062, the owner's
+     * ruling 5 on ADR-0055): no role trusts an address range, because the one range that was
+     * here, Kamal's whole Docker network, also held the media worker, Postgres and Valkey,
+     * and any of them could then name any client in `X-Forwarded-For`.
+     */
+    @Test
+    fun `the API trusts kamal-proxy by name and no role trusts an address range`() {
+        roles.getValue("web").clear["MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXY_HOSTS"] shouldBe "kamal-proxy"
+        roles.forEach { (role, environment) ->
+            val ranges = environment.clear.filterKeys { it.startsWith("MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXIES") }
+            withClue("config/deploy.yml trusts an address range in $role: $ranges") { ranges shouldBe emptyMap() }
+        }
+    }
+
+    /**
      * The API sends through the production Firebase project, never the development
      * one (ops/notification/README.md, #133); the media worker keeps `log`, because it
      * holds no FCM secrets and on FCM would refuse to start.

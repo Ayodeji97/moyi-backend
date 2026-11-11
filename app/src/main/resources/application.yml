@@ -353,8 +353,8 @@ management:
 # `moyi.security.client-address.trusted-proxies` is EMPTY here on purpose:
 # with no ranges configured no `X-Forwarded-For` is believed and the socket
 # address is the client, which behind a proxy means every request shares one
-# address — over-strict and visible, rather than spoofable. Production sets
-# it to kamal-proxy's Docker range and Cloudflare's published ranges.
+# address — over-strict and visible, rather than spoofable. Production trusts
+# kamal-proxy by name instead, in `trusted-proxy-hosts` (ADR-0062), and no range.
 
 moyi:
   gratitude:

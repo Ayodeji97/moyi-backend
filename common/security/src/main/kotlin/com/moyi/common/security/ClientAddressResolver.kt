@@ -1,6 +1,7 @@
 package com.moyi.common.security
 
 import jakarta.servlet.http.HttpServletRequest
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.security.web.util.matcher.IpAddressMatcher
 import org.springframework.stereotype.Component
@@ -21,8 +22,13 @@ import org.springframework.stereotype.Component
  * someone forgot to configure the ranges, per-IP limiting collapses to
  * per-proxy limiting — over-strict, and visible — rather than to
  * per-whatever-the-client-claims, which is no limit at all. In production,
- * kamal-proxy and Cloudflare sit in front (ADR-0011), and their ranges go in
- * `moyi.security.client-address.trusted-proxies`.
+ * kamal-proxy sits in front (ADR-0011) and is trusted **by name**, in
+ * `moyi.security.client-address.trusted-proxy-hosts` ([TrustedProxyHosts],
+ * ADR-0062): its address on Kamal's Docker network is Docker's to assign, and
+ * trusting the whole network would trust every container on it. Fixed ranges
+ * (Cloudflare's, should the host ever be proxied) go in
+ * `moyi.security.client-address.trusted-proxies`. A proxy is trusted when it
+ * matches either list.
  *
  * Tomcat's `RemoteIpValve` does the same job with a regular expression over
  * the proxy addresses and rewrites `remoteAddr` for everyone; ADR-0023 says
@@ -31,14 +37,18 @@ import org.springframework.stereotype.Component
 @Component
 class ClientAddressResolver(
     properties: ClientAddressProperties,
+    private val proxyHosts: TrustedProxyHosts,
 ) {
+    @Autowired
+    constructor(properties: ClientAddressProperties) : this(properties, TrustedProxyHosts(properties.trustedProxyHosts))
+
     private val trusted: List<IpAddressMatcher> = properties.trustedProxies.map(::IpAddressMatcher)
 
     fun resolve(request: HttpServletRequest): ClientAddress {
         val socket =
             ClientAddress.parse(request.remoteAddr)
                 ?: error("The servlet container reported a remote address that is not an address")
-        if (trusted.isEmpty() || !socket.isTrustedProxy()) return socket
+        if (!socket.isTrustedProxy()) return socket
 
         // Right to left, and only as far as the entries parse: a hop that is
         // not an address ends the walk, because what lies beyond it was
@@ -64,7 +74,7 @@ class ClientAddressResolver(
         return client
     }
 
-    private fun ClientAddress.isTrustedProxy(): Boolean = trusted.any { it.matches(hostAddress) }
+    private fun ClientAddress.isTrustedProxy(): Boolean = trusted.any { it.matches(hostAddress) } || inet in proxyHosts
 
     private companion object {
         const val FORWARDED_FOR = "X-Forwarded-For"
@@ -72,11 +82,13 @@ class ClientAddressResolver(
 }
 
 /**
- * The proxies whose `X-Forwarded-For` entries are believed, as CIDR ranges
- * (`10.0.0.0/8`, `fd00::/8`). Empty by default — see [ClientAddressResolver]
- * for why empty means "trust nobody" rather than "trust everybody".
+ * The proxies whose `X-Forwarded-For` entries are believed: [trustedProxies] as CIDR ranges
+ * (`10.0.0.0/8`, `fd00::/8`), [trustedProxyHosts] as names resolved to their current
+ * addresses (`kamal-proxy`; [TrustedProxyHosts]). Both empty by default — see
+ * [ClientAddressResolver] for why empty means "trust nobody" rather than "trust everybody".
  */
 @ConfigurationProperties(prefix = "moyi.security.client-address")
 data class ClientAddressProperties(
     val trustedProxies: List<String> = emptyList(),
+    val trustedProxyHosts: List<String> = emptyList(),
 )

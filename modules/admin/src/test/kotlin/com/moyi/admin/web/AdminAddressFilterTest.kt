@@ -2,6 +2,7 @@ package com.moyi.admin.web
 
 import com.moyi.common.security.ClientAddressProperties
 import com.moyi.common.security.ClientAddressResolver
+import com.moyi.common.security.TrustedProxyHosts
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import jakarta.servlet.FilterChain
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.security.web.AuthenticationEntryPoint
+import java.net.InetAddress
 
 /**
  * The allow-list on its own (spec §4): which addresses it admits, that an empty list admits
@@ -52,6 +54,20 @@ internal class AdminAddressFilterTest {
         val filter = filter("10.9.0.0/16")
         passes(filter, request("203.0.113.7").apply { addHeader("X-Forwarded-For", "10.9.1.1") }) shouldBe false
         passes(filter, request("172.16.0.2").apply { addHeader("X-Forwarded-For", "10.9.1.1") }) shouldBe true
+    }
+
+    @Test
+    fun `behind kamal-proxy trusted by name, a neighbour container cannot claim an allowed address`() {
+        // Ruling 5 (ADR-0055, ADR-0062): kamal-proxy is 172.18.0.2 on Kamal's network and the
+        // media worker 172.18.0.7. Trusting the network let the worker say "10.9.1.1".
+        val byName =
+            ClientAddressResolver(
+                ClientAddressProperties(trustedProxyHosts = listOf("kamal-proxy")),
+                TrustedProxyHosts(listOf("kamal-proxy"), { listOf(InetAddress.getByAddress(byteArrayOf(172.toByte(), 18, 0, 2))) }),
+            )
+        val filter = AdminAddressFilter(listOf("10.9.0.0/16"), byName, entryPoint, apiHeaders = null)
+        passes(filter, request("172.18.0.7").apply { addHeader("X-Forwarded-For", "10.9.1.1") }) shouldBe false
+        passes(filter, request("172.18.0.2").apply { addHeader("X-Forwarded-For", "10.9.1.1") }) shouldBe true
     }
 
     @Test

@@ -62,7 +62,7 @@ certificate problem has to be diagnosed by switching it on deliberately.
 is known only once Kamal has created its network on the server, so it was set by
 a change after the first deploy: `172.18.0.0/16`. Until then every client shared
 one rate-limit bucket: over-strict, never spoofable (ADR-0023). A rebuilt server
-needs its range read again before its first deploy.
+needs its range read again before its first deploy. *(Superseded 2026-11-11 by ADR-0062: kamal-proxy is now trusted by its container name, and nothing is read off the server.)*
 
 ## Alternatives considered
 - **Kamal builds the image on each deploy** — rejected: production would run an
