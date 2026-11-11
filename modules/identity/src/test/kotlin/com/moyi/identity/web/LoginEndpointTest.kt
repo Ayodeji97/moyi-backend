@@ -8,7 +8,6 @@ import com.moyi.identity.infra.security.Argon2idPasswordHasher
 import com.moyi.identity.infra.security.TestBreachCorpus
 import com.moyi.notification.api.EmailMessage
 import io.kotest.matchers.collections.shouldHaveSize
-import io.kotest.matchers.ints.shouldBeInRange
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
@@ -33,6 +32,7 @@ import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
+import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -187,7 +187,7 @@ internal class LoginEndpointTest(
         locked.status shouldBe 401
         locked.contentAsString shouldContain "\"code\":\"INVALID_CREDENTIALS\""
         failedAttempts() shouldBe 5
-        secondsUntilUnlock() shouldBeInRange 55..60
+        untilUnlock() shouldBe Duration.ofMinutes(1)
         // The verify still ran for the locked attempt: 5 wrong + 1 locked.
         hasher.matchesCalls.get() shouldBe 6
     }
@@ -196,17 +196,17 @@ internal class LoginEndpointTest(
     fun `each lock is longer than the last, and a successful sign-in resets everything`() {
         registerAndActivate()
         repeat(5) { login(password = "wrong").status shouldBe 401 }
-        secondsUntilUnlock() shouldBeInRange 55..60
+        untilUnlock() shouldBe Duration.ofMinutes(1)
 
         expireLock()
         login(password = "wrong").status shouldBe 401
         failedAttempts() shouldBe 6
-        secondsUntilUnlock() shouldBeInRange 115..120
+        untilUnlock() shouldBe Duration.ofMinutes(2)
 
         expireLock()
         login(password = "wrong").status shouldBe 401
         failedAttempts() shouldBe 7
-        secondsUntilUnlock() shouldBeInRange 235..240
+        untilUnlock() shouldBe Duration.ofMinutes(4)
 
         expireLock()
         login(password = PASSWORD).status shouldBe 200
@@ -558,10 +558,16 @@ internal class LoginEndpointTest(
 
     private fun failedAttempts(): Int = jdbc.queryForObject("SELECT failed_attempts FROM credentials", Int::class.java)!!
 
-    private fun secondsUntilUnlock(): Int =
-        jdbc.queryForObject("SELECT CAST(EXTRACT(EPOCH FROM (locked_until - now())) AS int) FROM credentials", Int::class.java)!!
+    // The lock is set and judged by the injected clock, so it is measured and
+    // lapsed by that clock too, never by the database's now(). The clock stands
+    // still while the wall clock runs on; the two drift apart by however long
+    // the test has taken since the clock was last set, and the first version
+    // of these helpers used now() and failed whenever that passed a second.
+    private fun lockedUntil(): Instant = jdbc.queryForObject("SELECT locked_until FROM credentials", Timestamp::class.java)!!.toInstant()
 
-    private fun expireLock() = jdbc.update("UPDATE credentials SET locked_until = now() - interval '1 second'")
+    private fun untilUnlock(): Duration = Duration.between(clock.instant(), lockedUntil())
+
+    private fun expireLock() = clock.set(lockedUntil().plusSeconds(1))
 
     @TestConfiguration
     class RecordingConfiguration {
