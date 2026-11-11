@@ -312,11 +312,12 @@
 # wrong code and a replayed one refused, no CSRF token a 403, sign-out ending the session, five failures
 # locking the account; and audit_log holds the rows, none with an email, while UPDATE and DELETE on it
 # raise. It cannot show the console OFF (404 with a bearer): the local profile has it on, and
-# AdminDisabledTest shows it. Last run on 2026-11-06, on feat/admin-console-a1, from a jar of the tree
-# after its enrolment page was found cut off for a visitor with no session (the QR code outgrew the
-# response buffer; MockMvc cannot see it), on a fresh database that applied 41 migrations to V42, against
-# its own compose project (moyi-99: Postgres 55499, Valkey 56399, MinIO 59299), the jar booted by hand
-# (local profile) and --attach: 1369 passed, 0 failed, 0 skipped, 35 sections.
+# AdminDisabledTest shows it. Last run on 2026-11-11, on feat/admin-console-a1 after main (ca77fe4) was
+# merged in and the migration renumbered V60, at 818a00f (its jar built from the same main sources), on a
+# fresh database that applied 54 migrations to V60, against its own compose project (moyi-131s: Postgres
+# 55531, Valkey 56531, MinIO 59531), the jar booted by hand (local profile, the five crons at */5) and
+# --attach: 1716 passed, 0 failed, 1 skipped (the tag across the erasure, the poller having won the
+# race), 42 admin checks among them. Before the merge, on 2026-11-06, at V42: 1369, 0, 0, 35 sections.
 # Since semantic search S1 (FR-204, ADR-0054) it runs with the embedding provider `none`, as the
 # local profile and production name it: search 200 by words alone; "Remember when" 200 from the
 # words' ranking alone (and a plain question whose words are not all in one entry answers no day),
