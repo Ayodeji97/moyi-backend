@@ -57,7 +57,7 @@ internal class TotpTest {
     fun `otpauth uri has the fixed shape`() {
         val uri = totpAt(0).otpauthUri(secret, "op@example.com", "Moyi admin")
         assertEquals(
-            "otpauth://totp/Moyi%20admin:op%40example.com?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ" +
+            "otpauth://totp/Moyi%20admin:op%40example.com?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ" + // gitleaks:allow (RFC 6238 test seed)
                 "&issuer=Moyi%20admin&algorithm=SHA1&digits=6&period=30",
             uri,
         )

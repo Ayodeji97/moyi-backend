@@ -296,8 +296,9 @@ only `modules/admin` may depend on them.
 - Migration **V60** (`modules/admin`): `admin_accounts`, `admin_invitations`, `audit_log`
   plus its trigger, and the `admin_invite` and `admin_disable` functions. Rollback past V60 drops an unused console. No other module's data changes.
 - New secret `MOYI_ADMIN_TOTP_KEY`, and new config `MOYI_ADMIN_ENABLED` and
-  `MOYI_ADMIN_ALLOWED_NETWORKS`, added to `config/deploy.yml` under `servers.web` only (never
-  the media worker), with `ENABLED` `"false"`. The app's own startup check (§4) is the guard.
+  `MOYI_ADMIN_ALLOWED_NETWORKS`, under `servers.web` only (never the media worker). A1 adds
+  only `MOYI_ADMIN_ENABLED: "false"` to `config/deploy.yml`; the key and the networks join it at
+  switch-on (runbook). The app's own startup check (§4) is the guard.
   A1 does not ship the key into the vault, so production stays off until the owner follows
   the runbook.
 - A runbook, `ops/admin/README.md`: generate the key, invite yourself, enrol, the allowlist
