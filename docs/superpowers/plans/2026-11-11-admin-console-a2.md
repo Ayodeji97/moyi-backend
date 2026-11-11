@@ -4,7 +4,9 @@
 
 **Goal:** A `MODERATOR` decides the report queue and the quarantine queue in the switched-off admin console, through the database functions `scripts/moyi` already calls, with each decision audited under the admin's id, irreversible ones behind a fresh second factor, and held-back media viewable only where the runbook allows.
 
-**Architecture:** Two admin-only ports, `gratitude.api.ReportModeration` and `media.api.QuarantineModeration`, each implemented in its own module's `infra` by `JdbcClient` calls to the existing functions, each `MANDATORY` so it joins the console's transaction. `modules/admin` gains `ModerationConsole` (service, `@PreAuthorize("hasRole('MODERATOR')")`), three controllers, plain-form Thymeleaf pages, a step-up check, and `AdminAccessDisclosure` implementing `export.api.AdminAccessLog`. Migration V61 widens `audit_log`'s action `CHECK` and adds `disclosed_to`.
+**Revised 2026-11-11** after an independent review (FIX FIRST): locks in the media port (Task 1), a block action, export-time disclosure with no `disclosed_to` column (Tasks 3, 7), lookup purposes, step-up enforced in the service. Spec §16 lists every change.
+
+**Architecture:** Two admin-only ports, `gratitude.api.ReportModeration` and `media.api.QuarantineModeration`, each implemented in its own module's `infra` by `JdbcClient` calls to the existing functions, each `MANDATORY` so it joins the console's transaction. `modules/admin` gains `ModerationConsole` (service, `@PreAuthorize("hasRole('MODERATOR')")`), three controllers, plain-form Thymeleaf pages, a step-up check, and `AdminAccessDisclosure` implementing `export.api.AdminAccessLog`. Migration V61 widens `audit_log`'s action `CHECK` (17 actions) and nothing else; disclosure is derived when the export is built.
 
 **Tech Stack:** as A1: Kotlin 2.4, Spring Boot 4.1.2, Spring Security 7.1.2, Thymeleaf, Postgres 18, Flyway, JUnit 6 + kotest + MockMvc + Testcontainers. No new dependency.
 
@@ -17,7 +19,8 @@
 - Every console method: `@PreAuthorize("hasRole('MODERATOR')")`, `@Transactional` (default isolation: READ COMMITTED), and its `audit_log` row through A1's `AuditTrail` (`MANDATORY`).
 - Never in a log, exception message, metric tag, flash message or audit `metadata`: entry text, the reporter's `detail`, the moderator's note (it goes only in `justification` and the functions' own logs), an email, a storage key, a URL.
 - Notes: required, 1–400 code points after trim.
-- Step-up window: 5 minutes, session attribute `admin.secondFactorAt` (an `Instant`), set by sign-in's TOTP step and by `stepUp`.
+- Step-up window: 5 minutes, session attribute `admin.secondFactorAt` (an `Instant`), set by sign-in's TOTP step and by `stepUp`. The **service** applies the rule (`StepUp.isFresh(secondFactorAt, clock.instant())`); controllers pass the attribute through, never a boolean.
+- Every guard the console adds around a media function is taken **under the asset's row lock** in the port: `FOR UPDATE` for delete and block, `FOR SHARE` for the view.
 - Migration **V61** in `modules/admin/src/main/resources/db/migration/`. Re-check `main` for a V61 before Task 3; if one has landed, take the next free number and say so in the PR.
 - No admin route in `contracts/openapi.json`; `OpenApiContractTest` passes with no change.
 - Commits: Conventional Commits, subject ≤ 88 characters; `git config core.hooksPath .githooks` in the worktree.
@@ -26,44 +29,49 @@
 ## Review Focus
 
 1. **Nothing a member wrote leaks.** The unique-marker test (Task 6) and the log-capture test (Task 6) are the proof; a reviewer reads every template and every `metadata` map.
-2. **The view rule cannot be bypassed.** `BLOCKED`, `evidence_held` and priority/consent reports are refused by the service, not by hiding a link. Pinned in Task 5 (service) and Task 6 (HTTP).
+2. **The view rule and the evidence rule cannot be bypassed or raced.** `BLOCKED`, `evidence_held` and priority/consent reports are refused under the row lock, not by hiding a link. Pinned in Task 1 (the `pg_locks` races), Task 5 (service) and Task 6 (HTTP).
 3. **Atomicity.** A decision and its audit row commit together; the injected-failure test (Task 5) proves rollback of the function's effects.
 4. **Stale and concurrent decisions** give one success and one `REFUSED`, synchronised on `pg_locks`, never a sleep (Task 2, Task 6).
 5. **Console ≡ script.** Task 7's twin-database cross-check.
+6. **Nothing tips anyone off.** Disclosure is decided at export time; a view followed by a block, any report-driven act, and `SAFETY`/`LEGAL` lookups are absent from every export (Task 7).
 
 ---
 
-### Task 1: `media.api.QuarantineModeration` and the media half of the view rule
+### Task 1: `media.api.QuarantineModeration`, the locked guards, and the media half of the view rule
 
 **Files:**
 - Create: `modules/media/src/main/kotlin/com/moyi/media/api/QuarantineModeration.kt` (interface + DTOs + outcome enums)
 - Create: `modules/media/src/main/kotlin/com/moyi/media/infra/database/QuarantineModerationStore.kt` (internal, `JdbcClient`)
-- Modify: `modules/media/src/main/kotlin/com/moyi/media/domain/MediaAsset.kt` (`reviewableByModerator`)
+- Create: `modules/media/src/main/kotlin/com/moyi/media/domain/ModeratorReview.kt` (pure: `allows(verdict, evidenceHeld, status, purged, heldByReport)`; `purged_at` is not on `MediaAsset`, `MediaAssetStore` reads it, so the rule takes facts, not the entity)
 - Modify: `app/src/test/kotlin/com/moyi/app/ArchitectureTest.kt` (add the new types to A1's admin-only rule)
-- Test: `modules/media/src/test/kotlin/com/moyi/media/infra/QuarantineModerationTest.kt`, `MediaAssetReviewableTest.kt`, `QuarantineOutcomeNamesTest.kt`
+- Test: `modules/media/src/test/kotlin/com/moyi/media/infra/QuarantineModerationTest.kt`, `QuarantineModerationRaceTest.kt`, `domain/ModeratorReviewTest.kt`, `QuarantineOutcomeNamesTest.kt`
 
-**Interfaces (produces):**
-- `interface QuarantineModeration` — every method `@Transactional(propagation = MANDATORY)` in the implementation:
-  - `fun queue(actor: String): List<QuarantineRow>` → `SELECT * FROM media_quarantine_list(:actor)`
-  - `fun asset(mediaId: UUID): QuarantinedAsset?` (status, verdict, reason, kind, attached, moderatedAt, ownerUserId, evidenceHeld, purged, reviewable), no log row
-  - `fun history(mediaId: UUID): List<ModerationLogRow>` (from `media_moderation_log`, oldest first)
-  - `fun reportsHolding(mediaId: UUID): List<UUID>` (from `media_report_holds`)
-  - `fun release(mediaId: UUID, actor: String, note: String): ReleaseOutcome` → `media_quarantine_release`
-  - `fun delete(mediaId: UUID, actor: String, note: String): DeleteOutcome` → `media_quarantine_delete`
-  - `fun reviewCopy(mediaId: UUID): ReviewCopy?` — `null` unless `reviewableByModerator`; a photo's display variant, a voice note's `voice.m4a` else `voice.ogg`; locks nothing.
-- `enum ReleaseOutcome { RELEASED, REMODERATED, NEVER_RELEASED, REPORT_HELD, NOT_QUARANTINED }`, `enum DeleteOutcome { DELETED, NOT_QUARANTINED }`; an unknown string throws `IllegalStateException` naming the function, not the id.
-- `ReviewCopy(contentType: String, open: () -> InputStream?)`, `toString` with no key.
-- All DTOs' `toString` print ids only.
+**Interfaces (produces):** every implementation method `@Transactional(propagation = MANDATORY)`:
+- `queue(actor): List<QuarantineRow>` → `SELECT * FROM media_quarantine_list(:actor)`
+- `openCount(): Int` — `status = 'QUARANTINED' OR evidence_held`, the list's own predicate; writes nothing (for the home page)
+- `asset(mediaId): QuarantinedAsset?` (status, verdict, reason, kind, attached, moderatedAt, evidenceHeld, purged, heldByReport, reportDriven), no log row, no lock
+- `history(mediaId)`, `reportsHolding(mediaId): List<UUID>`
+- `release(mediaId, actor, note): ReleaseOutcome` → `media_quarantine_release` (it checks report holds itself)
+- `block(mediaId, actor, note): BlockOutcome` — `SELECT … FOR UPDATE`; any `media_report_holds` row → `REPORT_HELD`; else `media_quarantine_block`
+- `delete(mediaId, actor, note): DeleteOutcome` — `SELECT moderation_verdict, evidence_held … FOR UPDATE`; `BLOCKED` or held → `EVIDENCE_SERVER_ONLY`; any report hold → `REPORT_HELD`; else `media_quarantine_delete`
+- `reviewCopy(mediaId): Review` — `SELECT … FOR SHARE` (reading `purged_at`), then `media_report_holds`; returns `Refused(reason)` or `Allowed(reportIds, reportDriven, copy)`; the copy's content type is the variant's (`image/webp`, `audio/mp4` for `voice.m4a`, `audio/ogg` for `voice.ogg`), never `media_assets.content_type`; a variant missing from the store → `Refused("missing")` when opened
+- `ownedBy(userId): List<UUID>` (every asset the user owns, deleted included) and `withheldFromOwner(ids): Set<UUID>` (now `BLOCKED` or `evidence_held`), for Task 7
+- `enum ReleaseOutcome { RELEASED, REMODERATED, NEVER_RELEASED, REPORT_HELD, NOT_QUARANTINED }`, `enum BlockOutcome { BLOCKED, ALREADY_BLOCKED, GONE, REPORT_HELD }`, `enum DeleteOutcome { DELETED, NOT_QUARANTINED, EVIDENCE_SERVER_ONLY, REPORT_HELD }`; an unknown string from SQL throws `IllegalStateException` naming the function, not the id.
+- All DTOs' `toString` print ids only; `ReviewCopy` holds no key in its `toString`.
 
 - [ ] **Step 1: Write failing tests.**
-  - `MediaAssetReviewableTest` (pure): reviewable for `QUARANTINED/QUARANTINED`; for `DELETED` with an open report hold and objects present; not for `BLOCKED`, `evidence_held`, `READY/PASSED` with no hold, purged.
-  - `QuarantineModerationTest` (Postgres, Flyway chain): each `ReleaseOutcome` and `DeleteOutcome` reached through the real function; `queue` returns `media_quarantine_list`'s rows in order and writes one `LISTED`; calling any method outside a transaction throws `IllegalTransactionStateException`; `reviewCopy` is `null` for a blocked asset and opens the display key for a quarantined photo (a fake `ObjectStore` records which key was opened).
-  - `QuarantineOutcomeNamesTest`: reads `pg_get_functiondef` of `media_quarantine_release` and `_delete` and asserts every quoted `RETURN '…'` literal is an enum name, and the reverse.
-- [ ] **Step 2: Run them and see them fail** (`./gradlew :modules:media:test --tests "*QuarantineModeration*" --tests "*Reviewable*" --tests "*QuarantineOutcomeNames*"`).
+  - `ModeratorReviewTest` (pure): allowed for `QUARANTINED/QUARANTINED`; for `DELETED` held by a report with objects present; refused for `BLOCKED`, `evidence_held`, `READY/PASSED` unheld, purged.
+  - `QuarantineModerationTest` (Postgres, Flyway chain): each outcome of each enum reached; `queue` returns the function's rows in order and writes one `LISTED`; `openCount` writes nothing; any method outside a transaction throws `IllegalTransactionStateException`; `reviewCopy` refuses a blocked asset without touching the store (a fake `ObjectStore` records keys opened) and opens `display.webp` as `image/webp` for a photo whose `content_type` is `image/heic`; voice with and without `voice.m4a`; `missing` when the fake store has no object.
+  - `QuarantineModerationRaceTest` (two connections; synchronised on `pg_locks`/`pg_stat_activity.wait_event_type = 'Lock'`, never a sleep):
+    1. A: `BEGIN; SELECT media_quarantine_block(id, …)` (holds the row). B: port `delete` in its own transaction, observed waiting. A commits. B returns `EVIDENCE_SERVER_ONLY`; the asset is `BLOCKED`, `evidence_held`, with no `DELETED` log row.
+    2. A: `media_report_hold(entry, report, …)` held open; B: `delete` waits, then `REPORT_HELD`; B: `block` likewise `REPORT_HELD`.
+    3. A: `media_report_hold` held open; B: `reviewCopy` waits on its `FOR SHARE`, then reports `heldByReport` with A's report id.
+  - `QuarantineOutcomeNamesTest`: every `RETURN '…'` literal in `pg_get_functiondef` of `media_quarantine_release`, `_block`, `_delete` is an enum name (port-only names excepted, listed in the test), and the reverse.
+- [ ] **Step 2: Run them and see them fail** (`./gradlew :modules:media:test --tests "*QuarantineModeration*" --tests "*ModeratorReview*" --tests "*QuarantineOutcomeNames*"`).
 - [ ] **Step 3: Implement.** Check `build-logic`'s module rules allow `admin → media`; if they need a line, add it here.
-- [ ] **Step 4: Mutation:** drop the `BLOCKED` clause from `reviewableByModerator`, see the test go red, restore. Remove `MANDATORY`, see the outside-transaction test go red, restore.
+- [ ] **Step 4: Mutations** (each red, then restored): drop `FOR UPDATE` from `delete` (race 1 goes red); drop the `REPORT_HELD` check (race 2); drop `FOR SHARE` (race 3); drop the `BLOCKED` clause from `ModeratorReview.allows`; remove `MANDATORY`.
 - [ ] **Step 5: Run `:modules:media:test` and `:app:test --tests "*ArchitectureTest*"`; all pass.**
-- [ ] **Step 6: Commit** `feat(media): an admin-only port over the quarantine functions`
+- [ ] **Step 6: Commit** `feat(media): an admin-only port over the quarantine functions, guarded under lock`
 
 ### Task 2: `gratitude.api.ReportModeration`, the stale check, and the gratitude half of the view rule
 
@@ -76,6 +84,7 @@
 
 **Interfaces (produces):** methods `MANDATORY`:
 - `queue(actor): List<ReportRow>` → `entry_report_list`
+- `openCount(): Int` (`status = 'OPEN'`; writes nothing, for the home page)
 - `read(reportId, actor): ReportCase?` → `entry_report_read` (rows folded into one case with its held media), plus `history(reportId)` from `entry_report_log`
 - `dismiss(reportId, expectedReason: String, actor, note): DismissOutcome` (`DISMISSED, NOT_OPEN, STALE`)
 - `reclassify(reportId, expectedReason, newReason, actor, note): ReclassifyOutcome` (`RECLASSIFIED, SAME_REASON, NOT_OPEN, STALE`); an unknown reason is refused by `ReportReason.of` before SQL
@@ -95,24 +104,23 @@
 - [ ] **Step 5: `:modules:gratitude:test` and the ArchitectureTest pass.**
 - [ ] **Step 6: Commit** `feat(gratitude): an admin-only port over the report queue functions`
 
-### Task 3: V61, the new audit actions, `disclosed_to`, and `Disclosure.of`
+### Task 3: V61, the new audit actions, and `Disclosure.shows`
 
 **Files:**
 - Create: `modules/admin/src/main/resources/db/migration/V61__admin_moderation_audit.sql`
 - Modify: `modules/admin/src/main/kotlin/com/moyi/admin/domain/AuditAction.kt`
-- Create: `modules/admin/src/main/kotlin/com/moyi/admin/domain/Disclosure.kt`
-- Modify: `modules/admin/src/main/kotlin/com/moyi/admin/infra/AuditLogEntity.kt`, `service/AuditTrail.kt` (`disclosedTo: UUID? = null`)
+- Create: `modules/admin/src/main/kotlin/com/moyi/admin/domain/Disclosure.kt`, `LookupPurpose.kt`
 - Test: `modules/admin/src/test/kotlin/com/moyi/admin/infra/V61MigrationTest.kt`, `AuditActionCheckTest.kt` (unchanged code, must still pass), `domain/DisclosureTest.kt`
 
 **Interfaces (produces):**
-- `AuditAction` gains `REPORT_QUEUE_VIEWED, REPORT_READ, REPORT_DISMISSED, REPORT_RECLASSIFIED, REPORT_UPHELD, QUARANTINE_QUEUE_VIEWED, MEDIA_VIEWED, MEDIA_RELEASED, MEDIA_DELETED, ADMIN_STEP_UP`.
-- `object Disclosure { fun of(action: AuditAction, outcome: AuditOutcome, subject: UUID?, withheld: Boolean): UUID? }` — spec §9.3; `withheld` is true for a blocked asset or one under an open priority report.
-- `fun exportWord(action: AuditAction): String?` beside it (`ACCOUNT_LOOKED_UP`, `MEDIA_REVIEWED`, `MEDIA_RELEASED`, `MEDIA_REMOVED`; `null` for the rest).
-- V61: `ALTER TABLE audit_log DROP CONSTRAINT audit_log_action_check; ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check CHECK (action IN (…16…));` `ALTER TABLE audit_log ADD COLUMN disclosed_to uuid;` `CREATE INDEX audit_log_disclosed_idx ON audit_log (disclosed_to, occurred_at) WHERE disclosed_to IS NOT NULL;`
+- `AuditAction` gains `REPORT_QUEUE_VIEWED, REPORT_READ, REPORT_DISMISSED, REPORT_RECLASSIFIED, REPORT_UPHELD, QUARANTINE_QUEUE_VIEWED, MEDIA_VIEWED, MEDIA_RELEASED, MEDIA_BLOCKED, MEDIA_DELETED, ADMIN_STEP_UP` (17 in all).
+- `enum LookupPurpose(val disclosed: Boolean) { MEMBER_REQUEST(true), OPERATIONS(true), SAFETY(false), LEGAL(false) }`
+- `object Disclosure { fun shows(action, outcome, purpose: LookupPurpose?, reportDriven: Boolean?, nowWithheld: Boolean): String? }` — returns the export word (`ACCOUNT_LOOKED_UP`, `MEDIA_REVIEWED`, `MEDIA_RELEASED`, `MEDIA_REMOVED`) or `null`; spec §9.3 exactly. A missing purpose on a lookup (a pre-A2 row) → `null`.
+- V61: `ALTER TABLE audit_log DROP CONSTRAINT audit_log_action_check; ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check CHECK (action IN (…17…));` and nothing else (no column: spec §9.1).
 
-- [ ] **Step 1: Failing tests.** `V61MigrationTest`: an A1 row written before V61 survives unchanged (migrate to V60, insert, migrate to V61, compare); each new action inserts; `'NOPE'` is refused; `UPDATE … SET disclosed_to` still raises `audit_log is append-only`. `DisclosureTest`: the table in spec §9.3, both sides of `withheld`, `REFUSED` never disclosed.
-- [ ] **Step 2: Run, fail, implement, pass.** **Step 3: Mutation:** drop `withheld` from `Disclosure.of`, see red, restore.
-- [ ] **Step 4: Commit** `feat(admin): V61 audit actions for moderation and a disclosed_to column`
+- [ ] **Step 1: Failing tests.** `V61MigrationTest`: an A1 row written before V61 survives unchanged (migrate to V60, insert, migrate to V61, compare); each new action inserts; `'NOPE'` is refused; `UPDATE`/`DELETE` still raise `audit_log is append-only`. `DisclosureTest`: every row of spec §9.3's list on both sides: `reportDriven` true → `null`; `nowWithheld` → `null`; `MEDIA_BLOCKED` → `null`; `REFUSED` → `null`; each `LookupPurpose`; no purpose → `null`.
+- [ ] **Step 2: Run, fail, implement, pass.** **Step 3: Mutations:** drop the `nowWithheld` clause; drop the `reportDriven` clause; flip `SAFETY.disclosed`; each red, restored.
+- [ ] **Step 4: Commit** `feat(admin): V61 audit actions for moderation, and the disclosure rule`
 
 ### Task 4: Step-up
 
@@ -121,10 +129,10 @@
 - Create: `modules/admin/src/main/kotlin/com/moyi/admin/web/StepUp.kt` (reads the attribute, checks the 5-minute window against the `Clock`)
 - Test: `app/src/test/kotlin/com/moyi/app/admin/AdminStepUpTest.kt`
 
-**Interfaces (produces):** `AdminSignIn.stepUp(adminId, code, from): TotpStep` sharing `totp`'s private verification (one code path: refactor `totp` into `verifyCode(…)` used by both; do not copy it). Success writes `ADMIN_STEP_UP/SUCCEEDED`; failure counts toward the lockout and writes `ADMIN_STEP_UP/REFUSED`. `StepUp.isFresh(session, now): Boolean`.
+**Interfaces (produces):** `AdminSignIn.stepUp(adminId, code, from): TotpStep` sharing `totp`'s private verification (one code path: refactor `totp` into `verifyCode(…)` used by both; do not copy it). Success writes `ADMIN_STEP_UP/SUCCEEDED`; failure counts toward the lockout and writes `ADMIN_STEP_UP/REFUSED`. `object StepUp { val WINDOW = 5.minutes; fun isFresh(secondFactorAt: Instant?, now: Instant): Boolean }` in `admin.service` (the service applies it; Task 5).
 
 - [ ] **Step 1: Failing tests:** fresh at sign-in + 4 min 59 s, stale at + 5 min 1 s (`MutableClock`); a correct code refreshes the window and spends the step (the same code again is refused as a replay); five wrong codes lock the account exactly as five wrong sign-in codes do; A1's `AdminSignInTest` still passes untouched.
-- [ ] **Step 2: Run, fail, implement, pass.** **Step 3: Mutation:** make `isFresh` always true; Task 6's step-up test must go red once written — note it in the PR and run it there.
+- [ ] **Step 2: Run, fail, implement, pass.** **Step 3:** the mutation of `isFresh` is run in Task 5 and Task 6, where the tests that it must break exist (tracked there as named steps).
 - [ ] **Step 4: Commit** `feat(admin): a five-minute step-up on the second factor for irreversible acts`
 
 ### Task 5: `ModerationConsole`, the service
@@ -135,11 +143,11 @@
 - Test: `app/src/test/kotlin/com/moyi/app/admin/ModerationConsoleServiceTest.kt`
 
 **Interfaces (produces):** `@Service @ConditionalOnAdminConsole`, every method `@PreAuthorize("hasRole('MODERATOR')") @Transactional`:
-- `reportQueue(adminId, from)`, `report(reportId, adminId, from)`, `dismiss(…, expectedReason, note)`, `reclassify(…)`, `uphold(…, takedown, note, stepUpFresh: Boolean)`, `quarantineQueue(…)`, `quarantined(mediaId, …)`, `release(…)`, `delete(…, stepUpFresh)`, `openForReview(mediaId, via: ReportId?, adminId, from): ReviewCopy?`.
-- `uphold`/`delete` with `stepUpFresh = false` throw `StepUpRequired` before any read or write (the controller turns it into the code field).
-- `delete` on a `BLOCKED` asset returns `EVIDENCE_SERVER_ONLY` without calling the port, audited `REFUSED`.
-- `openForReview`: `asset.reviewable && reports.reviewableReasons(media.reportsHolding(id))`; writes `MEDIA_VIEWED` (`SUCCEEDED` or `REFUSED` with the reason) with `disclosedTo = Disclosure.of(…)`; returns the copy only after the row is written; the transaction commits when the method returns, before the controller streams.
-- Each decision writes its audit row (spec §9.2), and for each asset an uphold took down whose owner is told, a `MEDIA_DELETED` row with `disclosed_to` (spec §9.3).
+- `counts()` (both ports' `openCount`, no audit row), `reportQueue(adminId, from)`, `report(reportId, adminId, from)`, `dismiss(…, expectedReason, note)`, `reclassify(…)`, `uphold(…, takedown, note, secondFactorAt: Instant?)`, `quarantineQueue(…)`, `quarantined(mediaId, …)`, `release(…)`, `block(…, secondFactorAt)`, `delete(…, secondFactorAt)`, `openForReview(mediaId, adminId, from): ReviewCopy?`.
+- `uphold`, `block` and `delete` call `StepUp.isFresh(secondFactorAt, clock.instant())` first and throw `StepUpRequired` before any read or write (the controller turns it into the code field).
+- `delete`'s `EVIDENCE_SERVER_ONLY` and `REPORT_HELD` come from the port (Task 1), taken under the lock; the service only audits them `REFUSED`. The service does **not** read the asset first and decide: that was the review's check-then-act finding.
+- `openForReview`: the port's `reviewCopy` (under `FOR SHARE`), then `reports.reviewableReasons(allowed.reportIds)`, in one transaction; writes `MEDIA_VIEWED` (`SUCCEEDED` or `REFUSED` with the reason, and `reportDriven`); returns the copy only after the row is written; the transaction commits when the method returns, before the controller streams.
+- Each decision writes one audit row (spec §9.2) with `reportDriven` on every `MEDIA_*` row. No row carries a disclosure decision.
 - Metrics `moyi.admin.moderation.decision{queue,decision,outcome}` and `moyi.admin.media.review{outcome}`.
 
 - [ ] **Step 1: Failing tests** (Spring context, admin enabled, security context set per role):
@@ -148,10 +156,11 @@
   - **atomicity:** with a test-only trigger raising on `audit_log` insert, `dismiss` throws and the report is still `OPEN`, its media still `QUARANTINED`, and `entry_report_log` has no `DISMISSED`;
   - the transaction is READ COMMITTED (`SHOW transaction_isolation` from inside a console call via a test hook) and `delete` succeeds;
   - `openForReview` refuses each spec §7.4 case and writes `REFUSED`; a refused view returns `null` with no store access (the fake store records none);
-  - `delete` of a blocked asset: `EVIDENCE_SERVER_ONLY`, the asset untouched, `REFUSED` row;
-  - `uphold` without step-up: `StepUpRequired`, nothing written.
+  - `delete` of a blocked asset: `EVIDENCE_SERVER_ONLY`, the asset untouched, `REFUSED` row; `block` of a quarantined asset: `BLOCKED`, `evidence_held`, a `MEDIA_BLOCKED` row;
+  - `uphold`, `block` and `delete` with `secondFactorAt` 5 min 1 s old, or null: `StepUpRequired`, nothing written; at 4 min 59 s they decide;
+  - `counts()` writes no `LISTED` row in either module log and no audit row.
 - [ ] **Step 2: Run, fail, implement, pass.**
-- [ ] **Step 3: Mutations** (each red, then restored): remove `@PreAuthorize` from `dismiss`; remove the audit call from `release`; remove the `EVIDENCE_SERVER_ONLY` check; drop the reports half from `openForReview`; build the actor without the `admin:` prefix (a test asserts `entry_report_log.actor = 'admin:<id>'`).
+- [ ] **Step 3: Mutations** (each red, then restored): remove `@PreAuthorize` from `dismiss`; remove the audit call from `release`; make `StepUp.isFresh` always true (Task 4's mutation, run here); drop the reports half from `openForReview`; build the actor without the `admin:` prefix (a test asserts `entry_report_log.actor = 'admin:<id>'`).
 - [ ] **Step 4: Commit** `feat(admin): the moderation console service over the report and quarantine ports`
 
 ### Task 6: Pages, controllers and the review copy
@@ -159,38 +168,45 @@
 **Files:**
 - Create: `modules/admin/src/main/kotlin/com/moyi/admin/web/ReportsController.kt`, `QuarantineController.kt`, `MediaReviewController.kt`
 - Create templates: `templates/admin/reports.html`, `report.html`, `quarantine.html`, `quarantined.html`, `fragments/decision.html` (note field, hidden expected reason, code field when stale), `not-found.html` if A1 has none
-- Modify: `templates/admin/layout.html` (nav for `MODERATOR`), `home.html` (counts, overdue), `web/AdminSecurityConfiguration.kt` (`media-src 'self'` in the CSP constant), `admin.css`
+- Modify: `templates/admin/layout.html` (nav for `MODERATOR`), `home.html` (open counts from `counts()`; no "overdue": spec §5), `web/AdminSecurityConfiguration.kt` (`media-src 'self'` in the CSP constant), `admin.css`
 - Test: `app/src/test/kotlin/com/moyi/app/admin/ReportQueueTest.kt`, `QuarantineQueueTest.kt`, `MediaReviewTest.kt`, `ModerationPrivacyTest.kt`, `ModerationConcurrencyTest.kt`; A1's `AdminChainTest` CSP assertion updated to the new constant.
 
-**Interfaces (produces):** routes of spec §5; POST-redirect-GET; flash result chosen from the outcome enum (a `when` over it, so a new outcome fails compilation, not a page); every refusal of a read (`unknown id`, bad UUID, refused view) renders the same admin `404` page.
+**Interfaces (produces):** routes of spec §5, including `POST /admin/quarantine/{mediaId}/block`; POST-redirect-GET; flash result chosen from the outcome enum (a `when` over it, so a new outcome fails compilation, not a page), with no counts in it; controllers pass the session's `admin.secondFactorAt` to the service as it is; every refusal of a read (`unknown id`, bad UUID, refused view) renders the same admin `404` page. Lists show each item's age in days.
 
 - [ ] **Step 1: Failing tests** (A1's `AdminConsoleDriver`, real Postgres, MinIO-less fake store for bytes):
   - `ReportQueueTest`: list order equals `entry_report_list`; priority row shows `DO NOT VIEW — runbook §2` and no view link; report page shows the detail; each decision form works end to end and flashes the right line; a decided report shows "Emptied when decided."; a POST without CSRF is the `403` page and decides nothing; `SUPPORT` gets `403` on every route.
-  - `QuarantineQueueTest`: release and delete; a `BLOCKED` row has no delete form, and a forged POST gets `EVIDENCE_SERVER_ONLY`; a report-held row has no release form and links to the report.
+  - `QuarantineQueueTest`: release, block (listed first, with its runbook line) and delete; a `BLOCKED` row has no delete form, and a forged POST gets `EVIDENCE_SERVER_ONLY`; a report-held row has no decision form and links to the report, and forged release, block and delete POSTs each get `REPORT_HELD`.
   - `MediaReviewTest`: bytes, `Content-Type`, `Cache-Control: no-store`, `nosniff`, `inline`, `Cross-Origin-Resource-Policy: same-origin`; refusals are byte-identical `404` pages; the page's HTML has no `http` URL other than `/admin/…`.
-  - **Step-up:** at sign-in + 6 min, "Uphold, delete" re-renders with a code field and the note kept, and decides nothing; with a correct code it decides.
+  - **Step-up:** at sign-in + 6 min, "Uphold, delete", quarantine "Block" and "Delete" each re-render with a code field and the note kept, and decide nothing; with a correct code they decide.
   - `ModerationPrivacyTest`: an entry whose text is `MARKER-<uuid>`; reported; every A2 page, every audit row and all captured log output searched for the marker: none. The reporter's detail (`DETAIL-<uuid>`) appears on the report page only, never in logs, audit rows or the flash.
   - `ModerationConcurrencyTest`: two admin sessions dismiss one report; the second POST observed blocked on the row lock before the first commits; one "Dismissed", one "Already decided by someone else"; two audit rows, `SUCCEEDED` and `REFUSED`.
 - [ ] **Step 2: Run, fail, implement, pass.** A1's `TemplateSafetyTest` passes over the new templates; prove it still bites with a temporary `th:utext` in `report.html`.
-- [ ] **Step 3: Mutations:** remove `no-store` from the review copy (red); make the step-up always fresh (Task 4's note; red here); restore.
+- [ ] **Step 3: Mutations** (each red, then restored): remove `no-store` from the review copy; make `StepUp.isFresh` always true (Task 4's mutation, tracked here: the step-up test above must go red); serve `media_assets.content_type` instead of the variant's (`MediaReviewTest`'s HEIC case must go red).
 - [ ] **Step 4: Commit** `feat(admin): report and quarantine pages for moderators, with a no-store review copy`
 
-### Task 7: Disclosure in the export, and the console ≡ script cross-check
+### Task 7: Lookup purposes, disclosure at export time, and the console ≡ script cross-check
 
 **Files:**
 - Modify: `modules/admin/build.gradle.kts` (`projects.modules.export`)
 - Create: `modules/admin/src/main/kotlin/com/moyi/admin/service/AdminAccessDisclosure.kt` (implements `export.api.AdminAccessLog`; **not** `@ConditionalOnAdminConsole`, ADR-0055 ruling D)
-- Modify: `modules/admin/src/main/kotlin/com/moyi/admin/service/UserLookup.kt` (pass `disclosedTo = user.id` on a hit)
-- Modify: `modules/export/src/main/kotlin/com/moyi/export/api/AdminAccessLog.kt` (KDoc only: the admin module now implements it)
-- Test: `app/src/test/kotlin/com/moyi/app/admin/AdminAccessDisclosureTest.kt`, `ConsoleMatchesScriptTest.kt`; update any export test asserting `logKept = false` in the app context
+- Modify: `modules/admin/src/main/kotlin/com/moyi/admin/service/UserLookup.kt`, `web/UserLookupController.kt`, `templates/admin/users.html` (a required purpose select; `metadata.purpose`)
+- Modify: `modules/export/src/main/kotlin/com/moyi/export/service/ArchiveWriter.kt` (the three statements become the one sentence of spec §9.3, shown whether or not anything was withheld; `NO_ADMIN_LOG` stays for no bean), `api/AdminAccessLog.kt` (KDoc: implemented by admin; some access is withheld by rule)
+- Test: `app/src/test/kotlin/com/moyi/app/admin/AdminAccessDisclosureTest.kt`, `ConsoleMatchesScriptTest.kt`; A1's `UserLookupTest` (now passes a purpose); any export test asserting `logKept = false` or the old sentences
 
-**Interfaces (produces):** `accessesTo(userId)` = `SELECT occurred_at, action FROM audit_log WHERE disclosed_to = :u ORDER BY occurred_at, id`, mapped through `exportWord`, `justification = null`.
+**Interfaces (produces):** `accessesTo(userId)`, read each time an export is built, no row written: lookups by `target_type = 'USER' AND target_id = :u` and media rows by `target_type = 'MEDIA' AND target_id = ANY(:ownedBy)`, both through V60's `audit_log_target_idx`; `withheldFromOwner` asked once for the media ids found; each row through `Disclosure.shows`; `justification = null`; oldest first.
 
 - [ ] **Step 1: Failing tests.**
-  - `AdminAccessDisclosureTest`: after a lookup of A and a view of A's quarantined photo, A's export lists `ACCOUNT_LOOKED_UP` and `MEDIA_REVIEWED` with `justification: null`; B's export lists nothing; after a refused view under a priority report, nothing for anyone; `logKept` is `true` with the console off too.
-  - `ConsoleMatchesScriptTest`: two databases (two schemas, or two Testcontainers databases) seeded identically; for dismiss, reclassify, uphold delete, uphold block, release and delete, one decided through the console and the twin by `SELECT entry_report_…(…)` / `media_quarantine_…(…)` as `scripts/moyi` does (copy the SQL from the script's `ops_sql` lines, citing them); compare `media_assets` (status, verdict, moderation_scores, evidence_held, deleted_at null-ness), `media_report_holds`, `entry_reports` and the outbox event types; actors and ids excepted.
+  - `AdminAccessDisclosureTest`:
+    - A lookup of A for `MEMBER_REQUEST` and a view of A's moderation-quarantined photo: A's export lists `ACCOUNT_LOOKED_UP` and `MEDIA_REVIEWED`, `justification: null`. B's lists nothing.
+    - **The same view, then a block of that photo: A's next export lists only the lookup.** This is the review's finding 2, decided at build time.
+    - A view under a `VIOLENCE_OR_SELF_HARM` report, an uphold that took A's photo down, and an operator's `REPORTED` hold then released: nothing for A.
+    - Lookups for `SAFETY` and `LEGAL`: nothing.
+    - `logKept` is `true` with the console off too.
+    - The statement is the one sentence in every case. Compare an export with withheld rows against one with none: the sentence is byte-identical.
+  - `ConsoleMatchesScriptTest`: two databases (two schemas, or two Testcontainers databases), seeded identically. For dismiss, reclassify, uphold delete, uphold block, release, block and delete, decide one through the console and the twin by `SELECT entry_report_…(…)` / `media_quarantine_…(…)`, as `scripts/moyi` does. Copy the SQL from the script's `ops_sql` lines and cite them. Compare `media_assets` (status, verdict, moderation_scores, evidence_held, deleted_at null-ness), `media_report_holds`, `entry_reports` and the outbox event types. Actors and ids are excepted.
 - [ ] **Step 2: Run, fail, implement, pass.**
-- [ ] **Step 3: Commit** `feat(admin): disclose admin access to a member's account and media in their export`
+- [ ] **Step 3: Mutation:** make `accessesTo` skip `withheldFromOwner`. The view-then-block test goes red; restore.
+- [ ] **Step 4: Commit** `feat(admin): disclose admin access in the export, decided when it is built`
 
 ### Task 8: Operations, the record and the smoke run
 
@@ -198,7 +214,7 @@
 - Create: `adr/0063-the-admin-console-a2-moderation.md` (every *(builder's call)* in the spec; the owner questions of §14 as open questions)
 - Modify: `adr/0055-…md` (Owed: A2 done), `adr/0059-the-data-export.md` (decision 8: implemented by A2), `adr/0051-…md` and `adr/0053-…md` (Revisit when / Owed: the console now calls the functions)
 - Modify: `ops/moderation/takedown.md` (§1, §3: the console path beside the script; §3.3: words, pending §14 Q2), `ops/admin/README.md` (inviting a moderator; what stays on the server)
-- Modify: `scripts/smoke.sh` (spec §13; the export's `logKept` expectation `False` → `True`)
+- Modify: `scripts/smoke.sh` (spec §13; the export's `logKept` expectation `False` → `True`; the lookup steps pass a purpose)
 - Modify: `docs/learning-log.md` only if something went wrong worth recording
 
 - [ ] **Step 1: `./gradlew build`.** Expected: BUILD SUCCESSFUL; record the test count from the JUnit XML.
