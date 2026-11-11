@@ -44,9 +44,10 @@ exception that is a privacy rule, not a moderation rule: what a moderator may *s
   the admin as `admin:<accountId>`, so the module logs and the audit log agree on who acted.
 - A moderator can look at a held-back photo or voice note **when the runbook says to look**, and
   is refused, by the server, when it says never to (child sexual abuse material).
-- Each such look is audited. Whether it is shown to the person whose media it was, in their data
-  export (T-10, ADR-0059 decision 8), is decided **when the export is built**, not when the row
-  is written, and by default nothing report-driven or safety-related is shown (§9.3, §14 Q1).
+- Each such look is audited. Until the owner rules (§14 Q1), a member's data export (T-10,
+  ADR-0059 decision 8) shows only what can never become a tip-off: lookups made at their request
+  or for operations, and the removal of their own media from a moderation quarantine. Views,
+  releases and everything report-driven or safety-related are withheld (§9.3).
 - An asset the moderator finds to be child sexual abuse material can be **blocked as evidence**
   from the quarantine page, without going to the server (§5.2).
 - Two moderators deciding one item at once cannot both succeed, and neither can decide on a page
@@ -204,7 +205,7 @@ The console's actor string is `admin:<accountId>` (42 characters, inside both lo
 | Release | `QuarantineModeration.release` | `media_quarantine_release(id, actor, note)` → maybe `media_give_back` | `RELEASED`, `REMODERATED`, `NEVER_RELEASED`, `REPORT_HELD`, `NOT_QUARANTINED` | `MEDIA_RELEASED` | no |
 | Block as evidence | `QuarantineModeration.block` | `SELECT … FOR UPDATE` on the asset (refuses `REPORT_HELD`), then `media_quarantine_block(id, actor, note)` | `BLOCKED`, `ALREADY_BLOCKED`, `GONE`; port's `REPORT_HELD` | `MEDIA_BLOCKED` | **yes** |
 | Delete | `QuarantineModeration.delete` | `SELECT … FOR UPDATE` on the asset (refuses `EVIDENCE_SERVER_ONLY`, `REPORT_HELD`), then `media_quarantine_delete(id, actor, note)` | `DELETED`, `NOT_QUARANTINED`; port's `EVIDENCE_SERVER_ONLY`, `REPORT_HELD` | `MEDIA_DELETED` | **yes** |
-| View | `QuarantineModeration.reviewCopy` | none: `SELECT … FOR SHARE` on the asset, a read of `media_report_holds`, then the object store | a copy, or refused (§7) | `MEDIA_VIEWED` | no |
+| View | `QuarantineModeration.reportsHolding`, `ReportModeration.reviewableReasons`, `QuarantineModeration.reviewCopy` | none: holds read unlocked, then `FOR SHARE` on those reports, then `FOR SHARE` on the asset and the holds re-read (§7.4), then the object store | a copy, or refused (§7) | `MEDIA_VIEWED` | no |
 | Step-up | `AdminSignIn.stepUp` | none (A1's TOTP check and step CAS) | accepted, refused | `ADMIN_STEP_UP` | — |
 
 No function changes. No new function. The ports return the function's outcome strings as a
@@ -304,16 +305,30 @@ halves from the runbook)*:
   image to confirm it was shared without consent is the harm itself, §14 Q3).
 - **The console composes them:** an asset may be viewed only if media's half says so **and**
   every open report holding it has a reviewable reason.
-- **Under a share lock** *(revised after review)*. The port's first statement is `SELECT … FROM
-  media_assets WHERE id = :id FOR SHARE`; it then reads `media_report_holds`, and the console asks
-  gratitude for those reports' reasons, all in the view's transaction, which commits (with its
-  audit row) before the first byte is streamed. `media_quarantine_block` and the report route's
-  `media_report_hold` both take the asset `FOR UPDATE`, so either one that is in flight makes the
-  view wait and the view then reads its result (READ COMMITTED: each later statement sees what
-  committed before it); and neither can commit a block or a hold between the view's check and its
-  commit. What the share lock cannot stop is a block or a report that arrives **after** the commit,
-  while the bytes stream: that moderator had a right to look when they looked, and the audit row
-  says so.
+- **Under share locks, taken report first** *(revised after two reviews)*. The view must not be
+  allowed on facts that change before its audit row commits: a block, a report's hold, or a
+  reclassification of a holding report to `MINOR_SEXUAL_CONTENT`. So it takes share locks on the
+  asset **and** on each report holding it, and it takes them in the order every report decision
+  already uses, **report, then asset**. `entry_report_uphold`, `_reclassify` and `_dismiss` lock (or
+  update) the report row and then the asset rows, so a view that locked the asset first and the
+  reports second would form a cycle with them and Postgres would abort one side as a deadlock. In
+  the view's one transaction:
+  1. `QuarantineModeration.reportsHolding(id)`: the report ids in `media_report_holds`, read
+     **unlocked**;
+  2. `ReportModeration.reviewableReasons(ids)`: `SELECT reason FROM entry_reports WHERE id =
+     ANY(:ids) AND status = 'OPEN' FOR SHARE`, then gratitude's half of the rule over the reasons;
+  3. `QuarantineModeration.reviewCopy(id, expectedReports = ids)`: `SELECT … FROM media_assets
+     WHERE id = :id FOR SHARE`, then media's half, then `media_report_holds` read again. A set
+     different from step 1's (a report filed or decided in between) is the refusal `changed`, and
+     the moderator reloads. The view never reads a set it has not locked.
+
+  `media_quarantine_block` and `media_report_hold` take the asset `FOR UPDATE`; a reclassify or a
+  decision takes the report `FOR UPDATE`. Each one in flight makes the view wait, and the view then
+  reads its result (READ COMMITTED: each later statement sees what committed before it). None of
+  them can commit between the view's check and its commit. The view's transaction, with its audit
+  row, commits before the first byte is streamed. What the locks cannot stop is a block or a report
+  that arrives **after** the commit, while the bytes stream. That moderator had the right to look
+  when they looked, and the audit row says so.
 
 What is served:
 - A photo: its **display variant** (`display.webp`, 1280 px, the variant moderation looked at),
@@ -335,7 +350,7 @@ download.
 **The audit row is written and committed before the first byte is sent.** If the write fails,
 nothing is streamed. If the stream fails after the commit, the row stands: the log over-records
 a look rather than under-records one (T-10). A refused view writes `MEDIA_VIEWED/REFUSED` with the
-reason (`blocked`, `priority_report`, `consent_report`, `not_held`, `purged`, `missing`) and serves the admin
+reason (`blocked`, `priority_report`, `consent_report`, `not_held`, `purged`, `missing`, `changed`) and serves the admin
 `404` page, the same page for every refusal, so a forged id learns nothing.
 
 ## 8. Concurrency: two moderators, one item
@@ -411,46 +426,56 @@ say "No administrator access to your account or to what you wrote is recorded" w
 recorded. A2 implements it, unconditionally (a persistence bean, ADR-0055 ruling D), as
 `AdminAccessDisclosure`.
 
-**Decided when the export is built, not when the row is written** *(revised after review)*. The
-first draft fixed `disclosed_to` at write time, on a table that can never be updated. That cannot
-be withdrawn when the facts change, and they do change in exactly the case that matters: child
-abuse material will in practice first appear as an ordinary quarantine (`UNMODERATABLE`,
-`EXTREME_VIOLENCE`) or a non-priority report, because nothing is blocked automatically until a hash
-list is wired (runbook §5). A view written "disclosed to the uploader" and then followed by a block
-would tip the uploader off (runbook §2 step 3). So `accessesTo(user)` reads, each time:
+**Only facts that cannot later turn into a tip-off are shown** *(revised after two reviews)*. The
+first draft set `disclosed_to` when each row was written, on a table that can never be updated, so
+a disclosure could never be withdrawn. Child abuse material will in practice first appear as an
+ordinary quarantine (`UNMODERATABLE`, `EXTREME_VIOLENCE`) or a non-priority report, because nothing
+is blocked automatically until a hash list is wired (runbook §5). A view disclosed to the uploader
+and followed by a block would therefore tip them off (runbook §2 step 3). The second draft decided
+it when the export is built and dropped rows whose asset had since been blocked. That has a tip-off
+of its own: **disappearance**. Export 1 lists "a moderator reviewed your photo", the photo is then
+blocked, and export 2 no longer lists it. The difference between the two exports says what
+happened.
 
-1. `USER_LOOKED_UP/SUCCEEDED` rows with `target_type = 'USER'`, `target_id = user`, and a
-   disclosed **purpose** (below);
-2. the user's media ids, from `media.api` (`QuarantineModeration.ownedBy(user)`, deleted ones
-   included), and the `MEDIA_VIEWED`, `MEDIA_RELEASED`, `MEDIA_DELETED` rows with `SUCCEEDED` on
-   those targets, both through `audit_log_target_idx`;
-3. drops every media row with `reportDriven: true`, and every row on an asset that is **now**
-   `BLOCKED` or `evidence_held` (`QuarantineModeration.withheldFromOwner(ids)`, asked at build
-   time);
-4. maps what is left to `AdminAccess(at, word, justification = null)`.
+The only safe set is acts whose disclosure no later event can change. So, until the owner rules on
+§14 Q1, `accessesTo(user)` shows:
+- **a lookup of the member's account** (`USER_LOOKED_UP/SUCCEEDED`, `target_type = 'USER'`,
+  `target_id = user`), when its purpose is `MEMBER_REQUEST` (the member asked support for help) or
+  `OPERATIONS` (a fault being investigated);
+- **the removal of the member's own photo or voice note from a moderation quarantine**
+  (`MEDIA_DELETED/SUCCEEDED` with `reportDriven: false`), as `MEDIA_REMOVED`. It is stable: the
+  port's delete refuses anything `BLOCKED` or held (§6.3), and a deleted asset's objects are purged
+  within seconds, after which `media_quarantine_block` answers `GONE`. A removal can therefore
+  never be followed by a block that would make it a tip-off.
 
-The rule is one pure function, `Disclosure.shows(row facts, asset facts now)` in `admin.domain`,
-so the owner's ruling on Q1 changes one place.
+**Withheld by default:**
+- views and releases (`MEDIA_VIEWED`, `MEDIA_RELEASED`): either could later precede a block;
+- anything a report drove (`reportDriven: true`, an uphold's takedown). Runbook §3.2 says of
+  non-consensual imagery "do not tell the author", §3.6 says "the author is never contacted about a
+  report", and in a bond of two a disclosed report-driven act names the reporter;
+- every block (tipping off);
+- lookups for `SAFETY` (a report or moderation case) or `LEGAL` (a law-enforcement request, runbook
+  §4), and lookups with no purpose (A1's, before A2; production has none). A1's lookup form gains a
+  required purpose select, recorded as `metadata.purpose`.
 
-**The recommended default withholds everything report-driven or safety-related** until the owner
-rules (§14 Q1):
-- a moderator's view, release or removal of a member's own media that **moderation** held back
-  (not a report), and which is not now blocked or held as evidence: shown, as `MEDIA_REVIEWED`,
-  `MEDIA_RELEASED`, `MEDIA_REMOVED`;
-- anything driven by a report (a view under a report, an uphold's takedown, an operator's
-  `REPORTED` hold): **withheld**. Runbook §3.2 says of non-consensual imagery "do not tell the
-  author", §3.6 says "the author is never contacted about a report", and in a bond of two a
-  disclosed report-driven act names the reporter;
-- `MEDIA_BLOCKED`, and anything on an asset now blocked or held: **withheld** (tipping off);
-- a lookup: shown only when its purpose is `MEMBER_REQUEST` (the member asked support for help)
-  or `OPERATIONS` (a fault being investigated); **withheld** for `SAFETY` (a report or moderation
-  case) and `LEGAL` (a law-enforcement request, runbook §4). A1's lookup form gains a required
-  purpose select, recorded as `metadata.purpose` *(revised after review: an unconditional
-  disclosure would have put a law-enforcement lookup, or one after a block, in the suspect's
-  export)*. A1 lookups written before A2 have no purpose; production has none (the console has
-  never been on there), and such rows are withheld;
-- everything else (queue views, report reads and decisions, step-ups, refusals): not about one
-  member's account or content, not shown.
+Everything else (queue views, report reads and decisions, step-ups, refusals) is not about one
+member's account or content, and is not shown.
+
+The rule is one pure function of the row alone, `Disclosure.shows(action, outcome, purpose,
+reportDriven)` in `admin.domain`. The owner's ruling on Q1 changes that one place. Because the rule
+reads nothing but the row, no build-time fact about the asset is needed. `accessesTo(user)` finds
+the rows through V60's `audit_log_target_idx`:
+- for lookups, `target_type = 'USER' AND target_id = :user::text`;
+- for media, `target_type = 'MEDIA' AND target_id = ANY(:ids)`, with `ids` the user's media ids
+  from `QuarantineModeration.ownedBy(user)` (deleted assets included), passed as **text**
+  (`target_id` is `text`; a `uuid[]` would not compare).
+
+**The export build holds no transaction** (`PrepareExports`: "A build holds no transaction. It
+reads through five modules' `api`s, each in its own…"). So `accessesTo` is
+`@Transactional(readOnly = true)` and opens its own, and `ownedBy` is `SUPPORTS`, **not**
+`MANDATORY`. The console's ports are `MANDATORY` so that a decision cannot run outside its audited
+transaction, but a read for the export has no audited transaction to join. A test builds an export
+through `PrepareExports` itself, outside any test transaction (§12).
 
 The export shows the fixed word and **no justification**: the moderator's note is written for the
 operator's record and may name a report. `AdminAccess.justification` stays for A5's typed
@@ -572,14 +597,27 @@ against each outcome its function can return; the outcome enums held to the func
   `evidence_held`. The same with A filing a report (`media_report_hold`): the delete answers
   `REPORT_HELD`. And the view: A holds the row for a priority report's hold, the view waits, and
   is refused `priority_report`.
+- **Bounded waits:** every concurrency test waits for its `pg_locks` condition with a deadline
+  (a few seconds) and **fails** when the deadline passes. Then a mutation that removes a lock turns
+  the test red instead of hanging the build.
 - **Content types:** a HEIC-declared photo is served as `image/webp`; a voice note with an AAC copy
   as `audio/mp4`, without one as `audio/ogg`; a held asset whose variant is missing is the `404`
   page with `missing`.
-- **Disclosure:** an export after a view of the author's moderation-quarantined photo lists
-  `MEDIA_REVIEWED` for the author and nothing for the partner; the same view followed by a block
-  lists **nothing** (decided at build time); a view or takedown under any report lists nothing; a
-  lookup lists `ACCOUNT_LOOKED_UP` only for `MEMBER_REQUEST` and `OPERATIONS`; `justification` is
-  null; the statement is the one sentence of §9.3 whether or not anything was withheld.
+- **Disclosure:**
+  - A removal of the author's moderation-quarantined photo lists `MEDIA_REMOVED` for the author and
+    nothing for the partner.
+  - A view or a release lists nothing, before and after a later block. Two exports either side of
+    the block are identical in `adminAccess`.
+  - A view or takedown under any report lists nothing.
+  - A lookup lists `ACCOUNT_LOOKED_UP` only for `MEMBER_REQUEST` and `OPERATIONS`.
+  - `justification` is null.
+  - The statement is the one sentence of §9.3 whether or not anything was withheld.
+  - **An export built through `PrepareExports` with no surrounding transaction** (not inside a test
+    transaction, which would hide a `MANDATORY` method) succeeds with the console off and on.
+- **The view's report lock:** a reclassify to `MINOR_SEXUAL_CONTENT` held open in another
+  transaction makes the view wait on the report's row, and the view is then refused
+  `priority_report`. A dismiss held open on the asset's report makes no deadlock with a view: both
+  orders are run.
 - **Home counts** write no `LISTED` row and no audit row.
 
 **Cross-checks** *(builder's call; the point of a console wrapping functions is that it changes
@@ -597,8 +635,9 @@ the `@PreAuthorize`; `StepUp.isFresh` (made always true); `ReportReason.mediaRev
 priority; `ModeratorReview.allows`'s `BLOCKED` clause; the stale-reason comparison; the audit
 write in a decision; `MANDATORY` on a port; the `FOR UPDATE` in the port's delete (the evidence
 race test must go red); the port's `EVIDENCE_SERVER_ONLY` and `REPORT_HELD` checks; the `FOR
-SHARE` in the view; `no-store` on the review copy; `Disclosure.shows`'s now-blocked and
-`reportDriven` exclusions and its lookup-purpose rule; the `admin:` actor prefix.
+SHARE` on the asset and on the reports in the view; `no-store` on the review copy;
+`Disclosure.shows`'s view/release exclusion, its `reportDriven` exclusion and its lookup-purpose
+rule; the `admin:` actor prefix.
 
 ## 13. Operations
 
@@ -612,8 +651,8 @@ SHARE` in the view; `no-store` on the review copy; `Disclosure.shows`'s now-bloc
   `SUPPORT` session gets `403`; a POST without CSRF is refused; a held photo is blocked as
   evidence from the quarantine page with a code, and its delete is then refused. The export
   section's `adminAccess.logKept` expectation changes from `False` to `True` (§9.3); one export
-  after a console view of a moderation-quarantined photo lists `MEDIA_REVIEWED`, and one after a
-  view under a report lists nothing.
+  after a console removal of a moderation-quarantined photo lists `MEDIA_REMOVED`, and one after a
+  view lists nothing.
 - **Metrics:** `moyi_admin_moderation_decision_total{queue, decision, outcome}` and
   `moyi_admin_media_review_total{outcome}` (`served`, `refused`). The open-report and quarantine
   alarms stay in `ops/monitoring/media-check.sh`, unchanged: they count rows, not who decides.
@@ -636,22 +675,28 @@ SHARE` in the view; `no-store` on the review copy; `Disclosure.shows`'s now-bloc
 ## 14. Questions only the owner can answer, with recommendations
 
 1. **What a member's export discloses of administrator access** (T-10, FR-112, ADR-0059 decision
-   8). *Recommended default, as built (§9.3): withhold everything report-driven or
-   safety-related until you rule.* Shown: a lookup of their account made at their own request or
-   to investigate a fault, and a moderator's view, release or removal of their own media that
-   **moderation** (not a report) held back and that is not now blocked or held as evidence.
-   Withheld: anything a report drove (runbook §3.2 "do not tell the author", §3.6 "the author is
-   never contacted"; in a bond of two it names the reporter), anything on blocked or held media
-   and every block (tipping off, runbook §2), and lookups for a safety case or a law-enforcement
-   request. Because it is decided when the export is built, a later block withdraws an earlier
-   view from every export after it. The export says, to everyone, that access is listed "except
-   access the law or a safety review requires us not to disclose".
-   **[legal: confirm]**: (a) whether withholding is lawful against GDPR Art. 15, which would need a
-   restriction under Art. 23 or the national law implementing it, and whether the sentence above
-   is a fair notice of it; (b) whether DSA Art. 16(5) (telling the reporter the decision) and
-   Art. 17 (a statement of reasons to the author of removed content) apply to the report flow as
-   a whole. Today the reporter is told nothing and the author nothing (ADR-0053 decisions 5 and 6),
-   and if either article applies, that is a change to the report flow, larger than this slice.
+   8). *Recommended default, as built (§9.3): disclose only what no later event can turn into a
+   tip-off.*
+   - **Shown:** a lookup of the member's account made at their request or to investigate a
+     fault, and the removal of their own media from a moderation quarantine.
+   - **Withheld:** views and releases; anything a report drove (runbook §3.2 and §3.6; in a bond of
+     two it names the reporter); every block; lookups for a safety case or a law-enforcement
+     request.
+   - **The costs, both ways.** Withholding views falls short of T-10's "access disclosed", for the
+     very act T-10 is about: a person looking at what a member shared. Disclosing them costs more.
+     A view disclosed when it is written cannot be withdrawn, and it tips the uploader off if the
+     asset is later blocked. A view disclosed when the export is built and dropped after a block
+     tips them off by its **disappearance** from the next export. No rule over views avoids both
+     unless the view is withheld until its asset's fate is final (released and passed, or
+     deleted), which is a further design if wanted.
+   - The export carries one sentence, the same for everyone, saying that access is listed "except
+     access the law or a safety review requires us not to disclose".
+   - **[legal: confirm]**:
+     - (a) whether withholding is lawful against GDPR Art. 15 (an Art. 23 restriction or the
+       national law implementing it), and whether that sentence is a fair notice of it;
+     - (b) whether DSA Art. 16(5) (telling the reporter the decision) and Art. 17 (a statement of
+       reasons to the author of removed content) apply to the report flow as a whole. Today
+       neither is told anything (ADR-0053 decisions 5 and 6).
 2. **Reports about words until A5.** *Recommended:* decide them from the reporter's detail in the
    console. Once the console is switched on, stop reading entry text at `psql` (runbook §3.3
    permits it), because that is content access with no justification and no disclosure. Build A5
@@ -667,7 +712,7 @@ SHARE` in the view; `no-store` on the review copy; `Disclosure.shows`'s now-bloc
    second pair of eyes on `BLOCK` when a second moderator is invited.
 6. **Lookup purposes** (new, from the review). *Recommended:* four, `MEMBER_REQUEST`,
    `OPERATIONS`, `SAFETY`, `LEGAL`, chosen on A1's lookup form. The first two are disclosed and the
-   last two are withheld (Q1). The cost: an operator could choose `SAFETY` to hide a lookup from a
+   last two are withheld, with lookups that have no purpose (Q1). The cost: an operator could choose `SAFETY` to hide a lookup from a
    member. The purpose is in the audit row and an `ADMIN` can read it, but nothing stops the
    choice, and with one operator nobody checks it.
 
@@ -699,8 +744,9 @@ The independent review returned FIX FIRST with seven findings. Each was checked 
    the row `FOR UPDATE` before it decides, and the view takes `FOR SHARE` (§6.3, §7.4). A
    `pg_locks`-synchronised test covers each race (§12).
 2. **(High) Disclosure was fixed at write time on an append-only table.** It is now derived when the
-   export is built, through V60's target index. `disclosed_to` is dropped, and an asset blocked
-   after a view withdraws the view (§9.3).
+   export is built, through V60's target index, and `disclosed_to` is dropped. *(The first answer,
+   withdrawing a view once its asset is blocked, was itself a tip-off by disappearance. The
+   re-review below replaced it with a default that never shows views at all.)*
 3. **(High) The quarantine page offered only destructive acts.** "Block as evidence" is added,
    listed first and gated by step-up (§5.2, §6.1).
 4. **(Medium-high) Lookups were disclosed unconditionally.** A lookup now records a purpose, and
@@ -720,3 +766,26 @@ The independent review returned FIX FIRST with seven findings. Each was checked 
    - The home page's counts come from non-logging count methods (§5).
    - The "overdue" flag is dropped, so the review thresholds have one home, `media-check.sh` (§5).
    - The step-up mutation is tracked in the plan's Task 6.
+
+### The re-review of 2026-11-11 (at 7f53d68)
+
+All seven findings above were resolved, and the re-review raised six more. Each was checked against
+`origin/main`.
+
+1. **(High) The export build holds no transaction.** Confirmed: `PrepareExports` says so (line 19).
+   `ownedBy` was `MANDATORY` and would have failed every export, even with the console off.
+   `accessesTo` is now `@Transactional(readOnly = true)` and `ownedBy` is `SUPPORTS`, with a test
+   through `PrepareExports` outside any transaction (§9.3, §12).
+2. **(Medium-high) Disclosure decided at build time tips off by disappearance.** By default only
+   member-requested and operations lookups and `MEDIA_REMOVED` are shown. Views and releases are
+   withheld. The rule reads the row alone, so `withheldFromOwner` is gone. Q1 states the cost
+   (§9.3, Q1).
+3. **(Low) The view read report reasons unlocked.** The view now takes `FOR SHARE` on the reports
+   too. It takes the report first and the asset second, the order the report decisions use;
+   locking the asset first would have formed a deadlock cycle with `entry_report_uphold` (§7.4).
+4. **(Low) `NOT_HELD_BACK` was missing.** Confirmed: `media_quarantine_release` can
+   `RETURN media_give_back(...)` (V38), which answers `NOT_HELD_BACK`. It is now in
+   `ReleaseOutcome`, and the names test reads `media_give_back` too (plan Task 1).
+5. **(Low) A mutated lock would hang a test, not fail it.** Every lock wait now has a deadline
+   (§12).
+6. **(Note) `target_id` is `text`.** The ids are passed as text (§9.3).
