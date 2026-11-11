@@ -18,11 +18,24 @@ import kotlin.random.Random
  * `AdminChainTest` holds a refused address to it. One literal, so that the three cannot
  * each agree with a different body.
  *
- * Only `instance` varies: it is the request's own path.
+ * Only `instance` varies: it is the request's own path. The body also carries a `traceId`,
+ * different for every request by design (ADR-0024, amended 2026-11-08), so a body is compared
+ * through [withoutTraceId].
  */
 internal fun unauthenticatedProblem(path: String): String =
     """{"detail":"Sign in to continue.","instance":"$path","status":401,"title":"Unauthenticated",""" +
         """"type":"https://api.getmoyi.app/problems/unauthenticated","code":"UNAUTHENTICATED"}"""
+
+private val TRACE_ID = Regex(""","traceId":"[0-9a-f]{32}"""")
+
+/**
+ * The body with its one `traceId` taken out, so that two answers can be compared byte for byte
+ * but the trace. It fails when the body has no trace id, or more than one.
+ */
+internal fun withoutTraceId(body: String): String {
+    TRACE_ID.findAll(body).count() shouldBe 1
+    return body.replace(TRACE_ID, "")
+}
 
 /** Every header, name by name, in a form two responses can be compared in. */
 internal fun MockHttpServletResponse.allHeaders(): Map<String, List<String>> = headerNames.sorted().associateWith { getHeaders(it) }

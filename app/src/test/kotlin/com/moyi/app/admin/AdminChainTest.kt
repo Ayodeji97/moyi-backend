@@ -77,7 +77,7 @@ class AdminChainTest(
                             }.andReturn()
                     refused.response.status shouldBe 401
                     refused.response.contentType shouldBe api.response.contentType
-                    refused.response.contentAsString shouldBe unauthenticatedProblem(path)
+                    withoutTraceId(refused.response.contentAsString) shouldBe unauthenticatedProblem(path)
                     refused.response.allHeaders() shouldBe api.response.allHeaders()
                     refused.response.setsACookie() shouldBe false
                     refused.request.getSession(false).shouldBeNull()
@@ -91,7 +91,7 @@ class AdminChainTest(
         // No X-Forwarded-For: the client is loopback itself, which is not on the list.
         val refused = send("/admin/login", forwardedFor = null)
         refused.statusCode() shouldBe 401
-        refused.body() shouldBe unauthenticatedProblem("/admin/login")
+        withoutTraceId(refused.body()) shouldBe unauthenticatedProblem("/admin/login")
         refused.headers().allValues("Set-Cookie").shouldBeEmpty()
     }
 

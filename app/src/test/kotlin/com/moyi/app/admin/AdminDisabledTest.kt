@@ -42,11 +42,11 @@ class AdminDisabledTest(
                 val admin = get(path, token = null)
                 admin.status shouldBe 401
                 admin.contentType shouldBe nowhere.contentType
-                admin.contentAsString shouldBe unauthenticatedProblem(path)
+                withoutTraceId(admin.contentAsString) shouldBe unauthenticatedProblem(path)
                 admin.allHeaders() shouldBe nowhere.allHeaders()
             }
         }
-        nowhere.contentAsString shouldBe unauthenticatedProblem("/no-such-path")
+        withoutTraceId(nowhere.contentAsString) shouldBe unauthenticatedProblem("/no-such-path")
     }
 
     @Test
@@ -59,7 +59,8 @@ class AdminDisabledTest(
                 val admin = get(path, token)
                 admin.status shouldBe 404
                 admin.contentType shouldBe nowhere.contentType
-                admin.contentAsString shouldBe nowhere.contentAsString.replace("/no-such-path", path)
+                withoutTraceId(admin.contentAsString) shouldBe
+                    withoutTraceId(nowhere.contentAsString).replace("/no-such-path", path)
             }
         }
     }

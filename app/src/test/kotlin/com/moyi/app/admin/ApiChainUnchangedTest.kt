@@ -57,7 +57,7 @@ class ApiChainUnchangedTest(
 
         val anonymous = send("GET", "/api/v1/me", address)
         anonymous.statusCode() shouldBe 401
-        anonymous.body() shouldBe unauthenticatedProblem("/api/v1/me")
+        withoutTraceId(anonymous.body()) shouldBe unauthenticatedProblem("/api/v1/me")
 
         val docs = send("GET", "/v3/api-docs", address, token = token)
         docs.statusCode() shouldBe 200
