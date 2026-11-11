@@ -2,11 +2,13 @@ package com.moyi.gratitude.infra.database
 
 import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.DayOutcome
-import com.moyi.gratitude.domain.StreakCell
+import com.moyi.gratitude.domain.LateEntryGrace
 import com.moyi.gratitude.domain.StreakDay
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
+import java.time.Instant
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.util.UUID
 
 /**
@@ -27,28 +29,36 @@ internal data class CompleteDays(
  * evaluation also asks [completeDays], under its own lock, so that the
  * milestones it announces are counted as the read counts them.)
  *
- * What a square may say is [StreakCell]'s to decide; this only reads the two
- * columns it decides from.
+ * What a square may say, and why a rest day is one, is [StreakDay.of]'s to
+ * decide; this only reads the two columns it decides from.
  */
 @Component
 internal class StreakCalendar(
     private val jdbc: JdbcTemplate,
+    private val grace: LateEntryGrace,
 ) {
-    /** The bond's squares from [from] to [to], oldest first. A date the calendar does not draw is not in the list. */
+    /**
+     * The bond's squares from [from] to [to], oldest first. A date the calendar does not draw is
+     * not in the list. [undecided] is the dates the clock says are not yet decided — today, and
+     * any day inside its late-entry grace — each with when it settles (`GetStreak`). A row the
+     * close job has not evaluated is undecided too, whatever the clock says
+     * ([LateEntryGrace.undecidedUntil]).
+     */
     fun between(
         bondId: UUID,
         from: LocalDate,
         to: LocalDate,
-        today: LocalDate,
+        undecided: Map<LocalDate, Instant>,
     ): List<StreakDay> =
         jdbc
             .query(
-                "SELECT date, status, evaluated_as FROM bond_days WHERE bond_id = ? AND date BETWEEN ? AND ? ORDER BY date",
+                "SELECT date, status, evaluated_as, ends_at FROM bond_days WHERE bond_id = ? AND date BETWEEN ? AND ? ORDER BY date",
                 { row, _ ->
                     val date = row.getObject("date", LocalDate::class.java)
                     val status = BondDayStatus.valueOf(row.getString("status"))
                     val outcome = row.getString("evaluated_as")?.let(DayOutcome::valueOf)
-                    StreakCell.of(status, outcome, isToday = date == today)?.let { StreakDay(date, it) }
+                    val endsAt = row.getObject("ends_at", OffsetDateTime::class.java).toInstant()
+                    StreakDay.of(date, status, outcome, grace.undecidedUntil(undecided[date], endsAt, evaluated = outcome != null))
                 },
                 bondId,
                 from,

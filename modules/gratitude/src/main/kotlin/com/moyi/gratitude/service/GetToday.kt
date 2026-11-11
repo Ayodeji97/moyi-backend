@@ -7,6 +7,7 @@ import com.moyi.gratitude.domain.DayAssignment
 import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryReading
+import com.moyi.gratitude.domain.LateEntryGrace
 import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.infra.database.BondDayStore
@@ -16,6 +17,7 @@ import com.moyi.gratitude.infra.database.Reactions
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 
 /**
@@ -35,8 +37,13 @@ internal data class TodayView(
     val status: BondDayStatus,
     val myEntry: EntryReading?,
     val partnerEntry: EntryReading?,
-    /** The bond's streak, with today in it when today is complete ([GetStreak]). */
+    /** The bond's streak, with the undecided days in it that have revealed ([GetStreak]). */
     val streak: StreakView,
+    /**
+     * When today settles: its end on the bond's calendar plus the late-entry grace (BR-3a as
+     * amended 2026-11-08). An entry written today and sent before this counts for today.
+     */
+    val settlesAt: Instant,
     /**
      * Which of the two entries **the caller** has bookmarked (FR-093): the
      * caller's own marks and nobody else's. Only ever ids of entries read in
@@ -162,6 +169,7 @@ internal class GetToday(
     private val reactions: Reactions,
     private val prompts: DailyPrompt,
     private val media: EntryMedia,
+    private val grace: LateEntryGrace,
 ) {
     @Transactional(readOnly = true)
     fun today(membership: BondMembership): TodayView {
@@ -170,7 +178,10 @@ internal class GetToday(
         // `anchorTimezone` here would, for the rest of the day a confirmed
         // change is deferred, report a date the caller's own write would not
         // land on.
-        val date = todayOf(membership, clock)
+        val now = clock.instant()
+        val date = todayOf(membership, now)
+        // The same instant, asked of the same calendar: today's own window, and when it settles.
+        val settlesAt = checkNotNull(grace.undecidedDaysOf(membership, now)[date]) { "today is undecided until it ends: $date" }
         // From the bond, the date and the library alone (ADR-0038), and before the day is
         // read: nothing read below is in reach of it.
         val prompt = prompts.on(membership, date)
@@ -178,13 +189,13 @@ internal class GetToday(
 
         if (day == null) {
             val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
-            val unwritten = streak.view(membership, date, todayComplete = false)
             return TodayView(
                 date,
                 status,
                 myEntry = null,
                 partnerEntry = null,
-                streak = unwritten,
+                streak = streak.view(membership),
+                settlesAt = settlesAt,
                 marked = emptySet(),
                 reactions = emptyMap(),
                 media = emptyMap(),
@@ -204,7 +215,8 @@ internal class GetToday(
             status = shown.status,
             myEntry = shown.mine,
             partnerEntry = shown.partners,
-            streak = streak.view(membership, date, todayComplete = day.status == BondDayStatus.REVEALED),
+            streak = streak.view(membership),
+            settlesAt = settlesAt,
             marked = favourites.markedBy(membership.memberId, readInFull),
             reactions = reactions.on(readInFull),
             media = media.of(membership.userId, listOfNotNull(shown.mine, shown.partners)),

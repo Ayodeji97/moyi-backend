@@ -217,7 +217,7 @@ internal class WithdrawEntriesTest(
         rig.wholeDays(withdrawn).map { it["version"] } shouldBe rig.wholeDays(deleted).map { it["version"] }
 
         // Midnight. The stepped-back day is an ordinary empty day to the close job.
-        clock.set(Instant.parse("2026-09-15T23:01:00Z"))
+        clock.set(Instant.parse("2026-09-16T11:01:00Z"))
         closer.closeElapsedDays(clock.instant(), 1_000).failed shouldBe 0
 
         val settled = rig.snapshot(deleted, ada, bea)
@@ -654,7 +654,7 @@ internal class WithdrawEntriesTest(
         val b13 = bonds.associateWith { rig.submit(bea, it, "${BEAS}13") }
         clock.set(at(14))
         val a14 = bonds.associateWith { rig.submit(ada, it, "${ADAS}14") }
-        clock.set(Instant.parse("2026-09-14T23:01:00Z"))
+        clock.set(Instant.parse("2026-09-15T11:01:00Z"))
         closer.closeElapsedDays(clock.instant(), 1_000).failed shouldBe 0
         clock.set(at(15))
         val a15 = bonds.associateWith { rig.submit(ada, it, "${ADAS}15") }

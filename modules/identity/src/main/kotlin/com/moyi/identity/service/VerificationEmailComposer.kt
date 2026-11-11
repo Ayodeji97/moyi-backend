@@ -7,6 +7,7 @@ import com.moyi.notification.api.EmailMessage
 import org.springframework.stereotype.Component
 import org.springframework.web.util.HtmlUtils
 import org.springframework.web.util.UriComponentsBuilder
+import java.time.Duration
 
 /**
  * Writes the verification email. Pure: an event in, a message out, nothing
@@ -33,6 +34,9 @@ internal class VerificationEmailComposer(
         val link = linkFor(event)
         val name = event.displayName.trim()
         val reset = event.purpose == VerificationPurpose.PASSWORD_RESET
+        // The code's own lifetime, as issued: fifteen minutes unless configured (#135).
+        val issuedAt = event.expiresAt.minus(event.purpose.ttl)
+        val codeMinutes = Duration.between(issuedAt, event.codeExpiresAt).toMinutes()
 
         return EmailMessage(
             to = event.email.value,
@@ -45,14 +49,20 @@ internal class VerificationEmailComposer(
                 |
                 |$link
                 |
-                |${if (reset) "If you did not request a password reset, you can ignore this email. Your password will not change without the link." else "If you did not create a Moyi account, you can ignore this email. Nothing happens without the link."}
+                |Or type this code in the app. It works for $codeMinutes minutes:
+                |
+                |${event.code.value}
+                |
+                |${if (reset) "If you did not request a password reset, you can ignore this email. Your password will not change without the link or the code." else "If you did not create a Moyi account, you can ignore this email. Nothing happens without the link or the code."}
                 """.trimMargin(),
             html =
                 """
                 |<p>Hi ${HtmlUtils.htmlEscape(name)},</p>
                 |<p>${if (reset) "Reset your Moyi password by opening the link below. It works once and expires in 1 hour." else "Confirm this is your address by opening the link below. It works once and expires in 24 hours."}</p>
                 |<p><a href="${HtmlUtils.htmlEscape(link)}">${if (reset) "Reset my password" else "Confirm my email"}</a></p>
-                |<p>${if (reset) "If you did not request a password reset, you can ignore this email. Your password will not change without the link." else "If you did not create a Moyi account, you can ignore this email. Nothing happens without the link."}</p>
+                |<p>Or type this code in the app. It works for $codeMinutes minutes:</p>
+                |<p style="font-size:24px;letter-spacing:4px"><strong>${event.code.value}</strong></p>
+                |<p>${if (reset) "If you did not request a password reset, you can ignore this email. Your password will not change without the link or the code." else "If you did not create a Moyi account, you can ignore this email. Nothing happens without the link or the code."}</p>
                 """.trimMargin(),
             idempotencyKey = event.tokenId.toString(),
         )

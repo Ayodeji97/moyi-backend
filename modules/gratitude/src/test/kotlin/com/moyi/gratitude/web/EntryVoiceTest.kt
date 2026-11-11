@@ -92,10 +92,14 @@ internal class EntryVoiceTest(
         val entry = body(created)
         voices.attachedTo(voice) shouldBe UUID.fromString(entry["id"].asString())
         val played = entry["voice"]
-        played.propertyNames().asSequence().toList() shouldBe listOf("id", "status", "url", "durationMs", "sensitive")
+        played.propertyNames().asSequence().toList() shouldBe listOf("id", "status", "url", "durationMs", "waveform", "sensitive", "urlAac")
+        // ADR-0060: a note made without an AAC variant (before it existed) is played from its Opus alone.
+        played["urlAac"].isNull shouldBe true
         played["id"].asString() shouldBe voice.toString()
         played["status"].asString() shouldBe "READY"
         played["durationMs"].asInt() shouldBe ProcessedVoices.DURATION_MS
+        // Issue #165, ADR-0061: its 64 levels, as media measured them, unsigned.
+        played["waveform"].values().map { it.asInt() } shouldBe ProcessedVoices.LEVELS
         played["url"].asString() shouldStartWith "http://127.0.0.1:9/moyi-media-test/v/"
         played["url"].asString().substringBefore("?") shouldEndWith "/voice.ogg"
         played["url"].asString() shouldContain "X-Amz-Signature="
@@ -134,6 +138,8 @@ internal class EntryVoiceTest(
         partners["status"].asString() shouldBe "PROCESSING"
         partners["url"].isNull shouldBe true
         partners["durationMs"].isNull shouldBe true
+        // The waveform goes with the URL (ADR-0061): none until the partner may play the note.
+        partners["waveform"].isNull shouldBe true
         getToday(ada, bondId).contentAsString shouldNotContain "voice.ogg"
         // The archive says the same.
         body(day(ada, bondId, "2026-09-15"))["partnerEntry"]["voice"]["status"].asString() shouldBe "PROCESSING"
@@ -141,6 +147,81 @@ internal class EntryVoiceTest(
         val own = body(getToday(bea, bondId))["myEntry"]["voice"]
         own["status"].asString() shouldBe "READY"
         own["url"].asString() shouldContain "X-Amz-Signature="
+        own["waveform"].values().map { it.asInt() } shouldBe ProcessedVoices.LEVELS
+
+        // Once it has passed moderation, the partner is given the same levels with the URL.
+        jdbc.update("UPDATE media_assets SET moderation_verdict = 'PASSED', moderated_at = now() WHERE id = ?", voice)
+        val passed = body(getToday(ada, bondId))["partnerEntry"]["voice"]
+        passed["status"].asString() shouldBe "READY"
+        passed["waveform"].values().map { it.asInt() } shouldBe ProcessedVoices.LEVELS
+    }
+
+    /** ADR-0061: held back from the partner, the author still has the note and its levels; blocked, neither. */
+    @Test
+    fun `a voice note held back is NOT_SHARED to its author with its waveform, and blocked has none`() {
+        val voice = voices.ready(owner = bea)
+        submit(bea, bondId, """{"text":"a secret kindness","voiceMediaId":"$voice"}""").status shouldBe 201
+        submit(ada, bondId, """{"text":"and mine"}""").status shouldBe 201
+        jdbc.update(
+            "UPDATE media_assets SET status = 'QUARANTINED', moderation_verdict = 'QUARANTINED', moderated_at = now() WHERE id = ?",
+            voice,
+        )
+
+        val held = body(getToday(bea, bondId))["myEntry"]["voice"]
+        held["status"].asString() shouldBe "NOT_SHARED"
+        held["waveform"].values().map { it.asInt() } shouldBe ProcessedVoices.LEVELS
+        body(getToday(ada, bondId))["partnerEntry"]["voice"]["waveform"].isNull shouldBe true
+
+        jdbc.update("UPDATE media_assets SET moderation_verdict = 'BLOCKED' WHERE id = ?", voice)
+        val blocked = body(getToday(bea, bondId))["myEntry"]["voice"]
+        blocked["status"].asString() shouldBe "NOT_SHARED"
+        blocked["url"].isNull shouldBe true
+        blocked["waveform"].isNull shouldBe true
+    }
+
+    /** ADR-0061: a note processed before the levels were measured is played as before, with no waveform: the client keeps its stand-in. */
+    @Test
+    fun `a voice note with no waveform measured is READY with its URL and a null waveform`() {
+        val voice = voices.ready(owner = ada, waveform = null)
+
+        val played = body(submit(ada, bondId, """{"text":"from before","voiceMediaId":"$voice"}"""))["voice"]
+
+        played["status"].asString() shouldBe "READY"
+        played["url"].asString() shouldContain "X-Amz-Signature="
+        played.has("waveform") shouldBe true
+        played["waveform"].isNull shouldBe true
+    }
+
+    /**
+     * ADR-0060: the AAC variant iOS streams goes with the Opus, to exactly whoever is played the Opus: its author
+     * once it is ready, the partner only once it has passed moderation. Signed at the same moment for as long.
+     */
+    @Test
+    fun `the AAC variant is given with the Opus, to the author at once and to the partner once it has passed, signed alike`() {
+        val voice = voices.ready(owner = bea, withAac = true)
+        submit(bea, bondId, """{"text":"a secret kindness","voiceMediaId":"$voice"}""").status shouldBe 201
+        submit(ada, bondId, """{"text":"and mine"}""").status shouldBe 201
+
+        val own = body(getToday(bea, bondId))["myEntry"]["voice"]
+        val url = own["url"].asString()
+        val urlAac = own["urlAac"].asString()
+        urlAac.substringBefore("?") shouldEndWith "/voice.m4a"
+        urlAac shouldContain "X-Amz-Signature="
+        // The same signing instant and lifetime as the Opus's: one expiry for both.
+        signing(urlAac) shouldBe signing(url)
+        // The same object directory: the same note.
+        urlAac.substringBefore("?").substringBeforeLast("/") shouldBe url.substringBefore("?").substringBeforeLast("/")
+
+        val unmoderated = body(getToday(ada, bondId))["partnerEntry"]["voice"]
+        unmoderated["status"].asString() shouldBe "PROCESSING"
+        unmoderated["urlAac"].isNull shouldBe true
+        getToday(ada, bondId).contentAsString shouldNotContain "voice.m4a"
+
+        jdbc.update("UPDATE media_assets SET moderation_verdict = 'PASSED', moderated_at = now() WHERE id = ?", voice)
+        val passed = body(getToday(ada, bondId))["partnerEntry"]["voice"]
+        passed["status"].asString() shouldBe "READY"
+        passed["urlAac"].asString().substringBefore("?") shouldEndWith "/voice.m4a"
+        signing(passed["urlAac"].asString()) shouldBe signing(passed["url"].asString())
     }
 
     @Test
@@ -156,6 +237,7 @@ internal class EntryVoiceTest(
             shown["status"].asString() shouldBe "PROCESSING"
             shown["url"].isNull shouldBe true
             shown["durationMs"].isNull shouldBe true
+            shown["waveform"].isNull shouldBe true
         }
     }
 
@@ -221,6 +303,77 @@ internal class EntryVoiceTest(
         body(patch(ada, entry, """{"text":"other words","voiceMediaId":"$second"}"""))["voice"]["id"].asString() shouldBe second.toString()
         voices.attachedTo(second) shouldBe UUID.fromString(entry)
         voices.attachedTo(first).shouldBeNull()
+    }
+
+    /** Issue #164: as `removeImage` does for a photo (EntryPhotoTest has the reaper's side of it). */
+    @Test
+    fun `PATCH removeVoice takes the voice note off, lets it go as a replaced one is, and leaves the photo`() {
+        val photo = photos.ready(owner = ada)
+        val voice = voices.ready(owner = ada)
+        val entry = body(submit(ada, bondId, """{"text":"words","imageMediaId":"$photo","voiceMediaId":"$voice"}"""))["id"].asString()
+
+        val response = patch(ada, entry, """{"text":"words","removeVoice":true}""")
+
+        response.status shouldBe 200
+        body(response)["voice"].isNull shouldBe true
+        body(response)["image"]["id"].asString() shouldBe photo.toString()
+        jdbc.queryForObject("SELECT voice_media_id FROM entries WHERE id = ?::uuid", UUID::class.java, entry).shouldBeNull()
+        voices.attachedTo(voice).shouldBeNull()
+        jdbc.queryForMap("SELECT status, detached_at FROM media_assets WHERE id = ?", voice) shouldBe
+            mapOf("status" to "READY", "detached_at" to java.sql.Timestamp.from(clock.instant()))
+        photos.attachedTo(photo) shouldBe UUID.fromString(entry)
+    }
+
+    @Test
+    fun `PATCH removeImage and removeVoice together leave the entry its words alone`() {
+        val photo = photos.ready(owner = ada)
+        val voice = voices.ready(owner = ada)
+        val entry = body(submit(ada, bondId, """{"text":"words","imageMediaId":"$photo","voiceMediaId":"$voice"}"""))["id"].asString()
+
+        val response = patch(ada, entry, """{"text":"only words","removeImage":true,"removeVoice":true}""")
+
+        response.status shouldBe 200
+        body(response)["image"].isNull shouldBe true
+        body(response)["voice"].isNull shouldBe true
+        body(response)["text"].asString() shouldBe "only words"
+        photos.attachedTo(photo).shouldBeNull()
+        voices.attachedTo(voice).shouldBeNull()
+    }
+
+    @Test
+    fun `PATCH removeVoice on an entry with no voice note is a 200 that changes nothing`() {
+        val entry = body(submit(ada, bondId, """{"text":"words"}"""))["id"].asString()
+
+        val response = patch(ada, entry, """{"text":"words","removeVoice":true}""")
+
+        response.status shouldBe 200
+        body(response)["voice"].isNull shouldBe true
+    }
+
+    @Test
+    fun `PATCH removeVoice with a voiceMediaId is refused 422, and neither is done`() {
+        val kept = voices.ready(owner = ada)
+        val entry = body(submit(ada, bondId, """{"text":"words","voiceMediaId":"$kept"}"""))["id"].asString()
+        val named = voices.ready(owner = ada)
+
+        val refused = patch(ada, entry, """{"text":"words","removeVoice":true,"voiceMediaId":"$named"}""")
+
+        refused.status shouldBe 422
+        refused.contentAsString shouldContain "\"code\":\"VALIDATION_FAILED\""
+        refused.contentAsString shouldContain "\"field\":\"removeVoiceWithoutVoiceMediaId\""
+        voices.attachedTo(kept) shouldBe UUID.fromString(entry)
+        voices.attachedTo(named).shouldBeNull()
+    }
+
+    @Test
+    fun `PATCH removeVoice of a revealed entry is immutable, and the voice note stays on it`() {
+        val voice = voices.ready(owner = ada)
+        val entry = body(submit(ada, bondId, """{"text":"words","voiceMediaId":"$voice"}"""))["id"].asString()
+        submit(bea, bondId, """{"text":"hers"}""").status shouldBe 201
+
+        patch(ada, entry, """{"text":"words","removeVoice":true}""").status shouldBe 409
+
+        voices.attachedTo(voice) shouldBe UUID.fromString(entry)
     }
 
     @Test
@@ -331,6 +484,12 @@ internal class EntryVoiceTest(
         mockMvc.get("/api/v1/bonds/$bondId/days/$date") { header(HttpHeaders.AUTHORIZATION, bearer(caller)) }.andReturn().response
 
     private fun bearer(user: UUID) = "Bearer ${tokens.issue(user).token}"
+
+    /** A signed URL's signing instant and lifetime, which two URLs signed alike share. */
+    private fun signing(url: String): Pair<String?, String?> {
+        val query = url.substringAfter("?").split("&").associate { it.substringBefore("=") to it.substringAfter("=") }
+        return query["X-Amz-Date"] to query["X-Amz-Expires"]
+    }
 
     private fun body(response: MockHttpServletResponse): JsonNode = json.readTree(response.contentAsString)
 

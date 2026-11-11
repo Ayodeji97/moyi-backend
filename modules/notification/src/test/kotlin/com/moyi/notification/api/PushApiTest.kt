@@ -14,7 +14,7 @@ internal class PushApiTest {
     fun `a push token never prints itself, nor does a message or a registration that holds one`() {
         val token = PushToken("fcm-token-secret")
         token.toString() shouldBe "PushToken(<redacted>)"
-        PushMessage(token, PushCategory.REVEAL, UUID.randomUUID(), Instant.EPOCH).toString() shouldNotContain "fcm-token-secret"
+        PushMessage(token, PushCategory.REVEAL, UUID.randomUUID(), Instant.EPOCH, null).toString() shouldNotContain "fcm-token-secret"
         PushTokenRegistration(UUID.randomUUID(), UUID.randomUUID(), PushPlatform.ANDROID, token).toString() shouldNotContain
             "fcm-token-secret"
     }
@@ -33,10 +33,10 @@ internal class PushApiTest {
         val user = UUID.randomUUID()
         val bond = UUID.randomUUID()
         val at = Instant.parse("2026-10-28T00:00:00Z")
-        PushRequest(user, bond, PushCategory.MILESTONE, "k".repeat(PushRequest.MAX_DEDUPE_KEY_LENGTH), at, RECIPIENT)
-        shouldThrow<IllegalArgumentException> { PushRequest(user, bond, PushCategory.MILESTONE, "", at, RECIPIENT) }
+        PushRequest(user, bond, PushCategory.MILESTONE, "k".repeat(PushRequest.MAX_DEDUPE_KEY_LENGTH), at, RECIPIENT, null)
+        shouldThrow<IllegalArgumentException> { PushRequest(user, bond, PushCategory.MILESTONE, "", at, RECIPIENT, null) }
         shouldThrow<IllegalArgumentException> {
-            PushRequest(user, bond, PushCategory.MILESTONE, "k".repeat(PushRequest.MAX_DEDUPE_KEY_LENGTH + 1), at, RECIPIENT)
+            PushRequest(user, bond, PushCategory.MILESTONE, "k".repeat(PushRequest.MAX_DEDUPE_KEY_LENGTH + 1), at, RECIPIENT, null)
         }
     }
 

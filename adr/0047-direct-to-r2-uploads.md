@@ -47,11 +47,14 @@ URL was issued.
   another `Content-Type` are each refused and nothing is stored (`R2ObjectStoreTest`). Removing
   the checksum from the signature turns three of those tests red; removing the length turns the
   signed-headers test red (the checksum still refuses a longer body).
-- **R2, not run: the [inferred] item is not settled.** Cloudflare's S3 compatibility page lists no
-  checksum headers on PutObject and does not say they are refused. The length is signed whatever
-  R2 does with the checksum, and completion (decision 2) compares the digest whenever the storage
-  reports one. **Owed:** one manual PUT of altered bytes against the real bucket before uploads
-  are switched on in production (doc 12:136 already asks one manual R2 check per release).
+- **R2, run 2026-11-05: the [inferred] item is settled; R2 honours the signed checksum.**
+  `scripts/r2-switch-on-check.sh`, run by the owner against production (`a8e7652`, bucket
+  `moyi-media`), saw R2 refuse a body of the signed length with one byte changed (`400`), a body
+  one byte longer (`403`) and another `Content-Type` (`403`), then take the declared bytes
+  (`200`). Before that run: Cloudflare's S3 compatibility page lists no checksum headers on
+  PutObject, so this was an inference. The length is signed whatever R2 does with the checksum,
+  and completion (decision 2) still compares the digest whenever the storage reports one. Doc
+  12:136 still asks for one manual R2 check per release; that script is the check.
 - **The SDK's own checksums are off unless required** (`WHEN_REQUIRED`), and chunked encoding is
   off, as Cloudflare's Java guide says. Seen: the signed headers are exactly `content-length;
   content-type;host;x-amz-checksum-sha256`, with no `x-amz-sdk-checksum-algorithm` a phone would
@@ -160,8 +163,8 @@ from `modules/media`, as it does for `notification`.
 declared is refused by the storage itself, not by code of ours that could be bypassed. A
 production without media credentials starts, and says so in its log. Replacing R2 is one class.
 
-**Negative.** Whether R2 enforces the signed checksum is unproven until someone PUTs altered bytes
-at the real bucket. A completion waits up to 3 s on a storage that does not answer (holding no
+**Negative.** Whether R2 enforces the signed checksum was unproven when this was decided; the
+2026-11-05 run against the real bucket settled it (decision 1), and the length is signed either way. A completion waits up to 3 s on a storage that does not answer (holding no
 database connection while it does). A deleted upload's bytes may outlive the deletion by up to two days if the storage
 cannot be reached at that moment. The test double is a community image whose maintainer is not
 MinIO.
@@ -206,7 +209,8 @@ bucket (30 an hour per user, doc 06 §4) joins `RateLimitBucket`.
   switch-on deploy (`ops/media-worker/README.md`, step 6). It PUTs a body one byte longer, a body
   of the signed length with one byte changed (the checksum, this decision's open item) and another
   `Content-Type`, and reports each refusal; if R2 takes the changed byte, it says whether the
-  completion's digest check then refused it. Seen against MinIO only.
+  completion's digest check then refused it. **Done 2026-11-05:** against R2, all three were
+  refused, the changed byte with `400` (decision 1).
 - **D2:** `media.process` must read the asset's status again and skip one that is `DELETED`: a
   `MediaUploaded` can name an asset deleted after it was published. And
   `media.process`, the signed GET URLs on `GET /media/{id}`, the FR-044a claim and

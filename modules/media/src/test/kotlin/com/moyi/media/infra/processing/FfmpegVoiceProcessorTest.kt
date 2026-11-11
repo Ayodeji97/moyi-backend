@@ -2,11 +2,15 @@ package com.moyi.media.infra.processing
 
 import com.moyi.media.domain.MediaRefusal
 import com.moyi.media.domain.VoiceFormat
+import com.moyi.media.domain.VoiceRules
 import com.sun.net.httpserver.HttpServer
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldBeIn
 import io.kotest.matchers.ints.shouldBeInRange
 import io.kotest.matchers.longs.shouldBeLessThan
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -63,8 +67,65 @@ internal class FfmpegVoiceProcessorTest {
                 kept["streams.stream.0.sample_rate"] shouldBe "48000"
                 kept["format.format_name"] shouldBe "ogg"
                 kept.keys.none { it.startsWith("streams.stream.1.") } shouldBe true
+                // Its waveform, measured from what was kept (ADR-0061): 64 levels, the loudest 255, or a silent note's zeros.
+                val levels = transcoded.waveform.shouldNotBeNull().levels
+                levels.size shouldBe 64
+                levels.all { it in 0..255 } shouldBe true
+                levels.max() shouldBeIn listOf(0, 255)
             }
         }
+    }
+
+    /** Issue #165, ADR-0061: the levels follow the note's loudness over time, measured after the transcode. */
+    @Test
+    fun `the waveform of a note loud for its first second and quiet for its second follows it, slice by slice`() {
+        val note = TestVoices.wavOf(2.0, sampleRate = 16_000) { at -> if (at < 1.0) 20_000.0 else 2_000.0 }
+
+        val levels =
+            transcode(note, VoiceFormat.WAV)
+                .shouldBeInstanceOf<Transcoding.Transcoded>()
+                .waveform
+                .shouldNotBeNull()
+                .levels
+
+        withClue(levels) {
+            // Away from the step (and from the encoder's onset), the loud half is near 255 and the quiet half near a tenth of it.
+            levels.subList(4, 28).all { it >= 230 } shouldBe true
+            levels.subList(36, 60).all { it in 10..45 } shouldBe true
+            levels.max() shouldBe 255
+        }
+    }
+
+    @Test
+    fun `a silent note's waveform is all zeros`() {
+        val levels =
+            transcode(TestVoices.wavOf(2.0) { 0.0 }, VoiceFormat.WAV)
+                .shouldBeInstanceOf<Transcoding.Transcoded>()
+                .waveform
+                .shouldNotBeNull()
+                .levels
+
+        levels shouldBe List(64) { 0 }
+    }
+
+    /** ADR-0061: the drawing is not worth the note. A measurement that fails keeps the note, without its waveform. */
+    @Test
+    fun `a waveform that cannot be measured leaves the note kept, without one`() {
+        val real = Ffmpegs.binDir
+        val fakes =
+            Ffmpegs.fake(
+                dir.resolve("bin"),
+                ffprobe = "exec \"${real.resolve("ffprobe")}\" \"$@\"",
+                ffmpeg = "case \"$*\" in *\"-f s16le\"*) exit 1;; esac; exec \"${real.resolve("ffmpeg")}\" \"$@\"",
+            )
+        val failing = FfmpegVoiceProcessor(fakes.resolve("ffmpeg"), fakes.resolve("ffprobe"), Ffmpegs.sandbox, Duration.ofSeconds(30))
+        work = Files.createTempDirectory(dir, "work-")
+
+        val outcome = failing.transcode(Files.write(work.resolve("upload"), TestVoices.wav(2.0)), VoiceFormat.WAV, work)
+
+        val transcoded = outcome.shouldBeInstanceOf<Transcoding.Transcoded>()
+        transcoded.waveform shouldBe null
+        transcoded.durationMs shouldBeInRange 1_900..2_200
     }
 
     /** Owner's ruling Q4: 24 kbps. A ten-second note is long enough for the average to mean something. */
@@ -257,6 +318,90 @@ internal class FfmpegVoiceProcessorTest {
         withClue("took $took") { took.toSeconds() shouldBeLessThan 10L }
         val sleeper = Files.readString(pid).trim().toLong()
         ProcessHandle.of(sleeper).map { it.isAlive }.orElse(false) shouldBe false
+    }
+
+    /**
+     * ADR-0060: beside the Opus, the AAC variant iOS streams: AAC-LC, mono, in MP4 whose index
+     * (`moov`) comes before the audio (`mdat`), so AVPlayer can start before the whole file has
+     * arrived. Made of the kept Opus, so its length is the Opus's, not a second reading of the upload.
+     */
+    @Test
+    fun `each note is also kept as AAC-LC in MP4, mono, its index first, as long as its Opus`() {
+        for ((name, recording) in mapOf(
+            "WAV" to (VoiceFormat.WAV to TestVoices.wav(2.0)),
+            "M4A" to (VoiceFormat.MP4 to TestVoices.m4a(dir)),
+        )) {
+            withClue(name) {
+                val (format, bytes) = recording
+                val transcoded = transcode(bytes, format).shouldBeInstanceOf<Transcoding.Transcoded>()
+                val aac = transcoded.aac.shouldNotBeNull()
+
+                aac.bytes shouldBe Files.size(aac.file)
+                val kept = Ffmpegs.probe(aac.file, "stream=codec_name,profile,channels", "format=format_name,duration")
+                kept["streams.stream.0.codec_name"] shouldBe "aac"
+                kept["streams.stream.0.profile"] shouldBe "LC"
+                kept["streams.stream.0.channels"] shouldBe "1"
+                kept["format.format_name"]!! shouldContain "mp4"
+                kept.keys.none { it.startsWith("streams.stream.1.") } shouldBe true
+                val aacMs = (kept["format.duration"]!!.toDouble() * 1000).toLong()
+                withClue("AAC $aacMs ms, Opus ${transcoded.durationMs} ms") {
+                    VoiceRules.isTheSameNote(transcoded.durationMs.toLong(), aacMs) shouldBe true
+                }
+
+                val file = Files.readAllBytes(aac.file)
+                String(file, 4, 4, Charsets.US_ASCII) shouldBe "ftyp"
+                val text = String(file, Charsets.ISO_8859_1)
+                withClue("moov at ${text.indexOf("moov")}, mdat at ${text.indexOf("mdat")}") {
+                    (text.indexOf("moov") in 0 until text.indexOf("mdat")) shouldBe true
+                }
+            }
+        }
+    }
+
+    /** ADR-0060: about 32 kbit/s. Ten seconds, so that the average means something. */
+    @Test
+    fun `the AAC variant is at about 32 kbit per second`() {
+        val transcoded = transcode(TestVoices.wav(10.0, sampleRate = 16_000), VoiceFormat.WAV).shouldBeInstanceOf<Transcoding.Transcoded>()
+        val aac = transcoded.aac.shouldNotBeNull()
+
+        val bitsPerSecond = aac.bytes * 8 * 1000 / transcoded.durationMs
+        withClue("$bitsPerSecond bit/s") { (bitsPerSecond in 24_000..44_000) shouldBe true }
+    }
+
+    /** As the Opus: no tag, chapter or build version of the upload or of this server in the AAC variant. */
+    @Test
+    fun `the AAC variant carries nothing of the upload but its sound, and no fingerprint of the build`() {
+        val transcoded = transcode(TestVoices.m4aWithTagsAndChapters(dir), VoiceFormat.MP4).shouldBeInstanceOf<Transcoding.Transcoded>()
+        val aac = transcoded.aac.shouldNotBeNull()
+
+        val bytes = String(Files.readAllBytes(aac.file), Charsets.ISO_8859_1)
+        bytes.contains(TestVoices.MARKER) shouldBe false
+        withClue(bytes.take(200)) { Regex("Lav[fc][0-9]").containsMatchIn(bytes) shouldBe false }
+    }
+
+    /**
+     * ADR-0060: the AAC variant is best effort. An encoder that fails on it leaves the note kept as
+     * Opus, and without the variant; it never refuses a note the Opus step kept.
+     */
+    @Test
+    fun `an AAC encode that fails keeps the Opus and no variant`() {
+        val real = Ffmpegs.binDir.resolve("ffmpeg")
+        val fakes =
+            Ffmpegs.fake(
+                dir.resolve("bin"),
+                ffprobe = "exec \"${Ffmpegs.binDir.resolve("ffprobe")}\" \"$@\"",
+                ffmpeg = "case \"$*\" in *${FfmpegVoiceProcessor.AAC_OUTPUT}*) exit 1;; esac; exec \"$real\" \"$@\"",
+            )
+        val failing = FfmpegVoiceProcessor(fakes.resolve("ffmpeg"), fakes.resolve("ffprobe"), Ffmpegs.sandbox, Duration.ofSeconds(30))
+        work = Files.createTempDirectory(dir, "work-")
+
+        val transcoded =
+            failing
+                .transcode(Files.write(work.resolve("upload"), TestVoices.wav(2.0)), VoiceFormat.WAV, work)
+                .shouldBeInstanceOf<Transcoding.Transcoded>()
+
+        transcoded.durationMs shouldBeInRange 1_900..2_200
+        transcoded.aac shouldBe null
     }
 
     /** In a work directory of its own, as the pipeline gives each upload: [work] is the last one. */

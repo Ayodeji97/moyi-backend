@@ -1,13 +1,10 @@
 package com.moyi.bond.service
 
-import com.moyi.bond.domain.RegionZone
 import com.moyi.common.web.ApiException
 import com.moyi.common.web.ErrorCode
 import com.moyi.common.web.NotFoundException
 import org.springframework.http.HttpStatus
-import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -126,36 +123,24 @@ internal class ProposalNeedsOtherMemberException :
  *
  * `409` and not `429` (ADR-0030): a month is not a rate limit, and a client that
  * treated it as one would show "please wait" and then retry into the same wall.
+ *
+ * **The date is also typed, as `allowedFrom`** (#142): an RFC 9457 extension
+ * member, `YYYY-MM-DD`, the same date the sentence names. The sentence is
+ * English prose and `ProblemDetail` says to switch on nothing in it; a client
+ * fills `allowedFrom` into its own words. Since #170 `BondResponse` carries
+ * the same date as `timezoneChangeAllowedFrom`, so the screen can name it
+ * before the attempt; both are `Bond.timezoneChangeAllowedFrom`, which also
+ * holds the rounding to a whole day (ADR-0030, amended 2026-11-10).
  */
 internal class TimezoneChangeTooSoonException(
-    allowedFrom: Instant,
-    zone: RegionZone,
+    allowedFrom: LocalDate,
 ) : ApiException(
         HttpStatus.CONFLICT,
         ErrorCode.TIMEZONE_CHANGE_TOO_SOON,
-        "The shared time zone can change again from ${DATE.format(readableDate(allowedFrom, zone))}.",
+        "The shared time zone can change again from ${DATE.format(allowedFrom)}.",
+        extensions = mapOf(ALLOWED_FROM to allowedFrom.toString()),
     ) {
     private companion object {
-        /**
-         * The first date on which the change is allowed *all day*, in the bond's
-         * own zone.
-         *
-         * Thirty days from an afternoon lands in an afternoon, so naming that
-         * calendar date makes the sentence false for most of the day it names —
-         * a client that read "28 October" and retried at 10:00 on the 28th got
-         * the identical refusal naming the identical date. Rounding **up** to
-         * the next whole day is the honest direction to be wrong in: the answer
-         * may arrive sooner than promised, never later. Found by the second
-         * review of PR #41.
-         */
-        fun readableDate(
-            allowedFrom: Instant,
-            zone: RegionZone,
-        ): LocalDate =
-            allowedFrom.atZone(zone.zone).let {
-                if (it.toLocalTime() == LocalTime.MIDNIGHT) it.toLocalDate() else it.toLocalDate().plusDays(1)
-            }
-
         /**
          * The date as a person reads it, in the bond's own zone.
          *
@@ -168,6 +153,9 @@ internal class TimezoneChangeTooSoonException(
          * *request's* locale, not the server's.
          */
         val DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH)
+
+        /** The extension member's name, as `ProblemDetail` declares it in the contract. */
+        const val ALLOWED_FROM = "allowedFrom"
     }
 }
 

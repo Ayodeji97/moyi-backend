@@ -39,3 +39,10 @@ The first implementation of this slice (PR #32 as opened) got the dummy verify r
 ## Revisit when
 
 FR-007 (session list) or push-token registration lands — build `devices`, move `device_info`. FR-012 lands — the per-IP bucket is what makes the visible "wait" honest. A suspended-account screen is designed — refuse suspended accounts with a code of their own only if the product decides they should know.
+
+## Amendment 2026-11-10: `401 INVALID_CREDENTIALS` is sign-in's alone (#166)
+
+Decision 1 stands for `POST /auth/login`. `INVALID_CREDENTIALS` is also what a wrong password
+typed again on a signed-in route answers (`POST /me/deletion-request`), and there it is **`403`**,
+not `401`: a `401` on a signed-in route is read by a client as its token refused, and the token
+there was accepted. See ADR-0058's amendment of the same date for the rule and the reasons.

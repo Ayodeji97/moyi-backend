@@ -63,14 +63,18 @@ RUN /opt/java/bin/java -Djarmode=tools -jar app.jar extract --layers --launcher 
 FROM ${UBUNTU}
 
 # libvips' command-line tools, the libde265 plugin that lets libheif decode a
-# HEIC, and ffmpeg with libopus (and the AMR decoders): exactly what CI's tests
-# install. --no-install-recommends keeps out what the packages only suggest.
+# HEIC, and ffmpeg with libopus (and the AMR decoders) and its own native AAC
+# encoder, `aac`, for the variant iOS streams (ADR-0060; never libfdk_aac, which
+# Ubuntu does not ship and whose licence forbids redistributing it): exactly
+# what CI's tests install. --no-install-recommends keeps out what the packages
+# only suggest.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends libvips-tools libheif-plugin-libde265 ffmpeg; \
     rm -rf /var/lib/apt/lists/*; \
     vips --version; \
-    ffmpeg -hide_banner -version | head -n 1
+    ffmpeg -hide_banner -version | head -n 1; \
+    ffmpeg -hide_banner -h encoder=aac | grep -q "Encoder aac"
 
 # Never root. No home directory and no login shell: nothing here needs either,
 # and the worker's root file system is read-only (config/deploy.yml).

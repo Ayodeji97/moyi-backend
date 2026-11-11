@@ -21,6 +21,7 @@ import org.springframework.boot.restclient.autoconfigure.RestClientAutoConfigura
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -92,12 +93,22 @@ internal class PushSenderConfigurationTest {
                 logger.addAppender(captured)
                 try {
                     val bond = UUID.randomUUID()
-                    sender.send(PushMessage(PushToken("secret-device-token"), PushCategory.MILESTONE, bond, Instant.EPOCH)) shouldBe
+                    sender.send(
+                        PushMessage(
+                            PushToken("secret-device-token"),
+                            PushCategory.MILESTONE,
+                            bond,
+                            Instant.EPOCH,
+                            LocalDate.parse("2026-10-28"),
+                        ),
+                    ) shouldBe
                         PushDelivery.Accepted(LoggingPushSender.PROVIDER_MESSAGE_ID)
                     val line = captured.list.single().formattedMessage
                     line shouldContain "MILESTONE"
                     line shouldContain bond.toString()
                     line shouldNotContain "secret-device-token"
+                    // The line names the category and the Bond, as it always has: the payload's other fields stay out (#146).
+                    line shouldNotContain "2026-10-28"
                 } finally {
                     logger.detachAppender(captured)
                 }

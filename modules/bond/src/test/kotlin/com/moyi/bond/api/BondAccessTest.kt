@@ -256,6 +256,35 @@ internal class BondAccessTest(
         access.partnerDisplayNameOf(access.membershipOf(ada, blocked)) shouldBe "Bea"
     }
 
+    /**
+     * FR-100's member half (ADR-0053, amended for #127): the member a report names. The other member row, left or
+     * blocked or not, and the bond's own `404` while there has never been a second, so that a bond with nobody to
+     * report answers as a stranger's does.
+     */
+    @Test
+    fun `the partner's member id is the other row, left or blocked, and a bond's 404 while there is none`() {
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+
+        val alone =
+            create
+                .create(draft(ada))
+                .bond.id.value
+        val nobody = shouldThrow<NotFoundException> { access.partnerMemberIdOf(access.membershipOf(ada, alone)) }
+        val stranger = shouldThrow<NotFoundException> { access.membershipOf(bea, alone) }
+        nobody.detail shouldBe stranger.detail
+
+        val bondId = bondForTwo(ada, bea)
+        val adas = access.membershipOf(ada, bondId)
+        val beas = access.membershipOf(bea, bondId)
+        access.partnerMemberIdOf(adas) shouldBe beas.memberId
+        access.partnerMemberIdOf(beas) shouldBe adas.memberId
+
+        endBond.block(guard.membershipOf(UserId(ada), BondId(bondId)), withdrawEntries = false)
+        access.partnerMemberIdOf(access.membershipOf(ada, bondId)) shouldBe beas.memberId
+        access.partnerMemberIdOf(access.membershipOf(bea, bondId)) shouldBe adas.memberId
+    }
+
     @Test
     fun `a partner identity no longer knows is a former member, as the bond route names them`() {
         val ada = users.verified("Ada")

@@ -38,6 +38,19 @@ spring:
         generate_statistics: true
 
 moyi:
+  legal:
+    # Required, with no value in application.yml (ADR-0056). Three versions that
+    # differ from each other and from anything a test client sends, so a test can
+    # tell which one a consent row recorded (LegalEndpointTest).
+    terms:
+      version: terms-t3
+      url: https://moyi.test/terms
+    privacy:
+      version: privacy-t2
+      url: https://moyi.test/privacy
+    summary:
+      version: summary-t1
+      url: https://moyi.test/data-processing
   notification:
     email:
       # Tests that care about the email replace the EmailSender bean with a

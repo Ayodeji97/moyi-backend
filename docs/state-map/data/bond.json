@@ -2118,11 +2118,11 @@
     "to": "PENDING_MEMBER",
     "status": 409,
     "code": "TIMEZONE_CHANGE_TOO_SOON",
-    "reason": "The shared zone moves at most once in 30 days, also while you are alone in the bond. The detail names the date from which it may move again.",
+    "reason": "The shared zone moves at most once in 30 days, also while you are alone in the bond. The detail names the date from which it may move again, and allowedFrom carries it typed (YYYY-MM-DD, in the bond's zone).",
     "rule": "FR-027, ADR-0030 §7",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#throw TimezoneChangeTooSoonException(requireNotNull(bond.nextTimezoneChangeAt), bond.anchorTimezone)"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#bond.timezoneChangeAllowedFrom(now)?.let { throw TimezoneChangeTooSoonException(it) }"
   },
   {
     "id": "bond-active-timezone-propose",
@@ -2193,11 +2193,11 @@
     "to": "ACTIVE",
     "status": 409,
     "code": "TIMEZONE_CHANGE_TOO_SOON",
-    "reason": "The shared zone moves at most once in 30 days. This is a 409 and not a 429: a month is not a rate limit. The detail names the date from which it may move again.",
+    "reason": "The shared zone moves at most once in 30 days. This is a 409 and not a 429: a month is not a rate limit. The detail names the date from which it may move again, and allowedFrom carries it typed (YYYY-MM-DD, in the bond's zone).",
     "rule": "FR-027, ADR-0030 §7",
     "evidence": "smoke",
     "evidenceRef": "a change within thirty days is 409 TIMEZONE_CHANGE_TOO_SOON",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#throw TimezoneChangeTooSoonException(requireNotNull(bond.nextTimezoneChangeAt), bond.anchorTimezone)"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#bond.timezoneChangeAllowedFrom(now)?.let { throw TimezoneChangeTooSoonException(it) }"
   },
   {
     "id": "bond-pending-deletion-timezone-propose",
@@ -3597,7 +3597,7 @@
     "rule": "ADR-0034",
     "evidence": "test",
     "evidenceRef": "StreakEndpointTest#a bond nobody has written in has a streak of nothing, and a calendar of today, open",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#val unwritten = last == today && !from.isAfter(today) && membership.isOpen && stored.lastOrNull()?.date != today"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#.map { (date, settlesAt) -> StreakDay(date, StreakCell.OPEN, settlesAt = settlesAt) }"
   },
   {
     "id": "bond-pending-deletion-streak",
@@ -3697,7 +3697,7 @@
     "rule": "doc 04 §8.3a",
     "evidence": "test",
     "evidenceRef": "MilestonesEndpointTest#a bond still waiting for its second person has reached nothing, whatever its creator wrote",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetMilestones.kt#val total = if (counted) evaluated.total + 1 else evaluated.total"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetMilestones.kt#val total = evaluated.total + counted.size"
   },
   {
     "id": "bond-active-milestones",
@@ -3722,7 +3722,7 @@
     "rule": "FR-075, ADR-0041",
     "evidence": "smoke",
     "evidenceRef": "milestones: the seventh complete day is today, reached the moment both wrote",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetMilestones.kt#val counted = streak.countsToday(membership, today, todayComplete)"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetMilestones.kt#val counted = pending.complete.filter { evaluatedSince == null || it.isAfter(evaluatedSince) }"
   },
   {
     "id": "bond-pending-deletion-milestones",
@@ -5689,7 +5689,7 @@
     "rule": "FR-027, ADR-0030 §7",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#throw TimezoneChangeTooSoonException(requireNotNull(bond.nextTimezoneChangeAt), bond.anchorTimezone)"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#bond.timezoneChangeAllowedFrom(now)?.let { throw TimezoneChangeTooSoonException(it) }"
   },
   {
     "id": "proposal-proposed-timezone-propose",
@@ -5778,11 +5778,11 @@
     "to": "CONFIRMED",
     "status": 409,
     "code": "TIMEZONE_CHANGE_TOO_SOON",
-    "reason": "The zone moved when the last proposal was agreed, and it moves at most once in 30 days. The detail names the date from which it may move again.",
+    "reason": "The zone moved when the last proposal was agreed, and it moves at most once in 30 days. The detail names the date from which it may move again, and allowedFrom carries it typed (YYYY-MM-DD, in the bond's zone).",
     "rule": "FR-027, ADR-0030 §7",
     "evidence": "smoke",
     "evidenceRef": "a change within thirty days is 409 TIMEZONE_CHANGE_TOO_SOON",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#throw TimezoneChangeTooSoonException(requireNotNull(bond.nextTimezoneChangeAt), bond.anchorTimezone)"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#bond.timezoneChangeAllowedFrom(now)?.let { throw TimezoneChangeTooSoonException(it) }"
   },
   {
     "id": "proposal-cancelled-timezone-propose",
@@ -6000,7 +6000,7 @@
     "rule": "ADR-0030 §6",
     "evidence": "test",
     "evidenceRef": "BondTimezoneEndpointTest#the thirty days are re-checked at confirmation, not only at proposal",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!bond.mayChangeTimezoneAt(now)) {"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#bond.timezoneChangeAllowedFrom(now)?.let { throw TimezoneChangeTooSoonException(it) }"
   },
   {
     "id": "bond-active-timezone-confirm-too-soon",
@@ -6025,7 +6025,7 @@
     "rule": "ADR-0030 §6",
     "evidence": "test",
     "evidenceRef": "BondTimezoneEndpointTest#the thirty days are re-checked at confirmation, not only at proposal",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!bond.mayChangeTimezoneAt(now)) {"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#bond.timezoneChangeAllowedFrom(now)?.let { throw TimezoneChangeTooSoonException(it) }"
   },
   {
     "id": "bond-none-semantic-on",
@@ -6401,6 +6401,131 @@
     "evidence": "smoke",
     "evidenceRef": "semantic: on an ended bond, calling a request off is 404",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-none-member-report",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/bonds/{bondId}/members/other/report",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "a stranger reporting a member of the bond is 404",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-member-report",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "POST /api/v1/bonds/{bondId}/members/other/report",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_MEMBER",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Nobody has joined, so there is nobody to report. The same answer, byte for byte, as a bond you are not in.",
+    "rule": "FR-100, ADR-0053 (amended for #127), doc 26 §2.2",
+    "evidence": "smoke",
+    "evidenceRef": "reporting the member of a bond with no partner yet is 404",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessAdapter.kt#val partner = bond.members.firstOrNull { it.id.value != membership.memberId } ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-active-member-report",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/members/other/report",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 201,
+    "code": null,
+    "reason": "Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag.",
+    "rule": "FR-100, ADR-0053 (amended for #127), doc 26 §2.2",
+    "evidence": "smoke",
+    "evidenceRef": "the reporter reports the other member: 201",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReportMember.kt#reports.insert(report, detail, now)"
+  },
+  {
+    "id": "bond-pending-deletion-member-report",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "POST /api/v1/bonds/{bondId}/members/other/report",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 201,
+    "code": null,
+    "reason": "Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. A countdown to deletion does not refuse it: a report is never contact.",
+    "rule": "FR-100, ADR-0053 (amended for #127), doc 26 §2.2",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReportMember.kt#reports.insert(report, detail, now)"
+  },
+  {
+    "id": "bond-archived-member-report",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "POST /api/v1/bonds/{bondId}/members/other/report",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 201,
+    "code": null,
+    "reason": "Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. Ended by a leave or a block, by either of you: a report is never contact, and the member who has just blocked may need it most.",
+    "rule": "FR-100, ADR-0053 (amended for #127), doc 26 §2.2",
+    "evidence": "smoke",
+    "evidenceRef": "a member report after a block is 201",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReportMember.kt#reports.insert(report, detail, now)"
   },
   {
     "id": "proposal-confirmed-timezone-confirm",

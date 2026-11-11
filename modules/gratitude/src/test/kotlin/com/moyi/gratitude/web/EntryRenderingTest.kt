@@ -278,6 +278,7 @@ internal class EntryRenderingTest {
                 URI.create("https://storage.example.test/v/x/voice.ogg?X-Amz-Signature=fake"),
                 4_200,
                 false,
+                waveform = List(64) { it * 4 },
             )
         val revealed = entry.withVoice(id, now).copy(status = EntryStatus.REVEALED, revealedAt = now)
         val media = ShownMedia(null, voice)
@@ -291,7 +292,15 @@ internal class EntryRenderingTest {
                 media = media,
             ).shouldNotBeNull()
             .voice shouldBe
-            EntryVoiceResponse(id, EntryVoiceStatus.READY, voice.url.toString(), 4_200, sensitive = false)
+            EntryVoiceResponse(
+                id,
+                EntryVoiceStatus.READY,
+                voice.url.toString(),
+                4_200,
+                waveform = List(64) { it * 4 },
+                sensitive = false,
+                urlAac = null,
+            )
         // A tombstone has no voice note, even one its caller passes.
         EntryResponse
             .of(revealed.copy(deletedAt = now).readBy(partner), date, favourited = false, reaction = null, media = media)

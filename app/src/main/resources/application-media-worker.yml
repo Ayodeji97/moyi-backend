@@ -59,6 +59,12 @@ moyi:
       cron: "-"
     embedding:
       cron: "-"
+    account-deletion:
+      cron: "-"
+    data-export:
+      cron: "-"
+    data-export-expiry:
+      cron: "-"
   # The worker holds none of the API's secrets (config/deploy.yml gives them to
   # the `web` role alone; review of #117): a decoder that is subverted must not
   # find the key that signs sessions, the HMAC key or the email key in its

@@ -1,14 +1,17 @@
 package com.moyi.identity.service
 
+import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
 import com.moyi.identity.domain.PasswordHash
 import com.moyi.identity.domain.PasswordHasher
+import com.moyi.identity.domain.PasswordResetCodeRejectedException
 import com.moyi.identity.domain.PasswordResetTokenExpiredException
 import com.moyi.identity.domain.PasswordResetTokenInvalidException
 import com.moyi.identity.domain.SecurityNotice
-import com.moyi.identity.domain.TokenHash
+import com.moyi.identity.domain.VerificationCode
 import com.moyi.identity.domain.VerificationPurpose
 import com.moyi.identity.domain.VerificationSecret
+import com.moyi.identity.domain.VerificationToken
 import com.moyi.identity.infra.database.AccountStore
 import com.moyi.identity.infra.database.RefreshTokenStore
 import com.moyi.identity.infra.database.VerificationTokenStore
@@ -39,6 +42,7 @@ internal class ResetPassword(
     private val hasher: PasswordHasher,
     private val clock: Clock,
     private val apply: ApplyPasswordReset,
+    private val codes: VerificationCodeCheck,
 ) {
     /**
      * @throws PasswordResetTokenInvalidException the token matches no reset token
@@ -50,10 +54,63 @@ internal class ResetPassword(
     ) {
         val hash = secret.hash()
         val existing = tokens.findByHash(hash, VerificationPurpose.PASSWORD_RESET) ?: throw PasswordResetTokenInvalidException()
-        if (!existing.isLive(clock.instant())) throw PasswordResetTokenExpiredException()
+        // Hashed only for a live link; a dead one, or one spent by a concurrent request, is the one 410.
+        val applied = existing.isLive(clock.instant()) && apply.apply(existing, hasher.hash(password), clock.instant())
+        if (!applied) throw PasswordResetTokenExpiredException()
+    }
+
+    /**
+     * The same reset by the six digits from the email and the address (#135). Three steps,
+     * for the reason the link path has two: the code is checked (and a wrong one counted and
+     * committed) in a short transaction, the Argon2id hash is computed outside any, and
+     * [ApplyPasswordReset] spends the row. A refused new password never gets this far (the
+     * edge refuses it first), so it neither spends nor counts against the code.
+     *
+     * Between the check and the spend the row is not locked: a link presented in that gap
+     * spends the row first, and this answers the code path's one refusal.
+     *
+     * @throws PasswordResetCodeRejectedException no account, no code, a wrong, expired, burned or spent one
+     */
+    fun reset(
+        email: Email,
+        code: VerificationCode,
+        password: Password,
+    ) {
+        val accepted = accept(email, code)
 
         val passwordHash = hasher.hash(password)
-        apply.apply(hash, passwordHash, clock.instant())
+        if (!apply.apply(accepted.token, passwordHash, clock.instant())) throw PasswordResetCodeRejectedException()
+    }
+
+    /**
+     * Whether a typed reset code is right, before the new password is typed (#169, ADR-0022
+     * amended 2026-11-10). A check, not a grant: a right code is left exactly as it was, live
+     * and uncounted, and [reset] still needs the address, the code and the password. It is
+     * [accept] and nothing else, so a wrong check is a wrong try on the reset's own counter
+     * (the row's five) and its own daily ten, and every refusal is the reset's one answer
+     * after the same work.
+     *
+     * @throws PasswordResetCodeRejectedException no account, no code, a wrong, expired, burned or spent one
+     */
+    fun check(
+        email: Email,
+        code: VerificationCode,
+    ) {
+        accept(email, code)
+    }
+
+    /**
+     * The typed code's whole gate, shared by [check] and [reset] so the two cannot count
+     * apart: the daily limit first, then the code checked, and a wrong one counted and
+     * committed, in a transaction of its own.
+     */
+    private fun accept(
+        email: Email,
+        code: VerificationCode,
+    ): AcceptedCode {
+        codes.limit(email)
+        return codes.checkAlone(email, VerificationPurpose.PASSWORD_RESET, code, clock.instant())
+            ?: throw PasswordResetCodeRejectedException()
     }
 }
 
@@ -66,16 +123,18 @@ internal class ApplyPasswordReset(
     private val events: ApplicationEventPublisher,
     private val pushTokens: PushTokens,
 ) {
+    /**
+     * @return `false` when [token] was spent first, by a concurrent presentation of its link
+     *   or its code; nothing has changed, and the caller answers with its own path's refusal
+     */
     @Transactional
-    @Suppress("ThrowsCount")
     fun apply(
-        tokenHash: TokenHash,
+        token: VerificationToken,
         newPasswordHash: PasswordHash,
         now: Instant,
-    ) {
+    ): Boolean {
         // The single race winner. A second presentation finds the row consumed.
-        if (!tokens.consume(tokenHash, now)) throw PasswordResetTokenExpiredException()
-        val token = tokens.findByHash(tokenHash, VerificationPurpose.PASSWORD_RESET) ?: throw PasswordResetTokenInvalidException()
+        if (!tokens.consume(token.id, now)) return false
         val user = accounts.findById(token.userId) ?: throw PasswordResetTokenInvalidException()
         val credentials = accounts.findCredentials(user.id) ?: throw PasswordResetTokenInvalidException()
 
@@ -95,5 +154,8 @@ internal class ApplyPasswordReset(
         // T-17: the old address is told, after the commit, that the password
         // changed and every device was signed out.
         events.publishEvent(SecurityNotice.PasswordChanged(user.id, user.email, user.displayName, changedAt = now))
+        // A code from a later reset email is moot now that the password has changed (#135).
+        tokens.retireCodes(user.id, VerificationPurpose.PASSWORD_RESET)
+        return true
     }
 }

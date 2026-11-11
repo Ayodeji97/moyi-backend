@@ -2,15 +2,18 @@ package com.moyi.identity.service
 
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.UserId
+import com.moyi.identity.domain.VerificationCode
 import com.moyi.identity.domain.VerificationPurpose
 import com.moyi.identity.domain.VerificationRequested
 import com.moyi.identity.domain.VerificationSecret
 import com.moyi.identity.infra.security.VerificationProperties
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import java.net.URI
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -73,11 +76,23 @@ internal class VerificationEmailComposerTest {
         composer.compose(event(secret = "a b&c")).text shouldContain "token=a%20b%26c"
     }
 
+    @Test
+    fun `both emails carry the code on a line of its own, with how long it works`() {
+        VerificationPurpose.entries.forEach { purpose ->
+            val message = composer.compose(event(purpose = purpose, code = "004217"))
+
+            message.text.lines() shouldContain "004217"
+            message.text shouldContain "It works for 15 minutes"
+            message.html shouldContain "<strong>004217</strong>"
+        }
+    }
+
     private fun event(
         purpose: VerificationPurpose = VerificationPurpose.EMAIL_VERIFICATION,
         secret: String = "s",
         displayName: String = "Ada",
         tokenId: UUID = UUID.randomUUID(),
+        code: String = "042817",
     ) = VerificationRequested(
         userId = UserId(UUID.randomUUID()),
         email = Email("ada@example.com"),
@@ -86,6 +101,12 @@ internal class VerificationEmailComposerTest {
         purpose = purpose,
         tokenId = tokenId,
         secret = VerificationSecret(secret),
-        expiresAt = Instant.parse("2026-09-24T12:00:00Z"),
+        expiresAt = ISSUED.plus(purpose.ttl),
+        code = VerificationCode(code),
+        codeExpiresAt = ISSUED.plus(Duration.ofMinutes(15)),
     )
+
+    private companion object {
+        val ISSUED: Instant = Instant.parse("2026-09-23T12:00:00Z")
+    }
 }

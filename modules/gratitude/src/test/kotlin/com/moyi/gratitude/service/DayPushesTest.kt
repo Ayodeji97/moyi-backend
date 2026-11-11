@@ -40,6 +40,7 @@ import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.sql.Timestamp
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 import javax.sql.DataSource
 import kotlin.reflect.full.memberProperties
@@ -103,16 +104,28 @@ internal class DayPushesTest(
         users.clear()
         ada = users.verified("Ada")
         bea = users.verified("Bea")
+        pairIn("Africa/Lagos")
+        phone(ada, ADA_TOKEN)
+        phone(bea, BEA_TOKEN)
+    }
+
+    /** Ada and Bea, paired at 10:00Z on 2026-09-01 in a bond anchored in [zone]; the ledger and the sent pushes then emptied. */
+    private fun pairIn(zone: String) {
         clock.set(Instant.parse("2026-09-01T10:00:00Z"))
-        val created = createBond(ada)
+        val created = createBond(ada, zone)
         bond = idOf(created)
         accept(bea, codeOf(created))
         // The join's own push (bond.notify) is not this class's subject.
         dispatchAll()
         jdbc.execute("TRUNCATE TABLE notifications")
         sender.sent.clear()
-        phone(ada, ADA_TOKEN)
-        phone(bea, BEA_TOKEN)
+    }
+
+    /** The bond of [pairIn] made again, in [zone]: the users and their phones are kept. */
+    private fun rebondIn(zone: String) {
+        jdbc.execute("TRUNCATE TABLE notifications, outbox_deliveries, outbox_events, streak_events, streak_states")
+        jdbc.execute("TRUNCATE TABLE idempotency_keys, entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
+        pairIn(zone)
     }
 
     @Test
@@ -133,8 +146,10 @@ internal class DayPushesTest(
         reveals.forEach { it.bondId shouldBe UUID.fromString(bond) }
         // No content: the message is the token, the category, the bond and its deadline (#96), and
         // nothing else can carry words.
-        PushMessage::class.memberProperties.map { it.name }.toSet() shouldBe setOf("token", "category", "bondId", "staleAfter")
+        // The Bond-day's date (#146) directs the app to the day and says nothing of what was written.
+        PushMessage::class.memberProperties.map { it.name }.toSet() shouldBe setOf("token", "category", "bondId", "staleAfter", "bondDate")
         reveals.forEach { it.staleAfter shouldBe Instant.parse("2026-09-02T23:00:00Z") }
+        reveals.forEach { it.bondDate shouldBe LocalDate.parse("2026-09-01") }
         val everythingSent = sender.sent.joinToString { "${it.category}|${it.bondId}" }
         val ledger = jdbc.queryForList("SELECT n::text FROM notifications n", String::class.java).joinToString()
         val events = jdbc.queryForList("SELECT payload::text FROM outbox_events", String::class.java).joinToString()
@@ -247,6 +262,59 @@ internal class DayPushesTest(
     }
 
     @Test
+    fun `a reveal names the bond's own date, which in Auckland is already tomorrow in UTC`() {
+        // 18:00Z on 1 September is 06:00 on the 2nd in Auckland (NZST, UTC+12) and still the 1st in
+        // UTC. Reykjavik stands for UTC: a bond's anchor is a region zone, never `UTC` itself.
+        mapOf("Pacific/Auckland" to "2026-09-02", "Atlantic/Reykjavik" to "2026-09-01").forEach { (zone, date) ->
+            rebondIn(zone)
+
+            bothWrite()
+
+            val reveals = sender.sent.filter { it.category == PushCategory.REVEAL }
+            reveals.size shouldBe 2
+            reveals.map { it.bondDate }.toSet() shouldBe setOf(LocalDate.parse(date))
+            bondDates() shouldBe setOf(LocalDate.parse(date))
+        }
+    }
+
+    @Test
+    fun `a solo unlock names the day that closed with one entry, in the bond's zone`() {
+        // Ada writes at 18:00Z; the day is closed once it has ended in the bond's zone and its
+        // twelve hours' late-entry grace have passed, as `closeTheDay`'s default is for Lagos.
+        mapOf(
+            "Pacific/Auckland" to ("2026-09-02" to "2026-09-03T00:05:00Z"),
+            "Atlantic/Reykjavik" to ("2026-09-01" to "2026-09-02T12:05:00Z"),
+        ).forEach { (zone, expected) ->
+            val (date, closeAt) = expected
+            rebondIn(zone)
+            clock.set(Instant.parse("2026-09-01T18:00:00Z"))
+            write(ada, ADA_WORDS)
+            dispatchAll()
+
+            closeTheDay(Instant.parse(closeAt))
+            dispatchAll()
+
+            sender.sent.map { it.category to it.bondDate } shouldBe listOf(PushCategory.SOLO_UNLOCK to LocalDate.parse(date))
+        }
+    }
+
+    @Test
+    fun `a milestone names the day that reached it, read from the bond's own day`() {
+        mapOf("Pacific/Auckland" to "2026-09-02", "Atlantic/Reykjavik" to "2026-09-01").forEach { (zone, date) ->
+            rebondIn(zone)
+            clock.set(Instant.parse("2026-09-01T18:00:00Z"))
+            write(ada, ADA_WORDS)
+            val day = dayId(date)
+
+            handle(milestone(day, Instant.parse("2026-09-02T12:00:01Z")))
+            dispatchAll()
+
+            bondDates() shouldBe setOf(LocalDate.parse(date))
+            sender.sent.map { it.category to it.bondDate }.toSet() shouldBe setOf(PushCategory.MILESTONE to LocalDate.parse(date))
+        }
+    }
+
+    @Test
     fun `a milestone is told to both members, once a day, for a day`() {
         val day = UUID.randomUUID()
         val at = Instant.parse("2026-09-01T23:00:01Z")
@@ -260,6 +328,8 @@ internal class DayPushesTest(
             .queryForList("SELECT stale_after FROM notifications", Timestamp::class.java)
             .map { it!!.toInstant() }
             .toSet() shouldBe setOf(Instant.parse("2026-09-02T23:00:01Z"))
+        // A day this module does not hold names no date; the milestone is still told.
+        bondDates() shouldBe setOf(null)
     }
 
     @Test
@@ -321,8 +391,7 @@ internal class DayPushesTest(
         write(bea, BEA_WORDS)
     }
 
-    private fun closeTheDay() {
-        val after = Instant.parse("2026-09-01T23:05:00Z")
+    private fun closeTheDay(after: Instant = Instant.parse("2026-09-02T11:05:00Z")) {
         clock.set(after)
         closer.closeElapsedDays(after, CLOSE_BUDGET)
     }
@@ -335,12 +404,17 @@ internal class DayPushesTest(
             userId,
         )!!
 
-    private fun dayId(): UUID =
+    private fun dayId(date: String = "2026-09-01"): UUID =
         jdbc.queryForObject(
-            "SELECT id FROM bond_days WHERE bond_id = ? AND date = '2026-09-01'",
+            "SELECT id FROM bond_days WHERE bond_id = ? AND date = ?::date",
             UUID::class.java,
             UUID.fromString(bond),
+            date,
         )!!
+
+    /** Every Bond-day date the ledger holds, as the push consumer will hand it to the phone. */
+    private fun bondDates(): Set<LocalDate?> =
+        jdbc.queryForList("SELECT bond_date FROM notifications", java.sql.Date::class.java).map { it?.toLocalDate() }.toSet()
 
     private fun milestone(
         day: UUID,
@@ -416,12 +490,15 @@ internal class DayPushesTest(
             .response.status shouldBe 200
     }
 
-    private fun createBond(userId: UUID): MockHttpServletResponse =
+    private fun createBond(
+        userId: UUID,
+        zone: String,
+    ): MockHttpServletResponse =
         mockMvc
             .post("/api/v1/bonds") {
                 header(HttpHeaders.AUTHORIZATION, bearer(userId))
                 contentType = MediaType.APPLICATION_JSON
-                content = """{"name":"Us","type":"COUPLE","anchorTimezone":"Africa/Lagos"}"""
+                content = """{"name":"Us","type":"COUPLE","anchorTimezone":"$zone"}"""
             }.andReturn()
             .response
             .also { it.status shouldBe 201 }

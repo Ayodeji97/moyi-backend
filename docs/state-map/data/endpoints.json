@@ -137,10 +137,18 @@
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "imageMediaId names no photo, or voiceMediaId no voice note, media will attach to this entry: not yours, not READY, of the other kind, or on another entry; one answer on the field it names. Asked under the entry's lock, after ENTRY_IMMUTABLE, the photo first; nothing changes. A new one in place of the entry's lets the old one go; an absent field leaves the entry's as it is.",
+        "reason": "imageMediaId names no photo, or voiceMediaId no voice note, media will attach to this entry: not yours, not READY, of the other kind, or on another entry; one answer on the field it names. Asked under the entry's lock, after ENTRY_IMMUTABLE, the photo first; nothing changes. A new one in place of the entry's lets the old one go; an absent field leaves the entry's as it is. removeImage or removeVoice takes the entry's off instead, letting it go the same way (ADR-0048 decision 7); removing one that is not there is 200 and changes nothing.",
         "evidence": "test",
         "evidenceRef": "EntryVoiceTest#PATCH with another user's voice note is refused on voiceMediaId, and the entry is unchanged",
         "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (!attachments.claim(userId, claimed, kind, entryId.value)) throw MediaNotAttachableException(kind)"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "removeImage is true and imageMediaId is given too, or removeVoice and voiceMediaId: take it off, or attach one in its place, not both. One answer on removeImageWithoutImageMediaId or removeVoiceWithoutVoiceMediaId; nothing changes (ADR-0048 decision 7).",
+        "evidence": "smoke",
+        "evidenceRef": "entry media: removeImage with an imageMediaId is 422 on removeImageWithoutImageMediaId",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/EntryChangesController.kt#private val removeImageWithoutImageMediaId: Boolean get() = !(removeImage && imageMediaId != null)"
       }
     ],
     "curl": "curl -X PATCH \"$API/entries/$ENTRY\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"text\": \"...\"}'"
@@ -990,6 +998,67 @@
     "curl": "curl -X POST \"$API/entries/$ENTRY/report\" -H \"Authorization: Bearer $TOKEN\" -H \"Idempotency-Key: $(uuidgen)\" -H 'Content-Type: application/json' -d '{\"reason\": \"NON_CONSENSUAL\"}'"
   },
   {
+    "id": "POST /api/v1/bonds/{bondId}/members/other/report",
+    "summary": "report the other member of your bond to a person",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [
+      "Idempotency-Key (required. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the same report, and nothing filed twice)",
+      "Content-Type (application/json, the entry report's body: {\"reason\": \"NON_CONSENSUAL\", \"MINOR_SEXUAL_CONTENT\", \"VIOLENCE_OR_SELF_HARM\", \"HARASSMENT\" or \"OTHER\", \"detail\": optional, at most 500 characters}. The body is checked before the bond is looked at)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "reason is missing, null, or not one of the five names exactly as written; or detail is blank, longer than 500 characters, or holds a NUL or an unpaired surrogate. Nothing is filed.",
+        "evidence": "smoke",
+        "evidenceRef": "a report with an unknown reason is 422 on the member route too",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/ReportRequest.kt#): Boolean = value == null || ReportReason.named(value) != null"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The Idempotency-Key header is missing or blank, is longer than 255 characters, or holds something other than visible ASCII. Nothing is filed.",
+        "evidence": "test",
+        "evidenceRef": "MemberReportsTest#without an Idempotency-Key it is refused, and nothing is filed",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#violationOf(key)?.let { throw IdempotencyKeyNotValidException(it) }"
+      },
+      {
+        "status": 422,
+        "code": "IDEMPOTENCY_KEY_REUSED",
+        "reason": "This Idempotency-Key was already used by you for a different request: another body, or another bond or route.",
+        "evidence": "test",
+        "evidenceRef": "MemberReportsTest#the same key is the same report, filed once, and replayed",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!matches) throw IdempotencyKeyReusedException()"
+      },
+      {
+        "status": 409,
+        "code": "IDEMPOTENCY_KEY_IN_FLIGHT",
+        "reason": "A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!store.lockFor(request.userId, request.key)) throw IdempotencyKeyInFlightException()"
+      },
+      {
+        "status": 413,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is filed.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#if (request.contentLengthLong > maxBytes) throw RequestBodyTooLargeException()"
+      },
+      {
+        "status": 429,
+        "code": "RATE_LIMITED",
+        "reason": "reports:create:user, ten a day, shared with the entry report route: one queue, one person reading it. Refused attempts count.",
+        "evidence": "test",
+        "evidenceRef": "ReportRateLimitTest#a member report spends the same allowance as an entry report",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/MemberReportsController.kt#@RateLimited(RateLimitBucket.REPORTS_CREATE_USER)"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds/$BOND/members/other/report\" -H \"Authorization: Bearer $TOKEN\" -H \"Idempotency-Key: $(uuidgen)\" -H 'Content-Type: application/json' -d '{\"reason\": \"HARASSMENT\"}'"
+  },
+  {
     "id": "POST /api/v1/auth/register",
     "summary": "register",
     "machine": "account",
@@ -1003,7 +1072,7 @@
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "A field is not acceptable; errors names each one. email is blank or not shaped like an address; password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED); displayName is blank (by every Unicode space, so a name of only no-break spaces too) or over 80 characters, or, once trimmed, holds a control character, a format character other than ZWNJ and ZWJ, or an unpaired surrogate (errors code VALID_DISPLAY_NAME, and NOT_BLANK too for an empty or all-space name; a newline inside the name is refused, a trailing one trimmed off); locale is not a language tag such as en or en-GB; acceptedTermsVersion is blank or over 40 characters; over18 is false. Nothing is created.",
+        "reason": "A field is not acceptable; errors names each one. email is blank or not shaped like an address; password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED); displayName is blank (by every Unicode space, so a name of only no-break spaces too) or over 80 characters, or, once trimmed, holds a control character, a format character other than ZWNJ and ZWJ, or an unpaired surrogate (errors code VALID_DISPLAY_NAME, and NOT_BLANK too for an empty or all-space name; a newline inside the name is refused, a trailing one trimmed off); locale is not a language tag such as en or en-GB; acceptedTermsVersion, if sent, is over 40 characters (it is optional and ignored: the consent rows record the versions GET /meta/legal names, ADR-0056); over18 is false. Nothing is created.",
         "evidence": "smoke",
         "evidenceRef": "a 422 spends a token too (validation runs after the limiter)",
         "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/RegisterRequest.kt#@field:AssertTrue(message = \"must be confirmed\")"
@@ -1014,31 +1083,40 @@
         "reason": "Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again.",
         "evidence": "test",
         "evidenceRef": "HashingCapacityResponseTest#saturation is 503 with a Retry-After, not 500",
-        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#errorCode = ErrorCode.HASHING_CAPACITY_EXCEEDED,"
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#else ErrorCode.HASHING_CAPACITY_EXCEEDED"
       }
     ],
-    "curl": "curl -X POST \"$API/auth/register\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"password\\\": \\\"$PASSWORD\\\", \\\"displayName\\\": \\\"Ada\\\", \\\"acceptedTermsVersion\\\": \\\"2026-09-01\\\", \\\"over18\\\": true}\""
+    "curl": "curl -X POST \"$API/auth/register\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"password\\\": \\\"$PASSWORD\\\", \\\"displayName\\\": \\\"Ada\\\", \\\"over18\\\": true}\""
   },
   {
     "id": "POST /api/v1/auth/verify-email",
-    "summary": "verify your email",
+    "summary": "verify your email, by the link or by the code",
     "machine": "account",
     "auth": "none",
     "headers": [
       "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
-      "Content-Type (application/json. The token travels in the body of a POST, never in a GET: a GET on this path without a bearer is the everywhere 401, so a mail scanner that fetches the link cannot spend it. No rate limit of its own)"
+      "Content-Type (application/json. The token, or the email address and the six-digit code from the same email, travel in the body of a POST, never in a GET: a GET on this path without a bearer is the everywhere 401, so a mail scanner that fetches the link cannot spend it)",
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Twenty an hour per client address, verify-email and reset-password together, links and codes alike, spent before the body is checked. Beside it, for an email and a code only: ten a day per email address as typed, both routes together, one back every 2.4 hours, counted for every address whether or not it has an account: the eleventh is 429 with Retry-After)"
     ],
     "requestErrors": [
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "token is blank or longer than 256 characters. It is not otherwise shape-checked: a mangled token is the state answer, 422 VERIFICATION_TOKEN_INVALID.",
+        "reason": "The body is not exactly one of a token, or an email and a code: neither, both, a blank token, or an address without a code (one violation on tokenOrEmailAndCode). Or the token is over 256 characters, the email is not shaped like an address, or the code is not six ASCII digits (errors code VALID_VERIFICATION_CODE). A token is not otherwise shape-checked: a mangled token is the state answer, 422 VERIFICATION_TOKEN_INVALID. Nothing here looks an address up or counts against a code.",
         "evidence": "smoke",
         "evidenceRef": "blank token is 422 VALIDATION_FAILED",
         "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/VerificationController.kt#internal data class VerifyEmailRequest("
+      },
+      {
+        "status": 503,
+        "code": "CODE_CHECK_UNAVAILABLE",
+        "reason": "An email and a code only, while the store that counts typed codes (Redis) cannot be reached: no code is checked until it is back (owner's ruling 2026-11-09, ADR-0023 amended). Retry-After: 60. Answered before the address is looked up, so it is the same bytes for an address with no account, and the code is neither counted nor spent. A token is never answered this: the link still works, and is what to offer.",
+        "evidence": "test",
+        "evidenceRef": "TypedCodeRedisOutageTest#a typed verification code is 503 with Retry-After, and is neither spent nor counted",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerificationCodeCheck.kt#RateLimitDecision.Unavailable -> if (bucket.failsClosed) throw CodeCheckUnavailableException()"
       }
     ],
-    "curl": "curl -X POST \"$API/auth/verify-email\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$VERIFY_TOKEN\\\"}\""
+    "curl": "curl -X POST \"$API/auth/verify-email\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$VERIFY_TOKEN\\\"}\"   # or -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"code\\\": \\\"$CODE\\\"}\""
   },
   {
     "id": "POST /api/v1/auth/resend-verification",
@@ -1087,7 +1165,7 @@
         "reason": "Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. (the test of this answer drives register, not sign-in)",
         "evidence": "never-run",
         "evidenceRef": "",
-        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#errorCode = ErrorCode.HASHING_CAPACITY_EXCEEDED,"
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#else ErrorCode.HASHING_CAPACITY_EXCEEDED"
       }
     ],
     "curl": "curl -X POST \"$API/auth/login\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"password\\\": \\\"$PASSWORD\\\", \\\"device\\\": {\\\"platform\\\": \\\"ANDROID\\\", \\\"appVersion\\\": \\\"1.0\\\", \\\"osVersion\\\": \\\"16\\\"}}\""
@@ -1210,6 +1288,138 @@
     "curl": "curl \"$API/me\" -H \"Authorization: Bearer $TOKEN\""
   },
   {
+    "id": "POST /api/v1/me/legal-consent",
+    "summary": "accept the current Terms and Privacy Policy",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl -X POST \"$API/me/legal-consent\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "POST /api/v1/me/deletion-request",
+    "summary": "ask for your account to be deleted",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After). This route also spends account:deletion:user, five an hour, wrong passwords included: the sixth is 429 with Retry-After"
+    ],
+    "requestErrors": [],
+    "curl": "curl -X POST \"$API/me/deletion-request\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"password\":\"your password\"}'"
+  },
+  {
+    "id": "DELETE /api/v1/me/deletion-request",
+    "summary": "call off your account's deletion",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl -X DELETE \"$API/me/deletion-request\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "POST /api/v1/me/export",
+    "summary": "ask for a copy of your data",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After). A request that starts a new export also spends account:export:user, three a day (a repeat while one is being prepared spends none): the fourth new one is 429 with Retry-After"
+    ],
+    "requestErrors": [],
+    "curl": "curl -X POST \"$API/me/export\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/me/export",
+    "summary": "read your latest data export",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl \"$API/me/export\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/me/export/{exportId}",
+    "summary": "read one of your data exports",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl \"$API/me/export/$EXPORT\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/meta/legal",
+    "summary": "read the current legal documents",
+    "machine": "account",
+    "auth": "none",
+    "headers": [
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "If-None-Match (optional; a matching strong ETag returns 304 with no body. Sent with Cache-Control: public, no-cache)"
+    ],
+    "requestErrors": [],
+    "curl": "curl \"$API/meta/legal\""
+  },
+  {
+    "id": "POST /api/v1/support/messages",
+    "summary": "write to support",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "Idempotency-Key (optional. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the same ticket, filed once and acknowledged at most once. A replay spends one of the five a day too, so a retry can be 429: wait for Retry-After, then the same key returns the same ticket. Without one, each request is a new ticket)",
+      "Content-Type (application/json, {\"subject\": 1 to 120 characters, \"body\": 1 to 5000 characters}; characters are Unicode code points, and neither may be blank)",
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Five messages a day per account, one back every 4.8 hours, spent before the body is checked, so a 422 and a replay use one too. The sixth is 429 with Retry-After)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "subject or body is missing, null, blank, longer than its limit (120 and 5000 characters), or holds a NUL or an unpaired surrogate; errors names the field, and the message never repeats it. Nothing is filed and no email is sent.",
+        "evidence": "smoke",
+        "evidenceRef": "a support message with no subject is 422 on subject",
+        "codeRef": "modules/support/src/main/kotlin/com/moyi/support/domain/SupportText.kt#require(raw.codePointCount(0, raw.length) <= max) { \"must be at most $max characters\" }"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "An Idempotency-Key that is sent is blank, longer than 255 characters, or holds something other than visible ASCII. Leaving it out is allowed.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#violationOf(key)?.let { throw IdempotencyKeyNotValidException(it) }"
+      },
+      {
+        "status": 422,
+        "code": "IDEMPOTENCY_KEY_REUSED",
+        "reason": "This Idempotency-Key was already used by you for a different request: another subject or body.",
+        "evidence": "test",
+        "evidenceRef": "SupportMessagesTest#the same key with different words is refused, and without a key two messages are two tickets",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!matches) throw IdempotencyKeyReusedException()"
+      },
+      {
+        "status": 409,
+        "code": "IDEMPOTENCY_KEY_IN_FLIGHT",
+        "reason": "A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!store.lockFor(request.userId, request.key)) throw IdempotencyKeyInFlightException()"
+      },
+      {
+        "status": 413,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is filed.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#if (request.contentLengthLong > maxBytes) throw RequestBodyTooLargeException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/support/messages\" -H \"Authorization: Bearer $TOKEN\" -H \"Idempotency-Key: $(uuidgen)\" -H 'Content-Type: application/json' -d '{\"subject\": \"Locked out\", \"body\": \"What happened, in your words\"}'"
+  },
+  {
     "id": "POST /api/v1/auth/forgot-password",
     "summary": "ask for a password reset link",
     "machine": "account",
@@ -1233,18 +1443,19 @@
   },
   {
     "id": "POST /api/v1/auth/reset-password",
-    "summary": "set a new password with a reset link",
+    "summary": "set a new password with a reset link or code",
     "machine": "account",
     "auth": "none",
     "headers": [
       "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
-      "Content-Type (application/json. The reset token in the body is the credential. No rate limit of its own)"
+      "Content-Type (application/json. The reset token, or the email address and the six-digit code from the same email, in the body are the credential)",
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Twenty an hour per client address, verify-email and reset-password together, links and codes alike, spent before the body is checked. Beside it, for an email and a code only: ten a day per email address as typed, both routes together, one back every 2.4 hours, counted for every address whether or not it has an account: the eleventh is 429 with Retry-After)"
     ],
     "requestErrors": [
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "token is blank or over 256 characters; or password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED). This is checked before the link is looked at, so a refused password does not spend the link. (the tests and the smoke script assert the status and the field's code, NOT_BREACHED, not VALIDATION_FAILED)",
+        "reason": "The body is not exactly one of a token, or an email and a code (one violation on tokenOrEmailAndCode); or the token is over 256 characters, the email is not shaped like an address, or the code is not six ASCII digits (VALID_VERIFICATION_CODE); or password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED). This is checked before the link or code is looked at, so a refused password spends neither and counts against no code. (the tests and the smoke script assert the status and the field's code, NOT_BREACHED, not VALIDATION_FAILED)",
         "evidence": "never-run",
         "evidenceRef": "",
         "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/PasswordResetController.kt#internal data class ResetPasswordRequest("
@@ -1252,13 +1463,59 @@
       {
         "status": 503,
         "code": "HASHING_CAPACITY_EXCEEDED",
-        "reason": "Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. The link is not spent. (the test of this answer drives register, not a reset)",
+        "reason": "Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. The link or the code is not spent. (the test of this answer drives register, not a reset)",
         "evidence": "never-run",
         "evidenceRef": "",
-        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#errorCode = ErrorCode.HASHING_CAPACITY_EXCEEDED,"
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#else ErrorCode.HASHING_CAPACITY_EXCEEDED"
+      },
+      {
+        "status": 503,
+        "code": "CODE_CHECK_UNAVAILABLE",
+        "reason": "An email, a code and a password only, while the store that counts typed codes (Redis) cannot be reached: no code is checked until it is back (owner's ruling 2026-11-09, ADR-0023 amended). Retry-After: 60. Answered before the address is looked up or the password hashed, the same bytes for every address; the code is neither counted nor spent. A token is never answered this: the reset link still works.",
+        "evidence": "test",
+        "evidenceRef": "TypedCodeRedisOutageTest#a typed reset code is 503 and spends nothing, while the reset link still works",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerificationCodeCheck.kt#RateLimitDecision.Unavailable -> if (bucket.failsClosed) throw CodeCheckUnavailableException()"
       }
     ],
-    "curl": "curl -X POST \"$API/auth/reset-password\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$RESET_TOKEN\\\", \\\"password\\\": \\\"$PASSWORD\\\"}\""
+    "curl": "curl -X POST \"$API/auth/reset-password\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$RESET_TOKEN\\\", \\\"password\\\": \\\"$PASSWORD\\\"}\"   # or -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"code\\\": \\\"$CODE\\\", \\\"password\\\": \\\"$PASSWORD\\\"}\""
+  },
+  {
+    "id": "POST /api/v1/auth/reset-password/check",
+    "summary": "check a typed reset code before the new password is typed",
+    "machine": "account",
+    "auth": "none",
+    "headers": [
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "Content-Type (application/json. The email address and the six-digit code from the reset email, in the body, are what is checked)",
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. The reset's own two buckets, not new ones: twenty an hour per client address, shared with verify-email and reset-password, spent before the body is checked; and ten typed codes a day per email address as typed, shared with the code forms of verify-email and reset-password, spent by every check, right or wrong, counted for every address whether or not it has an account: the eleventh is 429 with Retry-After)"
+    ],
+    "requestErrors": [
+      {
+        "status": 400,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The email or the code is missing (both are required), or the body is not JSON. Nothing is looked up and no try is counted.",
+        "evidence": "smoke",
+        "evidenceRef": "a reset-code check without a code is 400",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/PasswordResetController.kt#internal data class ResetCodeCheckRequest("
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The email is blank or not shaped like an address, or the code is not six ASCII digits (VALID_VERIFICATION_CODE). Checked before the address is looked up, so it counts against no code.",
+        "evidence": "test",
+        "evidenceRef": "ResetCodeCheckEndpointTest#a body that is not an address and a six-digit code is refused, and costs no try",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/PasswordResetController.kt#internal data class ResetCodeCheckRequest("
+      },
+      {
+        "status": 503,
+        "code": "CODE_CHECK_UNAVAILABLE",
+        "reason": "The store that counts typed codes (Redis) cannot be reached: no code is checked until it is back (owner's ruling 2026-11-09, ADR-0023 amended; #169 put the check under the same ruling). Retry-After: 60. Answered before the address is looked up, the same bytes for every address; the code is neither counted nor spent. The reset link in the same email still works.",
+        "evidence": "test",
+        "evidenceRef": "TypedCodeRedisOutageTest#a reset-code check is 503, counts nothing, and is the same bytes for an address with no account",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerificationCodeCheck.kt#RateLimitDecision.Unavailable -> if (bucket.failsClosed) throw CodeCheckUnavailableException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/reset-password/check\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"code\\\": \\\"$CODE\\\"}\""
   },
   {
     "id": "POST /api/v1/media/upload-intent",

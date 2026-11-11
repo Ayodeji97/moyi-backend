@@ -7,6 +7,7 @@ import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -21,6 +22,9 @@ import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -181,12 +185,55 @@ internal class BondTimezoneEndpointTest(
         // A date rather than a countdown, for `states.md` §9's reason: a
         // countdown framed as a deadline is urgency, a date is a fact.
         response.contentAsString shouldContain "can change again from"
+        // And the same date typed, for a client to put into its own words (#142): an extension member, YYYY-MM-DD.
+        val named = Regex("can change again from (\\d{1,2} \\w+ \\d{4})").find(response.contentAsString)!!.groupValues[1]
+        val allowedFrom = Regex("\"allowedFrom\":\"([^\"]+)\"").find(response.contentAsString)!!.groupValues[1]
+        LocalDate.parse(allowedFrom) shouldBe LocalDate.parse(named, DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH))
         // Nothing new is *open*: the confirmed row from the first change is
         // still there, which is the history, and the refusal recorded nothing.
         jdbc.queryForObject(
             "SELECT count(*) FROM bond_proposals WHERE confirmed_at IS NULL AND cancelled_at IS NULL",
             Int::class.java,
         ) shouldBe 0
+    }
+
+    @Test
+    fun `the bond names the date its zone may change again, the same date the refusal gives`() {
+        // #170: the date was only in the 409's `allowedFrom`, so the app could
+        // show it only after the person had picked a city and been refused.
+        // states.md §8 wants it in front of them first. One function answers
+        // both, so the two dates are compared here as they arrive.
+        val (ada, bea, bondId) = pairedBond()
+        getBond(ada, bondId).contentAsString shouldContain "\"timezoneChangeAllowedFrom\":null"
+        propose(ada, bondId, "Europe/London").status shouldBe 200
+        confirm(bea, bondId).status shouldBe 200
+
+        val shown = Regex("\"timezoneChangeAllowedFrom\":\"([^\"]+)\"").find(getBond(bea, bondId).contentAsString)!!.groupValues[1]
+        val refusal = propose(ada, bondId, "Asia/Tokyo")
+
+        refusal.status shouldBe 409
+        val allowedFrom = Regex("\"allowedFrom\":\"([^\"]+)\"").find(refusal.contentAsString)!!.groupValues[1]
+        shown shouldBe allowedFrom
+    }
+
+    @Test
+    fun `once the thirty days pass the date is gone, and a conditional GET sees the change`() {
+        // The date leaves the representation with the passing of time, not
+        // with a write: the row's version does not move. Its ETag must, or a
+        // client holding the old one is told 304 and keeps showing a date
+        // that is no longer true (ADR-0030's review amendment).
+        val (ada, bea, bondId) = pairedBond()
+        propose(ada, bondId, "Europe/London").status shouldBe 200
+        confirm(bea, bondId).status shouldBe 200
+        val before = getBond(ada, bondId)
+        before.contentAsString shouldNotContain "\"timezoneChangeAllowedFrom\":null"
+
+        jdbc.update("UPDATE bonds SET timezone_changed_at = now() - interval '30 days' - interval '1 second'")
+
+        val after = getBond(ada, bondId)
+        after.contentAsString shouldContain "\"timezoneChangeAllowedFrom\":null"
+        conditionalGet(ada, bondId, before.getHeader(HttpHeaders.ETAG)!!).status shouldBe 200
+        propose(ada, bondId, "Asia/Tokyo").status shouldBe 200
     }
 
     @Test
@@ -202,6 +249,7 @@ internal class BondTimezoneEndpointTest(
 
         response.status shouldBe 409
         response.contentAsString shouldContain "\"code\":\"TIMEZONE_CHANGE_TOO_SOON\""
+        response.contentAsString shouldContain "\"allowedFrom\":\""
         jdbc.queryForObject("SELECT count(*) FROM bond_proposals WHERE confirmed_at IS NOT NULL", Int::class.java) shouldBe 0
     }
 

@@ -10,6 +10,9 @@ import org.springframework.stereotype.Component
 import org.springframework.transaction.event.TransactionPhase
 import org.springframework.transaction.event.TransactionalEventListener
 import org.springframework.web.util.HtmlUtils
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * Emails the account holder after a security-relevant commit: a refresh-token
@@ -72,6 +75,17 @@ internal class SendSecurityNotice(
                         "that signs every device out."
                 }
 
+                is SecurityNotice.DeletionRequested -> {
+                    "Your Moyi account will be deleted" to
+                        "You asked for your Moyi account to be deleted. It will be deleted after " +
+                        "${DELETION_DATE.format(notice.cancellableUntil)}. Until then you can still sign in, and you can " +
+                        "change your mind: open Moyi, go to your account, and cancel it under " +
+                        "\"Delete my account\". After that date it cannot be undone. What you wrote becomes a blank " +
+                        "placeholder in your shared archive, so the other person's days and streak stay as they were. " +
+                        "If you did not ask for this, sign in, cancel it, and change your password with " +
+                        "\"I forgot my password\"."
+                }
+
                 is SecurityNotice.PasswordChanged -> {
                     "Your Moyi password was changed" to
                         "Your password was changed just now, and every device has been signed out. If this was you, there is " +
@@ -90,8 +104,19 @@ internal class SendSecurityNotice(
             idempotencyKey =
                 when (notice) {
                     is SecurityNotice.SessionReuseDetected -> "reuse-${notice.familyId}"
+
                     is SecurityNotice.PasswordChanged -> "password-changed-${notice.userId.value}-${notice.changedAt.toEpochMilli()}"
+
+                    // One per request: a repeated POST is the same request and must not mail twice.
+                    is SecurityNotice.DeletionRequested -> "deletion-requested-${notice.requestId}"
                 },
         )
     }
 }
+
+/**
+ * "23 November 2026 at 14:05 UTC": the moment the window closes, to the minute, because it closes at
+ * the request's time of day and not at the start or end of that date. UTC, and said so.
+ */
+private val DELETION_DATE: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("d MMMM yyyy 'at' HH:mm 'UTC'", Locale.UK).withZone(ZoneOffset.UTC)

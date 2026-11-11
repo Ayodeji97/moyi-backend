@@ -32,7 +32,7 @@ class RateLimitConfiguration {
     ): RateLimiter {
         if (!properties.enabled) {
             log.warn("Rate limiting is DISABLED (moyi.security.rate-limit.enabled=false). Every bucket in doc 06 §4 is off.")
-            return RateLimiter { _, _ -> RateLimitDecision.Unavailable }
+            return RateLimiter { _, _ -> RateLimitDecision.Disabled }
         }
         return RedisRateLimiter(connections, hasher, clock, properties, meters.getIfAvailable { Metrics.globalRegistry })
     }

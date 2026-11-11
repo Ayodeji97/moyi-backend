@@ -210,12 +210,12 @@ internal class EntriesEndpointTest(
      */
     @Test
     fun `an offline draft's intendedAt files the entry against that earlier day`() {
-        // 20 hours before NOW: inside the 36h offline window and not ahead
+        // 11.5 hours before NOW: inside the 12h late-entry grace and not ahead
         // of NOW (ruling P11) — trusted. NOW is
-        // 2026-09-15T10:00:00Z (2026-09-15 11:00 Lagos); 20 hours earlier is
-        // 2026-09-14T14:00:00Z (2026-09-14 15:00 Lagos) — a day *before* the
+        // 2026-09-15T10:00:00Z (2026-09-15 11:00 Lagos); 11.5 hours earlier is
+        // 2026-09-14T22:30:00Z (2026-09-14 23:30 Lagos) — a day *before* the
         // one `submittedAt` alone would have filed this under.
-        val intendedAt = NOW.minus(Duration.ofHours(20))
+        val intendedAt = NOW.minus(Duration.ofMinutes(690))
 
         val response = submit(ada, bondId, """{"text":"written on the flight","intendedAt":"$intendedAt"}""")
 
@@ -243,8 +243,9 @@ internal class EntriesEndpointTest(
     }
 
     @Test
-    fun `an intendedAt past the 36h offline window is ignored, and the entry lands on today`(output: CapturedOutput) {
-        val tooOld = NOW.minus(Duration.ofHours(40))
+    fun `an intendedAt past the 12h late-entry grace is ignored, and the entry lands on today`(output: CapturedOutput) {
+        // 13 hours: 22:00 on the 14th in Lagos, which the 36h window of before the ruling took.
+        val tooOld = NOW.minus(Duration.ofHours(13))
 
         val response = submit(ada, bondId, """{"text":"too old to back-file","intendedAt":"$tooOld"}""")
 

@@ -1,9 +1,11 @@
 package com.moyi.identity.web
 
 import com.moyi.identity.domain.BreachedPasswordCorpus
+import com.moyi.identity.domain.DevicePlatform
 import com.moyi.identity.domain.DisplayNames
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
+import com.moyi.identity.domain.VerificationCode
 import com.moyi.notification.api.PushToken
 import jakarta.validation.Constraint
 import jakarta.validation.ConstraintValidator
@@ -87,6 +89,32 @@ internal class PasswordConstraintValidator : ConstraintValidator<ValidPassword, 
 }
 
 /**
+ * Asks [VerificationCode] whether the value is six ASCII digits (#135), and reports its
+ * answer as `VALID_VERIFICATION_CODE`. Trimmed, as the controller trims what it hands on.
+ * A shape refused here is refused before any address is looked up, so it says nothing
+ * about one and counts against no code.
+ */
+@Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.RUNTIME)
+@Constraint(validatedBy = [VerificationCodeConstraintValidator::class])
+internal annotation class ValidVerificationCode(
+    val message: String = "is not a verification code",
+    val groups: Array<KClass<*>> = [],
+    val payload: Array<KClass<out Payload>> = [],
+)
+
+internal class VerificationCodeConstraintValidator : ConstraintValidator<ValidVerificationCode, String> {
+    override fun isValid(
+        value: String?,
+        context: ConstraintValidatorContext,
+    ): Boolean {
+        // Absent is the request's own rule (a token, or an address and a code); not this one's.
+        if (value == null) return true
+        return validate(context) { VerificationCode(value.trim()) }
+    }
+}
+
+/**
  * Asks `DisplayNames` whether the name holds a control or format character (ADR-0015,
  * amended 2026-10-28), and reports its answer as `VALID_DISPLAY_NAME`.
  */
@@ -115,6 +143,32 @@ internal class DisplayNameConstraintValidator : ConstraintValidator<ValidDisplay
         // and a newline inside the name is refused.
         return validate(context) { DisplayNames.check(value.trim()) }
     }
+}
+
+/**
+ * One of [DevicePlatform]'s names, exactly, and reported as `VALID_DEVICE_PLATFORM` (#139). It asks the enum, which
+ * is the one statement of the set: until 2026-11-08 the request carried `@Pattern("ANDROID|IOS|WEAR")`, a second
+ * copy that would have accepted a fourth platform nowhere and published itself in the contract as a pattern, which
+ * a generated client reads as a free string. The contract now lists the enum's names (`contracts`'
+ * `RequestDocumentation`), read from `DeviceResponse.platform`, which is the enum.
+ *
+ * Not trimmed: `DeviceRequest.toDescription` takes the value as sent, so a value with a space around it is refused
+ * here rather than failing there.
+ */
+@Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.RUNTIME)
+@Constraint(validatedBy = [DevicePlatformConstraintValidator::class])
+internal annotation class ValidDevicePlatform(
+    val message: String = "must be one of ANDROID, IOS, WEAR",
+    val groups: Array<KClass<*>> = [],
+    val payload: Array<KClass<out Payload>> = [],
+)
+
+internal class DevicePlatformConstraintValidator : ConstraintValidator<ValidDevicePlatform, String> {
+    override fun isValid(
+        value: String?,
+        context: ConstraintValidatorContext,
+    ): Boolean = value.isNullOrBlank() || DevicePlatform.entries.any { it.name == value }
 }
 
 @Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)

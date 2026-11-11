@@ -135,6 +135,9 @@ internal class GratitudeCrossTenantTest(
             "GET /api/v1/bonds/{bondId}/on-this-day" to Fixture(),
             // Slice C6c. No parameters: a stranger gets the bond's 404, never a list of what it reached.
             "GET /api/v1/bonds/{bondId}/milestones" to Fixture(),
+            // FR-100's member half (ADR-0053, amended for #127). A body that would be filed: a stranger gets the bond's 404,
+            // and so does a bond with nobody to report (`MemberReportsTest`).
+            "POST /api/v1/bonds/{bondId}/members/other/report" to Fixture(body = """{"reason":"OTHER"}"""),
         )
 
     private data class Fixture(

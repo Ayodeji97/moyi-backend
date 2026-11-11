@@ -3,8 +3,11 @@ package com.moyi.media.infra.processing
 import com.moyi.media.domain.MediaRefusal
 import com.moyi.media.domain.VoiceFormat
 import com.moyi.media.domain.VoiceRules
+import com.moyi.media.domain.Waveform
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
@@ -50,10 +53,22 @@ import java.time.Duration
  *   note's average stays near the ruling whatever the sound (unconstrained, a
  *   pure tone came out at 39 kbit/s; constrained, 25), with the `voip`
  *   tuning, which favours speech.
+ * - **The waveform is measured from what is kept, not from the upload**
+ *   (issue #165, ADR-0061): the Opus just checked is decoded once more, by its
+ *   own demuxer and decoder only ([Reading.KEPT]), to 16-bit mono PCM at
+ *   [WAVEFORM_SAMPLE_RATE], bounded in length and in bytes, and
+ *   [Waveform.measure] reads it. A measurement that fails leaves the note kept
+ *   without its waveform: the drawing is not worth the note.
+ *
+ * - **Then an AAC variant of what is kept** (ADR-0060), for iOS, which cannot
+ *   stream Ogg: read from the kept Opus, never from the upload, so no limit is
+ *   applied twice; best effort, so a variant that cannot be made never refuses
+ *   the note.
  *
  * Every program shares one [Deadline][Sandbox.Deadline]: the note's whole
  * processing is limited, not each step.
  */
+@Suppress("TooManyFunctions") // One per ffmpeg step; the waveform (ADR-0061) and the AAC copy (ADR-0060) made the eleventh.
 internal class FfmpegVoiceProcessor(
     private val ffmpeg: Path,
     private val ffprobe: Path,
@@ -107,7 +122,71 @@ internal class FfmpegVoiceProcessor(
             }
         if (kept.codec != OPUS || kept.channels != VoiceRules.CHANNELS) return Transcoding.Refused(MediaRefusal.UNREADABLE)
         if (!VoiceRules.mayKeepTranscoded(kept.durationMs)) return Transcoding.Refused(MediaRefusal.TOO_LONG)
-        return Transcoding.Transcoded(out, kept.durationMs.toInt(), bytes)
+        return Transcoding.Transcoded(
+            out,
+            kept.durationMs.toInt(),
+            bytes,
+            waveform(out, workDir, deadline),
+            aacOf(out, kept.durationMs, workDir, deadline),
+        )
+    }
+
+    /**
+     * ADR-0060: the AAC variant iOS streams, made of the kept [opus] (already judged: its length,
+     * its channels, its bytes), never of the upload, so the upload is read and limited once. Best
+     * effort: null when it cannot be made within what is left of [deadline], or is not one channel
+     * of AAC as long as the Opus ([VoiceRules.isTheSameNote]). The note is kept either way.
+     *
+     * The Opus is read as the result is read back ([Reading.KEPT]), and encoded by ffmpeg's own
+     * encoder (`aac`) as AAC-LC, mono, [VoiceRules.AAC_BITS_PER_SECOND], in MP4 with `+faststart`:
+     * the `moov` index is moved before the audio, so AVPlayer can play while it downloads. No
+     * metadata and no build fingerprint, as the Opus.
+     */
+    private fun aacOf(
+        opus: Path,
+        opusMs: Long,
+        workDir: Path,
+        deadline: Sandbox.Deadline,
+    ): Transcoding.AacVariant? {
+        val out = workDir.resolve(AAC_OUTPUT)
+        val arguments =
+            QUIET + listOf("-nostdin") + Reading.KEPT.arguments + listOf("-threads", "1", "-i", "file:${opus.toAbsolutePath()}") +
+                listOf("-map", "0:a:0", "-map_metadata", "-1", "-map_chapters", "-1") +
+                listOf("-fflags", "+bitexact", "-flags:a", "+bitexact") +
+                listOf("-c:a", "aac", "-profile:a", "aac_low", "-b:a", VoiceRules.AAC_BITS_PER_SECOND.toString()) +
+                listOf("-ac", VoiceRules.CHANNELS.toString(), "-threads", "1") +
+                listOf("-movflags", "+faststart", "-fs", (maxKeptBytes + 1).toString()) +
+                listOf("-f", "mp4", "file:${out.toAbsolutePath()}")
+        val encoded =
+            run(listOf(ffmpeg.toString()) + arguments, workDir, deadline) == null &&
+                Files.isRegularFile(out) &&
+                Files.size(out) <= maxKeptBytes
+        val kept = if (encoded) (probe("file:${out.toAbsolutePath()}", Reading.KEPT_AAC, workDir, deadline) as? Step.Done)?.value else null
+        val sameNote =
+            kept != null && kept.codec == AAC && kept.channels == VoiceRules.CHANNELS && VoiceRules.isTheSameNote(opusMs, kept.durationMs)
+        return if (sameNote) Transcoding.AacVariant(out, Files.size(out)) else null
+    }
+
+    /**
+     * The [Waveform] of the kept Opus at [kept]: decoded to raw PCM in the work
+     * directory, never more than [MAX_PCM_BYTES], and measured. Null when the
+     * decode fails, runs out of time, or writes more than a kept note can hold.
+     */
+    private fun waveform(
+        kept: Path,
+        workDir: Path,
+        deadline: Sandbox.Deadline,
+    ): Waveform? {
+        val pcm = workDir.resolve(LEVELS)
+        val command =
+            listOf(ffmpeg.toString()) + QUIET + listOf("-nostdin") + Reading.KEPT.arguments +
+                listOf("-threads", "1", "-i", "file:${kept.toAbsolutePath()}") +
+                listOf("-map", "0:a:0", "-ac", "1", "-ar", WAVEFORM_SAMPLE_RATE.toString(), "-c:a", "pcm_s16le") +
+                listOf("-t", seconds(VoiceRules.LIMIT_MS + RUN_ON_MS), "-fs", (MAX_PCM_BYTES + 1).toString()) +
+                listOf("-f", "s16le", "file:${pcm.toAbsolutePath()}")
+        if (run(command, workDir, deadline) != null || !Files.isRegularFile(pcm) || Files.size(pcm) > MAX_PCM_BYTES) return null
+        val samples = ByteBuffer.wrap(Files.readAllBytes(pcm)).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+        return Waveform.measure(ShortArray(samples.remaining()).also { samples.get(it) })
     }
 
     private fun transcodeArguments(
@@ -207,6 +286,9 @@ internal class FfmpegVoiceProcessor(
 
         /** The result, read back: Ogg, Opus. */
         KEPT("ogg", listOf("opus")),
+
+        /** The AAC variant, read back (ADR-0060): MP4, AAC. */
+        KEPT_AAC("mov", listOf("aac")),
         ;
 
         /** Input options, before the input they apply to. */
@@ -247,10 +329,27 @@ internal class FfmpegVoiceProcessor(
         /** The kept voice note, in the work directory. */
         const val OUTPUT = "voice.ogg"
 
+        /** Its AAC variant, in the work directory (ADR-0060). */
+        const val AAC_OUTPUT = "voice.m4a"
+
         /** How far past the limit the transcode may run, so that a note longer than its container said is seen to be. */
         const val RUN_ON_MS: Long = 1_000
 
+        /** The kept note decoded for its waveform, in the work directory. */
+        const val LEVELS = "levels.pcm"
+
+        /**
+         * The rate the kept note is decoded at for its waveform: speech's
+         * loudness lives below 4 kHz, and a 61-second note is then under a
+         * megabyte of samples (ADR-0061).
+         */
+        const val WAVEFORM_SAMPLE_RATE = 8_000
+
+        /** The most PCM a kept note can decode to: [RUN_ON_MS] past the limit, 16-bit mono at [WAVEFORM_SAMPLE_RATE]. */
+        const val MAX_PCM_BYTES: Long = (VoiceRules.LIMIT_MS + RUN_ON_MS) * WAVEFORM_SAMPLE_RATE / 1_000 * 2
+
         private const val OPUS = "opus"
+        private const val AAC = "aac"
         private const val MILLIS_DIGITS = 3
 
         /** Nothing printed but errors (ffmpeg is also given `-nostdin`, which ffprobe does not take). */

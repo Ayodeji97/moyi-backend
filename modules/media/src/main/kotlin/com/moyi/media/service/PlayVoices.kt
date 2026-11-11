@@ -13,7 +13,8 @@ import java.util.UUID
  * [VoiceViews], and what the owner's own `GET /media/{id}` shows of a voice
  * note: the rule is [MediaAsset.heardBy]'s (its owner once ready; anyone else
  * only once it has passed moderation, ADR-0049), the URL
- * is signed by [HourlyUrls], as a photo's is.
+ * is signed by [HourlyUrls], as a photo's is; and the AAC variant's (ADR-0060)
+ * by the same rule, at the same instant, so it expires with it.
  */
 @Service
 internal class PlayVoices(
@@ -48,12 +49,29 @@ internal class PlayVoices(
             is MediaAsset.Heard.Ready -> {
                 // No storage configured: nothing a URL could reach, so still processing (as a photo).
                 val url = urls.sign(heard.key, signedAt) ?: return processing(asset)
-                VoiceView(asset.id, VoiceViewStatus.READY, url, heard.durationMs, heard.sensitive)
+                VoiceView(
+                    asset.id,
+                    VoiceViewStatus.READY,
+                    url,
+                    heard.durationMs,
+                    heard.waveform?.levels,
+                    heard.sensitive,
+                    heard.aacKey?.let { urls.sign(it, signedAt) },
+                )
             }
 
             is MediaAsset.Heard.NotShared -> {
                 val url = heard.key?.let { urls.sign(it, signedAt) }
-                VoiceView(asset.id, VoiceViewStatus.NOT_SHARED, url, heard.durationMs?.takeIf { url != null })
+                val urlAac = heard.aacKey?.takeIf { url != null }?.let { urls.sign(it, signedAt) }
+                // The length, the waveform and the AAC go with the URL: none without it (blocked, or no storage).
+                VoiceView(
+                    asset.id,
+                    VoiceViewStatus.NOT_SHARED,
+                    url,
+                    heard.durationMs?.takeIf { url != null },
+                    heard.waveform?.levels?.takeIf { url != null },
+                    urlAac = urlAac,
+                )
             }
         }
 

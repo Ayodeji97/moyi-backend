@@ -43,6 +43,7 @@ import java.security.KeyPairGenerator
 import java.security.interfaces.RSAPublicKey
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.util.Base64
 import java.util.UUID
 
@@ -96,6 +97,8 @@ internal class FcmPushSenderTest {
             .andExpect(jsonPath("$.message.apns.headers.apns-expiration").value(staleAfter.epochSecond.toString()))
             .andExpect(jsonPath("$.message.android.notification.title_loc_key").value("push_reveal_title"))
             .andExpect(jsonPath("$.message.android.notification.body_loc_key").value("push_reveal_body"))
+            // Issue #134: one Android channel per category, so a person can mute reminders and keep reveals.
+            .andExpect(jsonPath("$.message.android.notification.channel_id").value("reveal"))
             .andExpect(jsonPath("$.message.apns.headers.apns-collapse-id").value("REVEAL:$bond"))
             .andExpect(jsonPath("$.message.apns.payload.aps.alert.title-loc-key").value("push_reveal_title"))
             .andExpect(jsonPath("$.message.apns.payload.aps.alert.loc-key").value("push_reveal_body"))
@@ -107,6 +110,36 @@ internal class FcmPushSenderTest {
 
         sender.send(message) shouldBe PushDelivery.Accepted("projects/moyi-test/messages/0:1")
         server.verify()
+    }
+
+    @Test
+    fun `every category has its own Android channel, named as the client creates it`() {
+        // The client creates exactly these ids (issue #134, ADR-0044 decision 9). Changing one
+        // silently moves pushes to FCM's fallback channel, so the list is spelled out here.
+        PushCategory.entries.associateWith(FcmPushSender::channelId) shouldBe
+            mapOf(
+                PushCategory.REMINDER to "reminder",
+                PushCategory.PARTNER_JOINED to "partner_joined",
+                PushCategory.REVEAL to "reveal",
+                PushCategory.SOLO_UNLOCK to "solo_unlock",
+                PushCategory.MILESTONE to "milestone",
+                PushCategory.ON_THIS_DAY to "on_this_day",
+                PushCategory.PROPOSAL_OPENED to "proposal_opened",
+            )
+    }
+
+    @Test
+    fun `a day's push names its Bond-day in data, and a push about no day, or recorded before V58, names none`() {
+        // Issue #146: the date directs the app to the day; it is the day's calendar label, never content.
+        @Suppress("UNCHECKED_CAST")
+        fun dataOf(message: PushMessage) =
+            ((FcmPushSender.payloadOf(message, clock.instant())["message"] as Map<String, Any>)["data"] as Map<String, Any>)
+
+        dataOf(message.copy(bondDate = LocalDate.parse("2026-10-28"))) shouldBe
+            mapOf("bondId" to bond.toString(), "kind" to "REVEAL", "date" to "2026-10-28")
+        // FCM's data values are strings, and a key with no value is left out rather than sent empty.
+        dataOf(message.copy(category = PushCategory.PARTNER_JOINED, bondDate = null)) shouldBe
+            mapOf("bondId" to bond.toString(), "kind" to "PARTNER_JOINED")
     }
 
     @Test
@@ -294,6 +327,29 @@ internal class FcmPushSenderTest {
 
         // As the JSON key file writes it: one line, `\n` spelt out.
         FcmPushSender.create(fcm(pem = PRIVATE_KEY_PEM.replace("\n", "\\n")), builder, clock).shouldBeInstanceOf<FcmPushSender>()
+    }
+
+    @Test
+    fun `the key reads the same however the vault and Kamal's env file wrote its line breaks`() {
+        // 2026-11-10: the vault held Google's `\n`; Kamal's env file doubled the
+        // backslash, the container read `\\n`, and the API would not start.
+        listOf(
+            PRIVATE_KEY_PEM,
+            PRIVATE_KEY_PEM.replace("\n", "\\n"),
+            PRIVATE_KEY_PEM.replace("\n", "\\\\n"),
+            PRIVATE_KEY_PEM.replace("\n", ""),
+        ).forEach { pem -> FcmPushSender.create(fcm(pem = pem), builder, clock).shouldBeInstanceOf<FcmPushSender>() }
+    }
+
+    @Test
+    fun `a key that will not decode is refused without the key in any message`() {
+        val body = Base64.getEncoder().encodeToString(KEYS.private.encoded)
+        val truncated = "$PEM_HEADER\\\\n${body.take(body.length / 2)}\\\\n$PEM_FOOTER"
+        val failure = shouldThrow<IllegalStateException> { FcmPushSender.create(fcm(pem = truncated), builder, clock) }
+
+        val messages = generateSequence<Throwable>(failure) { it.cause }.mapNotNull { it.message }.toList()
+        messages.first() shouldContain "moyi.notification.push.fcm.private-key-pem"
+        messages.forEach { it shouldNotContain body.take(16) }
     }
 
     @Test

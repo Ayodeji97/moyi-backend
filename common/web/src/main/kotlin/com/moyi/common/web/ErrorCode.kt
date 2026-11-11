@@ -64,6 +64,11 @@ enum class ErrorCode {
      * address, a locked account and an account in a state that cannot sign in,
      * because telling them apart is exactly the oracle T-18 and ADR-0015 close.
      * 401, without `WWW-Authenticate`: no bearer credential was presented.
+     *
+     * Also a password typed again on a signed-in route (`POST /me/deletion-request`)
+     * that is wrong, and there **403**, still without `WWW-Authenticate`: the bearer
+     * token was accepted, and a client reads a 401 on a signed-in route as that token
+     * refused (#166, ADR-0058 decision 1 as amended 2026-11-10).
      */
     INVALID_CREDENTIALS,
 
@@ -88,6 +93,16 @@ enum class ErrorCode {
 
     /** A password-reset secret that was spent or passed its one-hour TTL. */
     PASSWORD_RESET_TOKEN_EXPIRED,
+
+    /**
+     * `verify-email` or `reset-password` with an `email` and a `code` while the store that
+     * counts typed codes (ten a day per address, ADR-0023) cannot be reached. 503 with
+     * `Retry-After`. The code was not looked at, spent or counted, and the answer is the same
+     * whether the address has an account or not. The link in the same email still works; a
+     * client's move is to offer it, or to try the code again after the wait (owner's ruling,
+     * 2026-11-09: typed codes fail closed, links fail open).
+     */
+    CODE_CHECK_UNAVAILABLE,
 
     /**
      * FR-002: "unverified accounts may sign in but MUST NOT create or join a

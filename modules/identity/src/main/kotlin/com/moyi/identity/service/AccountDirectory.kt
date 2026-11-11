@@ -24,17 +24,20 @@ internal class AccountDirectory(
 ) : UserDirectory,
     VerifiedEmails {
     @Transactional(readOnly = true)
-    override fun find(id: UUID): UserSummary? = accounts.findById(UserId(id))?.toSummary()
+    override fun find(id: UUID): UserSummary? = accounts.findById(UserId(id))?.takeIf { it.deletedAt == null }?.toSummary()
 
     @Transactional(readOnly = true)
-    override fun isVerified(userId: UUID): Boolean = accounts.findById(UserId(userId))?.isEmailVerified == true
+    override fun isVerified(userId: UUID): Boolean =
+        accounts.findById(UserId(userId))?.takeIf { it.deletedAt == null }?.isEmailVerified == true
 
     @Transactional(readOnly = true)
     override fun findAll(ids: Collection<UUID>): Map<UUID, UserSummary> {
         // An empty `IN ()` is a query that cannot match; not asking is both
         // faster and clearer than asking and discarding.
         if (ids.isEmpty()) return emptyMap()
-        return accounts.findAllById(ids.map(::UserId)).associate { it.id.value to it.toSummary() }
+        // A deleted account is nobody to another module (ADR-0058 decision 6): absent, as an
+        // unknown id is, so a partner's archive says "Former member" and not a placeholder name.
+        return accounts.findAllById(ids.map(::UserId)).filter { it.deletedAt == null }.associate { it.id.value to it.toSummary() }
     }
 
     private fun User.toSummary(): UserSummary =

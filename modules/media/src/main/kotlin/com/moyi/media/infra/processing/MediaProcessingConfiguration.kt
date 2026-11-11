@@ -69,7 +69,9 @@ internal class MediaProcessingConfiguration {
      * found, the memory limit enforced or waived, and ffmpeg run through the
      * sandbox the voice notes will be, once for its version and once to show
      * it has the Opus encoder the owner's ruling Q4 names (`libopus`): an
-     * ffmpeg built without it would fail every voice note.
+     * ffmpeg built without it would fail every voice note; and once to show
+     * it has its own AAC encoder (`aac`), which makes the variant iOS streams
+     * (ADR-0060): without it every note would quietly have none.
      */
     private fun ffmpeg(properties: MediaProcessingProperties): FfmpegVoiceProcessor {
         val settings = properties.ffmpeg
@@ -78,6 +80,7 @@ internal class MediaProcessingConfiguration {
         val sandbox = sandbox(settings.memoryLimit, properties.allowUnlimitedMemory)
         val version = checked(sandbox, listOf(ffmpeg.toString(), "-hide_banner", "-version")) { it.isNotEmpty() }.lineSequence().first()
         checked(sandbox, listOf(ffmpeg.toString(), "-hide_banner", "-h", "encoder=libopus")) { "Encoder libopus" in it }
+        checked(sandbox, listOf(ffmpeg.toString(), "-hide_banner", "-h", "encoder=aac")) { "Encoder aac" in it }
         log.info("Voice processing: NATIVE, {}, {}, time limit {}", version, limitOf(sandbox), settings.timeout)
         return FfmpegVoiceProcessor(ffmpeg, ffprobe, sandbox, settings.timeout)
     }

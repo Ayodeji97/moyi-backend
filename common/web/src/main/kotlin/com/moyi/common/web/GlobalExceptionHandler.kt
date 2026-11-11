@@ -96,7 +96,9 @@ class GlobalExceptionHandler(
         // that alerts on a user typing a short password is a dashboard
         // people learn to ignore.
         log.warn("{} -> {} {}", ex.errorCode, ex.status.value(), ex.detail)
-        return respond(ex.status, ex.errorCode, ex.detail, request, ex.errors)
+        return ResponseEntity
+            .status(ex.status)
+            .body(problems.of(ex, request.instanceUri()))
     }
 
     /**

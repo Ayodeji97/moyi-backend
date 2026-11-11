@@ -57,7 +57,9 @@ internal data class UploadIntentResponse(
  * length. Before, all are null, and each is null on the other kind.
  * `QUARANTINED` is one moderation held back from the partner (ADR-0051; the
  * entry shows it to its author as `NOT_SHARED`, Q10): its URL is still given
- * here, unless it was blocked outright. [sensitive] is true once a photo has
+ * here, unless it was blocked outright. It can still be attached to an entry,
+ * and is shown there as `NOT_SHARED` from the entry's first answer, as one held
+ * back after it was attached is (#149). [sensitive] is true once a photo has
  * passed moderation with adult nudity found: blurred until tapped (Q16).
  * [contentType] and [sizeBytes] are what was declared for the upload, not
  * what is kept.

@@ -1,5 +1,6 @@
 package com.moyi.gratitude.domain
 
+import java.time.Instant
 import java.time.LocalDate
 
 /**
@@ -24,9 +25,20 @@ internal data class StreakState(
     val freezeProgress: Int,
     val freezesConsumed: Int,
     val totalCompleteDays: Int,
+    /**
+     * The length of the run the latest break ended (issue #141, `states.md` §7: "Your streak
+     * ended at 21 days"), or `null` if no run has ended. Set by a [StreakChange.BROKEN] day and
+     * by nothing else, so it stays the last ended run while the next one grows. At least one: a
+     * missed day on a run of zero breaks nothing. Not [longest], which is the longest ever.
+     */
+    val lastRunLength: Int? = null,
+    /** The date of the missed day that ended [lastRunLength]'s run, itself not in it; `null` exactly when that is. */
+    val lastRunBrokenOn: LocalDate? = null,
 ) {
     init {
         require(current >= 0 && longest >= current) { "a streak's longest run is at least its current one" }
+        require((lastRunLength == null) == (lastRunBrokenOn == null)) { "an ended run has a length and a date, or neither" }
+        require(lastRunLength == null || lastRunLength in 1..longest) { "an ended run was a run, and no longer than the longest" }
         require(freezesAvailable in 0..StreakRules.MAX_FREEZES) { "at most ${StreakRules.MAX_FREEZES} freezes are banked" }
         require(freezeProgress in 0 until StreakRules.DAYS_PER_FREEZE) { "freeze progress resets at the threshold" }
     }
@@ -118,7 +130,10 @@ internal enum class DayOutcome {
  * miss. `GET /today` already says as much about each day while it is today.
  *
  * Today, until it is complete, is still only [OPEN] here: who has written so
- * far today is `GET /today`'s to say.
+ * far today is `GET /today`'s to say. So is yesterday, while its late-entry
+ * grace runs (BR-3a as amended 2026-11-08), and after it until the close job has
+ * evaluated it: an entry sent late may still land on it, and nothing about it is
+ * decided until the job settles it.
  */
 internal enum class StreakCell {
     /** Both wrote. */
@@ -133,7 +148,11 @@ internal enum class StreakCell {
     /** Nobody wrote. Not in the run. */
     MISSED,
 
-    /** Today, not complete yet. Whether anybody has written is `GET /today`'s to say, not this calendar's. */
+    /**
+     * Not decided yet, and not complete: today, or an earlier day inside its late-entry grace or
+     * not yet evaluated by the close job ([LateEntryGrace.undecidedUntil]). Whether anybody has
+     * written is `GET /today`'s to say, not this calendar's.
+     */
     OPEN,
     ;
 
@@ -143,19 +162,22 @@ internal enum class StreakCell {
          * (`null`: not evaluated yet), or `null` for a day the calendar does
          * not draw:
          *
-         * - a day not yet evaluated, unless it is today — its square could
-         *   still change (a missed day may become a rest day), and "the
-         *   numbers must agree with the grid": the run counts evaluated days;
+         * - a day not yet evaluated, unless it is [undecided] — its square
+         *   could still change (a missed day may become a rest day), and "the
+         *   numbers must agree with the grid": the run counts evaluated days.
+         *   An [undecided] day is today, one inside its late-entry grace, or
+         *   one the close job has not evaluated yet, which is drawn [COMPLETE] once it has revealed (that much cannot
+         *   change) and [OPEN] until then;
          * - a suspended day, and a missed day after the bond had ended, which
          *   moved nothing and must not sit in the grid looking like a break.
          */
         fun of(
             status: BondDayStatus,
             outcome: DayOutcome?,
-            isToday: Boolean,
+            undecided: Boolean,
         ): StreakCell? =
             when {
-                isToday && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN
+                undecided && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN
                 outcome == DayOutcome.COMPLETE -> COMPLETE
                 outcome == DayOutcome.FROZEN_BY_SKIP -> FROZEN
                 outcome == DayOutcome.MISSED -> missed(status)
@@ -171,11 +193,65 @@ internal enum class StreakCell {
     }
 }
 
-/** One square of a bond's calendar. */
+/**
+ * Why a [StreakCell.FROZEN] square is a rest day (issue #141, `states.md` §7a): the copy differs.
+ * Derived from what the day was evaluated as, which is stored (ADR-0034 decision 4); no column of
+ * its own.
+ */
+internal enum class FrozenReason {
+    /** A missed day a banked freeze covered: "we used a rest day". */
+    REST_DAY,
+
+    /** A date an approved zone change stepped over (BR-6): nobody could have written on it, and no freeze was spent. */
+    TIMEZONE_SHIFT,
+}
+
+/**
+ * One square of a bond's calendar. [reason] is set on a [StreakCell.FROZEN] square and on no
+ * other; [settlesAt] on an [StreakCell.OPEN] square and on no other: the earliest the day can be
+ * decided, when its late-entry grace runs out; the close job decides it on its next run after
+ * that (BR-3a, [LateEntryGrace.settlesAt]), so on a day not yet evaluated it can be past.
+ */
 internal data class StreakDay(
     val date: LocalDate,
     val cell: StreakCell,
-)
+    val reason: FrozenReason? = null,
+    val settlesAt: Instant? = null,
+) {
+    init {
+        require((cell == StreakCell.FROZEN) == (reason != null)) { "a square has a reason exactly when it is FROZEN" }
+        require((cell == StreakCell.OPEN) == (settlesAt != null)) { "a square says when it settles exactly when it is OPEN" }
+    }
+
+    companion object {
+        /**
+         * The square for the day on [date] ([StreakCell.of] decides which), with its reason when
+         * it is a rest day. A square is `FROZEN` for one of two outcomes only: a date a zone
+         * change stepped over is evaluated [DayOutcome.FROZEN_BY_SKIP], and a missed day becomes
+         * `FROZEN` when, and only when, it spends a freeze (`StreakStore.recordDay`; V17's
+         * `bond_days_freeze_check`). So the outcome says which.
+         *
+         * [settlesAt] is non-null exactly for an undecided day (today, one inside its grace, or
+         * one not yet evaluated: [LateEntryGrace.undecidedUntil]), and is the earliest it can be
+         * decided; the square carries it only if it is drawn [StreakCell.OPEN].
+         */
+        fun of(
+            date: LocalDate,
+            status: BondDayStatus,
+            outcome: DayOutcome?,
+            settlesAt: Instant?,
+        ): StreakDay? =
+            StreakCell.of(status, outcome, undecided = settlesAt != null)?.let { cell ->
+                val reason =
+                    when {
+                        cell != StreakCell.FROZEN -> null
+                        outcome == DayOutcome.FROZEN_BY_SKIP -> FrozenReason.TIMEZONE_SHIFT
+                        else -> FrozenReason.REST_DAY
+                    }
+                StreakDay(date, cell, reason, settlesAt.takeIf { cell == StreakCell.OPEN })
+            }
+    }
+}
 
 /** What one day did to the run — the vocabulary of `streak_events`, and of "why did my streak break?". */
 internal enum class StreakChange {
@@ -259,7 +335,7 @@ internal object StreakRules {
             }
 
             DayOutcome.MISSED -> {
-                missed(state, strict, recordedFreeze)
+                missed(state, date, strict, recordedFreeze)
             }
         }
 
@@ -287,6 +363,7 @@ internal object StreakRules {
 
     private fun missed(
         state: StreakState,
+        date: LocalDate,
         strict: Boolean,
         recordedFreeze: Boolean?,
     ): Evaluation {
@@ -298,8 +375,13 @@ internal object StreakRules {
             val next = extended(state).copy(freezesAvailable = state.freezesAvailable - 1, freezesConsumed = state.freezesConsumed + 1)
             Evaluation(next, freezeApplied = true, StreakChange.FREEZE_CONSUMED, freezeBanked = false)
         } else {
-            val change = if (state.current > 0) StreakChange.BROKEN else StreakChange.NONE
-            Evaluation(state.copy(current = 0), freezeApplied = false, change, freezeBanked = false)
+            if (state.current > 0) {
+                // The run this day ended, kept for "your streak ended at …" (issue #141).
+                val next = state.copy(current = 0, lastRunLength = state.current, lastRunBrokenOn = date)
+                Evaluation(next, freezeApplied = false, StreakChange.BROKEN, freezeBanked = false)
+            } else {
+                Evaluation(state, freezeApplied = false, StreakChange.NONE, freezeBanked = false)
+            }
         }
     }
 }

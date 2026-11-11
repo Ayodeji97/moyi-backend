@@ -162,6 +162,42 @@ the remaining lifetime at send time (never negative; FCM's default is four weeks
 it after `stale_after` (review of #96). The owner writes the words in the apps'
 string tables.
 
+*Amended 2026-11-08 (issue #134).* Android's `notification.channel_id` is also sent: the
+category's name in lower case, the same stem as the localisation keys (`reveal`, `reminder`,
+`partner_joined`, `solo_unlock`, `milestone`, `on_this_day`, `proposal_opened`), so a person can
+mute one kind of push and keep another (doc 13 §7). The client creates one channel per category
+with exactly these ids; a push naming a channel the phone has not created is shown in the app's
+default channel, so adding a category means a client release that creates its channel.
+`FcmPushSenderTest` spells the list out, so a rename fails the build rather than the phone.
+
+*Amended 2026-11-10 (issue #146).* `data` is now `{bondId, kind, date}`. `date` is the ISO
+`yyyy-MM-dd` date of the Bond-day the push is about: that day's own calendar label in the bond's
+anchor zone (`bond_days.date`), never the date of the instant it was sent in another zone. A
+tap can then open that day: the Archive's day view for a past day, Today for the current one.
+`date` directs and authorises nothing, because the app still loads the day from the server. It
+is not content either: it says which day, never what was written on it (FR-084, T-14).
+
+- **Which pushes carry it.** REVEAL and SOLO_UNLOCK carry the day that opened. MILESTONE
+  carries the day that reached it. ON_THIS_DAY carries **the day remembered**, the newest of
+  `GET /on-this-day`'s answer, not today. REMINDER carries the Bond-day it reminds of: today's,
+  read on the bond's timeline, not on the member's reminder zone. PARTNER_JOINED and
+  PROPOSAL_OPENED concern the Bond, not a day, and leave the key out. A key with no value is
+  left out rather than sent empty, because FCM's data values are strings.
+- **Resolved by the caller, kept on the row.** `notification` is a leaf and cannot read a day
+  (spec §2.1), so `PushRequest.bondDate` is required and nullable: every caller has to decide
+  whether its push concerns a day. The date is kept in `notifications.bond_date` (V58,
+  nullable), not only in the event. A push held by quiet hours is published again from its row
+  alone (ADR-0045), and an event carries ids only (ADR-0035). A row written before V58
+  has no date and is sent without one.
+- **The milestone's date is read, not carried.** The lead asked for the date to be added to the
+  `MilestoneReached` event. The event's payload is names to ids (ADR-0035), and
+  `OutboxEvent.references` is `Map<String, UUID>`. So `gratitude.notify`, which is in the module
+  that holds days, reads the date from the `bondDayId` the event already names. There is no
+  cross-module read and no change to the event. A day the module does not hold gives no date,
+  and the milestone is still told.
+- **`LoggingPushSender`'s line is unchanged.** It prints the category and the Bond, as before,
+  and no other field of the payload. `PushSenderConfigurationTest` fails if the date reaches it.
+
 **10. The provider posture is ADR-0017's.** `moyi.notification.push.provider` defaults to `FCM`,
 which refuses to start without `fcm.project-id`, `fcm.client-email` and `fcm.private-key-pem`
 (a key file's escaped `\n` accepted). `LOG` is asked for by name: the `local` profile, the test
@@ -169,6 +205,13 @@ contexts, and **production's `config/deploy.yml`, until a Firebase project exist
 that says so and how to switch. `LoggingPushSender` prints the category and the Bond, never the
 token, and reports `Accepted("not-sent:log")` so a row it settled cannot pass for a delivery.
 `PushProperties.Fcm` redacts the private key in its `toString`.
+
+*Amended 2026-11-10 (the first FCM deploy).* The key's line breaks are read in every shape they
+reach the container: real, `\n`, `\\n` and none (`com.moyi.common.core.Pem`, shared with
+ADR-0019's keys). `\\n` is what a vault's `\n` becomes, because Kamal writes its env file with
+`String#dump`, which doubles each backslash, and docker reads that file literally. The parser
+read only `\n`, and the API would not start. The vault holds the key on one line with no `\n`
+(ops/notification/README.md step 3, which also has a check that runs before the deploy).
 
 ## Consequences
 

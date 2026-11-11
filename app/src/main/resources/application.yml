@@ -232,6 +232,23 @@ server:
         same-site: strict
 
 management:
+  # Tracing gives an error body and its log lines one id (ADR-0024, amended
+  # 2026-11-08). It has no exporter, so no one downstream has a use for our
+  # trace context, and Boot's defaults would pass it on. TraceContextStaysInsideTest
+  # holds all three lines below.
+  tracing:
+    # A request's W3C `traceparent` is read and nothing else: no B3, and no
+    # `baggage`, which is a client's free text that would otherwise ride along.
+    baggage:
+      enabled: false
+    propagation:
+      consume: w3c
+  observations:
+    enable:
+      # No observation of our own calls to a third party (Voyage, Resend, FCM,
+      # each a RestClient from Boot's builder): an observed call is one the
+      # tracer writes `traceparent` into. Nothing reads those timers.
+      http.client.requests: false
   server:
     # The actuator on a port of its own, which kamal-proxy does not route: the
     # Prometheus scrape below needs no token (Prometheus holds none), so it
@@ -307,6 +324,20 @@ management:
 # would email live tokens to a stranger's server. Until 2026-10-22 this file
 # said `https://moyi.com/…`, a domain registered in 2004 by someone else.
 # Only the `local` profile and the test contexts carry values.
+
+# The legal documents (FR-103, ADR-0056): the current Terms of Service,
+# Privacy Policy and data-processing summary, each a version and a URL. No
+# value here either, for the same reason: every consent row records one of
+# these versions, so a default would be a version recorded as accepted by
+# every deployment that forgot its own. All six are required:
+#
+#   moyi.legal.terms.version / .url      MOYI_LEGAL_TERMS_VERSION / MOYI_LEGAL_TERMS_URL
+#   moyi.legal.privacy.version / .url    MOYI_LEGAL_PRIVACY_VERSION / MOYI_LEGAL_PRIVACY_URL
+#   moyi.legal.summary.version / .url    MOYI_LEGAL_SUMMARY_VERSION / MOYI_LEGAL_SUMMARY_URL
+#
+# A version is 1-40 of A-Z a-z 0-9 . _ - (a label, compared and never
+# parsed); a URL is absolute http(s). Changing a version is what asks every
+# person to accept again (GET /me's legalAccepted lags GET /meta/legal's).
 
 # Access-token signing (doc 09 §3, ADR-0019). No key here on purpose: the key
 # source defaults to CONFIGURED, which refuses to start unless

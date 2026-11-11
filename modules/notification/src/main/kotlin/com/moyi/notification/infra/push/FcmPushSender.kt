@@ -1,5 +1,6 @@
 package com.moyi.notification.infra.push
 
+import com.moyi.common.core.Pem
 import com.moyi.notification.api.PushCategory
 import com.moyi.notification.api.PushDelivery
 import com.moyi.notification.api.PushMessage
@@ -52,7 +53,9 @@ import java.util.Base64
  *
  * **What a phone is sent.** Localisation keys chosen by category for both
  * platforms (`title_loc_key`/`body_loc_key` on Android, `title-loc-key`/
- * `loc-key` on iOS), `data: {bondId, kind}`, and a collapse key of category
+ * `loc-key` on iOS), the Android channel of the category ([channelId]),
+ * `data: {bondId, kind, date}` (`date` the Bond-day's ISO date, only for a
+ * push about a day: issue #146), and a collapse key of category
  * and Bond, so that a push held back and then sent replaces its predecessor
  * rather than stacking (spec N1, Q6). No text authored here, no name.
  *
@@ -305,9 +308,19 @@ internal class FcmPushSender(
          * string tables (Q6); the server sends only the keys.
          */
         fun locKeys(category: PushCategory): Pair<String, String> {
-            val stem = "push_${category.name.lowercase()}"
+            val stem = "push_${channelId(category)}"
             return "${stem}_title" to "${stem}_body"
         }
+
+        /**
+         * The Android notification channel a push of [category] is shown in: the
+         * category's name in lower case (`reveal`, `reminder`, `on_this_day`…).
+         * The client creates one channel per category with exactly these ids, so a
+         * person can mute one kind and keep another (doc 13 §7, issue #134). A push
+         * naming a channel the phone has not created falls back to the app's default
+         * channel, so a renamed category is a client release, never a silent change.
+         */
+        fun channelId(category: PushCategory): String = category.name.lowercase()
 
         /** The same for every phone of a category and Bond, so a later push replaces an earlier one. */
         fun collapseKey(message: PushMessage): String = "${message.category.name}:${message.bondId}"
@@ -331,12 +344,17 @@ internal class FcmPushSender(
                 "message" to
                     mapOf(
                         "token" to message.token.value,
-                        "data" to mapOf("bondId" to message.bondId.toString(), "kind" to message.category.name),
+                        "data" to dataOf(message),
                         "android" to
                             mapOf(
                                 "collapse_key" to collapse,
                                 "ttl" to "${remaining}s",
-                                "notification" to mapOf("title_loc_key" to title, "body_loc_key" to body),
+                                "notification" to
+                                    mapOf(
+                                        "title_loc_key" to title,
+                                        "body_loc_key" to body,
+                                        "channel_id" to channelId(message.category),
+                                    ),
                             ),
                         "apns" to
                             mapOf(
@@ -350,6 +368,19 @@ internal class FcmPushSender(
                     ),
             )
         }
+
+        /**
+         * The push's `data`: what the app opens, never what it shows. FCM's data values are
+         * strings, so the date is ISO `yyyy-MM-dd`, and a push about no day leaves the key out
+         * rather than sending it empty. No content can travel here: a Bond's id, a category and
+         * a calendar date (FR-084, T-14).
+         */
+        private fun dataOf(message: PushMessage): Map<String, String> =
+            buildMap {
+                put("bondId", message.bondId.toString())
+                put("kind", message.category.name)
+                message.bondDate?.let { put("date", it.toString()) }
+            }
 
         private fun bytes(content: ByteArray) = StreamingHttpOutputMessage.Body { it.write(content) }
 
@@ -378,14 +409,12 @@ internal class FcmPushSender(
             return FcmPushSender(builder.build(), account, fcm.tokenUri, clock)
         }
 
-        /** PKCS#8, as Google's key file holds it, with its line breaks either real or written as `\n`. */
+        /**
+         * PKCS#8, as Google's key file holds it. Its line breaks may be real, spelt `\n`, doubled
+         * to `\\n` by Kamal's env file, or gone: [Pem] reads them all (ops/notification step 3).
+         */
         private fun privateKeyOf(pem: String): RSAPrivateKey {
-            val body =
-                pem
-                    .replace("\\n", "\n")
-                    .substringAfter(PEM_HEADER, missingDelimiterValue = "")
-                    .substringBefore(PEM_FOOTER, missingDelimiterValue = "")
-                    .filterNot(Char::isWhitespace)
+            val body = Pem.body(pem, "PRIVATE KEY").orEmpty()
             check(body.isNotEmpty()) { "moyi.notification.push.fcm.private-key-pem is not a PEM block ($PEM_HEADER … $PEM_FOOTER)." }
             return try {
                 KeyFactory.getInstance("RSA").generatePrivate(PKCS8EncodedKeySpec(Base64.getDecoder().decode(body))) as RSAPrivateKey

@@ -7,6 +7,7 @@ import com.moyi.common.events.ReceivedEvent
 import com.moyi.common.events.StartFrom
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.web.idempotency.IdempotencyKeyStore
+import com.moyi.export.api.DataExportJobs
 import com.moyi.gratitude.api.CloseResult
 import com.moyi.gratitude.api.DailyReminders
 import com.moyi.gratitude.api.DayCloser
@@ -15,6 +16,7 @@ import com.moyi.gratitude.api.EmbeddingSweep
 import com.moyi.gratitude.api.OnThisDayPushes
 import com.moyi.gratitude.api.OnThisDayRun
 import com.moyi.gratitude.api.ReminderRun
+import com.moyi.identity.api.AccountDeletions
 import com.moyi.media.api.LifecycleRun
 import com.moyi.media.api.MediaLifecycle
 import com.moyi.notification.api.HeldPushes
@@ -78,6 +80,54 @@ internal class SchedulingTestApplication {
 
     @Bean
     fun embeddingSweep(): RecordingEmbeddingSweep = RecordingEmbeddingSweep()
+
+    @Bean
+    fun accountDeletions(): RecordingAccountDeletions = RecordingAccountDeletions()
+
+    @Bean
+    fun dataExports(): RecordingDataExports = RecordingDataExports()
+}
+
+internal class RecordingDataExports : DataExportJobs {
+    val prepares = CopyOnWriteArrayList<Int>()
+    val expiries = CopyOnWriteArrayList<Int>()
+
+    @Volatile
+    var nextExpired: Int = 0
+
+    override fun prepareDue(limit: Int): Int {
+        prepares += limit
+        return 0
+    }
+
+    override fun expireDue(limit: Int): Int {
+        expiries += limit
+        return nextExpired
+    }
+
+    fun reset() {
+        prepares.clear()
+        expiries.clear()
+        nextExpired = 0
+    }
+}
+
+/** An [AccountDeletions] that records the limits it was asked for and answers [next]: what a deletion does is identity's to test. */
+internal class RecordingAccountDeletions : AccountDeletions {
+    val limits = CopyOnWriteArrayList<Int>()
+
+    @Volatile
+    var next: Int = 0
+
+    override fun executeDue(limit: Int): Int {
+        limits += limit
+        return next
+    }
+
+    fun reset() {
+        limits.clear()
+        next = 0
+    }
 }
 
 /**

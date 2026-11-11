@@ -1,5 +1,6 @@
 package com.moyi.identity.infra.database
 
+import com.moyi.identity.domain.CodeHash
 import com.moyi.identity.domain.ConsentRecord
 import com.moyi.identity.domain.Credentials
 import com.moyi.identity.domain.Email
@@ -139,6 +140,9 @@ internal fun VerificationTokenEntity.toDomain(): VerificationToken =
         tokenHash = TokenHash(tokenHash),
         expiresAt = expiresAt,
         consumedAt = consumedAt,
+        codeHash = codeHash?.let(::CodeHash),
+        codeExpiresAt = codeExpiresAt,
+        codeAttempts = codeAttempts,
     )
 
 /**
@@ -154,4 +158,7 @@ internal fun VerificationToken.toEntity(): VerificationTokenEntity =
         tokenHash = tokenHash.value,
         expiresAt = expiresAt,
         consumedAt = consumedAt,
+        codeHash = codeHash?.value,
+        codeExpiresAt = codeExpiresAt,
+        codeAttempts = codeAttempts,
     )

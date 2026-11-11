@@ -135,6 +135,8 @@ the row lock". What changed in D2's code to share it:
 **6. FR-044a for a voice note.** `MediaAttachments.claim(owner, id, AttachableKind.VOICE, entryId)`,
 the same conditional update. `POST /entries` claims the voice note after the photo, in the entry's
 transaction; `PATCH` claims it under the entry's lock after BR-7, releasing the one it replaces.
+*(Amended 2026-11-10, issue #164: `removeVoice` takes one off, released the same way; ADR-0048
+decision 7.)*
 One refusal for every cause, `422 VALIDATION_FAILED` on `voiceMediaId`, as `imageMediaId`'s is,
 and a refused voice note rolls back a photo claimed before it. **`MEDIA_NOT_YET_SUPPORTED` leaves
 `ErrorCode`**: nothing throws it any more, and the contract's enum loses it (a breaking change for
@@ -210,6 +212,9 @@ voice note where they hold for both. CI installs `ffmpeg` beside libvips.
   24 kbit/s constrained VBR (`smoke.sh`'s voice section leaves one at a URL). If iOS will not play
   it, Q4 says AAC-LC 48 kbit/s for both; the container may be the cause rather than the codec (CAF
   holds Opus on iOS).
+  **Answered in part by ADR-0060** (issue #152): iOS cannot open Ogg, so a second copy, AAC-LC in
+  MP4 at about 32 kbit/s made of the kept Opus, is served as `urlAac` beside `url`; the Opus stays.
+  The playback test is still owed, now against `urlAac`.
 - **GATE: the media worker (provider `native`) is not deployed before D5's purge (#110, ADR-0050)
   is live in production**, so that no URL handed out before an erasure outlives it (ADR-0048 Owed).
   The FR-061 condition this gate carried is met: the owner ruled on 2026-10-29 that voice notes are
@@ -240,8 +245,9 @@ voice note where they hold for both. CI installs `ffmpeg` beside libvips.
 - **R2, not run:** that a GET of `voice.ogg` is served with `audio/ogg`, as MinIO serves it.
   **Moved to the owner's verification of the switch-on** (ADR-0052, "Switched on"):
   `scripts/r2-switch-on-check.sh` uploads a WAV as a voice note, waits for `READY` and checks the
-  URL's answer is `audio/ogg` and Ogg Opus. Seen against MinIO; owed against R2 until the owner has
-  run it. The iPhone playback test above is not part of it.
+  URL's answer is `audio/ogg` and Ogg Opus. Seen against MinIO; **run against R2 on 2026-11-05**
+  (production, `a8e7652`): `READY` in 2007 ms, served `200` as `audio/ogg`, and Ogg Opus; after the
+  delete, R2 answered its URL `404`. The iPhone playback test above is not part of it.
 - **D5:** erasure purges `voice.ogg` as it purges a photo's variants (`MediaAsset.objectKeys`
   names it; `MediaPurgeTest` holds it, red with `voice.ogg` dropped from the keys); the reaper
   takes an unattached voice note after 24 hours like a photo. **Done**: D5 merged first (#110),

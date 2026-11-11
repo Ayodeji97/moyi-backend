@@ -64,8 +64,10 @@ import javax.sql.DataSource
  *
  * The clock: Africa/Lagos is UTC+1 all year, so the bond's 14th is
  * `[09-13T23:00Z, 09-14T23:00Z)` and its 15th the 24 hours after. [NOW] is
- * 11:00 on the 15th; [YESTERDAY_EVENING] is 21:00 on the 14th, 14 hours
- * before [NOW] — inside the 36h offline window, after the bond was created.
+ * 08:00 on the 15th; [YESTERDAY_EVENING] is 21:00 on the 14th, 11 hours
+ * before [NOW] — inside the 12h window, after the bond was created. The
+ * 14th is closed here by hand, inside its grace, which the close job never
+ * does: these tests are about a close that has already happened.
  */
 @SpringBootTest(classes = [GratitudeTestApplication::class])
 @AutoConfigureMockMvc
@@ -387,10 +389,13 @@ internal class SubmitEntrySettledDayTest(
         Regex(""""id":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1]
 
     private companion object {
-        /** 11:00 on the 15th in Africa/Lagos — nowhere near a day boundary. */
-        val NOW: Instant = Instant.parse("2026-09-15T10:00:00Z")
+        /**
+         * 08:00 on the 15th in Africa/Lagos — nowhere near a day boundary, and inside the 14th's
+         * twelve-hour late-entry grace, so a claim on the 14th is trusted (BR-3a).
+         */
+        val NOW: Instant = Instant.parse("2026-09-15T07:00:00Z")
 
-        /** 21:00 on the 14th in Africa/Lagos; 14 hours before [NOW]. */
+        /** 21:00 on the 14th in Africa/Lagos; 11 hours before [NOW]. */
         val YESTERDAY_EVENING: Instant = Instant.parse("2026-09-14T20:00:00Z")
 
         /** 13:00 on the 14th in Africa/Lagos. */

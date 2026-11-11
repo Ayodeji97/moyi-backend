@@ -122,23 +122,29 @@ internal class MediaPurgeTest(
         undelivered().shouldBeEmpty()
     }
 
-    /** D3 with D5: a voice note's Opus is one of its derived keys, so an erasure takes it as it takes a photo's variants. */
+    /**
+     * D3 with D5: a voice note's Opus is one of its derived keys, so an erasure takes it as it takes a photo's variants;
+     * and so is its AAC variant (ADR-0060).
+     */
     @Test
-    fun `an erased entry's voice note is gone from the storage once media purge runs, its upload and its Opus`() {
+    fun `an erased entry's voice note is gone from the storage once media purge runs, its upload, its Opus and its AAC`() {
         val voice = client.upload(ada, TestVoices.wav(2.0), declaredType = "audio/wav", kind = "VOICE")
         deliver()
         rows.statusOf(UUID.fromString(voice)) shouldBe "READY"
         val upload = storageKeyOf(voice)
         val opus = "v/${upload.removePrefix("in/")}/voice.ogg"
+        val aac = "v/${upload.removePrefix("in/")}/voice.m4a"
         val url = urlOf(voice)
         fetch(url) shouldBe 200
         stored(opus) shouldBe true
+        stored(aac) shouldBe true
         transactions.execute { attachments.claim(ada, UUID.fromString(voice), AttachableKind.VOICE, entry) } shouldBe true
 
         transactions.execute { erasure.releaseAllOf(entry) } shouldBe 1
         deliver()
 
         stored(opus) shouldBe false
+        stored(aac) shouldBe false
         stored(upload) shouldBe false
         fetch(url) shouldBe 404
         rows.row(UUID.fromString(voice))["purged_at"].shouldNotBeNull()
@@ -243,6 +249,24 @@ internal class MediaPurgeTest(
         val view = json.readTree(client.get(ada, photo).contentAsString)
         view["status"].asString() shouldBe "READY"
         view["url"].asString() shouldContain "/display.webp"
+    }
+
+    /** ADR-0060: the reaper's deletion of a voice note on no entry takes its AAC variant with its Opus. */
+    @Test
+    fun `a voice note on no entry that the reaper deletes loses its Opus and its AAC from the storage`() {
+        val voice = client.upload(ada, TestVoices.wav(2.0), declaredType = "audio/wav", kind = "VOICE")
+        deliver()
+        rows.statusOf(UUID.fromString(voice)) shouldBe "READY"
+        val random = storageKeyOf(voice).removePrefix("in/")
+        val kept = listOf("v/$random/voice.ogg", "v/$random/voice.m4a")
+        kept.forEach { stored(it) shouldBe true }
+
+        clock.advance(Duration.ofHours(25))
+        lifecycle.reap(clock.instant(), LIMIT).changed shouldBe 1
+        deliver()
+
+        kept.forEach { stored(it) shouldBe false }
+        rows.row(UUID.fromString(voice))["purged_at"].shouldNotBeNull()
     }
 
     @Test

@@ -18,7 +18,10 @@ data class RateLimitProperties(
      * `false` replaces the limiter with one that allows everything, and says
      * so at WARN on every start. It exists for a test context whose subject
      * is something else, and as an operator's lever if the limiter itself
-     * misbehaves; it is not a deployment option.
+     * misbehaves; it is not a deployment option. Switched off, it answers
+     * `Disabled`, not `Unavailable`, so even the bucket that fails closed
+     * (`auth:code:email`) lets typed codes through without a daily limit:
+     * pulling this lever removes the ten-a-day bound on guessing a code.
      */
     val enabled: Boolean = true,
     /**

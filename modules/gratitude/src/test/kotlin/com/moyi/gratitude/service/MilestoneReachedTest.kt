@@ -252,7 +252,7 @@ internal class MilestoneReachedTest(
             jdbc.execute(
                 "CREATE TRIGGER milestone_test_refuse BEFORE UPDATE ON streak_states FOR EACH ROW EXECUTE FUNCTION milestone_test_refuse()",
             )
-            closer.closeElapsedDays(Instant.parse("${day(7)}T23:01:00Z"), BUDGET).failed shouldBe 1
+            closer.closeElapsedDays(Instant.parse("${day(8)}T11:01:00Z"), BUDGET).failed shouldBe 1
 
             jdbc.queryForObject(
                 "SELECT count(*) FROM bond_days WHERE bond_id = ?::uuid AND evaluated_at IS NOT NULL",
@@ -284,7 +284,7 @@ internal class MilestoneReachedTest(
     @Test
     fun `a run that waited on the bond's lock counts from the days committed while it waited`() {
         (1..7).forEach { bothWriteOn(it) }
-        (1..7).forEach { closeDay.settle(BondDayId(dayId(it)), Instant.parse("${day(7)}T23:01:00Z")) shouldBe CloseDay.Outcome.CLOSED }
+        (1..7).forEach { closeDay.settle(BondDayId(dayId(it)), Instant.parse("${day(8)}T11:01:00Z")) shouldBe CloseDay.Outcome.CLOSED }
 
         val evaluated =
             Executors.newSingleThreadExecutor().use { pool ->
@@ -371,7 +371,7 @@ internal class MilestoneReachedTest(
 
     /** Runs the job once, a minute after day *n* ends. */
     private fun closeThrough(n: Int) {
-        closer.closeElapsedDays(Instant.parse("${day(n)}T23:01:00Z"), BUDGET).failed shouldBe 0
+        closer.closeElapsedDays(Instant.parse("${day(n + 1)}T11:01:00Z"), BUDGET).failed shouldBe 0
     }
 
     private fun bothWriteOn(n: Int) {

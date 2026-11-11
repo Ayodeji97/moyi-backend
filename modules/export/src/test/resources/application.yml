@@ -1,0 +1,25 @@
+spring:
+  datasource:
+    hikari:
+      # A test context needs two or three connections, not the default ten (bond's test application.yml has why).
+      maximum-pool-size: 4
+  data:
+    redis:
+      repositories:
+        enabled: false
+
+moyi:
+  notification:
+    # identity is on this module's runtime classpath, and with it notification's configuration; nothing here sends.
+    email:
+      provider: log
+    push:
+      provider: log
+  security:
+    jwt:
+      key-source: ephemeral
+    hashing:
+      secret-source: ephemeral
+    rate-limit:
+      # Off for the shared context; DataExportRateLimitTest turns it on in a context of its own.
+      enabled: false

@@ -60,6 +60,27 @@ internal value class StorageKey(
             check(upload.value.startsWith(UPLOAD_PREFIX)) { "a voice note is made from an upload's key" }
             return StorageKey("v/${upload.value.removePrefix(UPLOAD_PREFIX)}/voice.ogg")
         }
+
+        /**
+         * Where the AAC variant of that Opus is kept (ADR-0060): `v/{uuid}/voice.m4a`, beside
+         * it and derived the same way, so every deletion that finds the Opus finds this too.
+         */
+        fun forVoiceAac(upload: StorageKey): StorageKey {
+            check(upload.value.startsWith(UPLOAD_PREFIX)) { "a voice note is made from an upload's key" }
+            return StorageKey("v/${upload.value.removePrefix(UPLOAD_PREFIX)}/voice.m4a")
+        }
+
+        private const val ARCHIVE_PREFIX = "x/"
+        private val ARCHIVE = Regex("""^x/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.zip$""")
+
+        /** A data export's archive (ADR-0059): `x/{random}.zip`, never the export's id. */
+        fun forArchive(random: UUID): StorageKey = StorageKey("$ARCHIVE_PREFIX$random.zip")
+
+        /** [value] as an archive's key, or an [IllegalArgumentException]: the export may name its own objects and no other. */
+        fun ofArchive(value: String): StorageKey {
+            require(ARCHIVE.matches(value)) { "not an archive's key" }
+            return StorageKey(value)
+        }
     }
 }
 
@@ -106,6 +127,18 @@ internal class MediaAsset(
     val processingAttempts: Int = 0,
     /** A ready voice note's length in milliseconds (D3); on the asset only, never on the entry (spec D-10). */
     val durationMs: Int? = null,
+    /**
+     * A ready voice note's loudness over time (issue #165, ADR-0061); null
+     * for one processed before it was measured, or whose measuring failed.
+     * Played by the rule its URL is: [heardBy] hands it out with the key.
+     */
+    val waveform: Waveform? = null,
+    /**
+     * Where a ready voice note's AAC variant is ([StorageKey.forVoiceAac], ADR-0060), recorded
+     * once it was made; null for a note made before the variant existed or whose variant could
+     * not be made. What is *played*; what is *deleted* is [objectKeys], recorded or not.
+     */
+    val aacKey: StorageKey? = null,
     /** 1 while a photo keeps its full-resolution variant, 2 once only the display variant is kept (D-16, D5). */
     val tier: Int = 1,
     /** Moderation found adult nudity (Q16): passed, and blurred until tapped. Kept whatever the verdict. */
@@ -176,9 +209,10 @@ internal class MediaAsset(
 
     /**
      * Every key the storage may hold for this asset: its upload and, for a
-     * photo, each variant's key, for a voice note its Opus, **whether or not
-     * the row records it**. The keys are derived from the upload's
-     * ([StorageKey.forVariant], [StorageKey.forVoice]), so an attempt that
+     * photo, each variant's key, for a voice note its Opus and its AAC variant
+     * (ADR-0060), **whether or not the row records it**. The keys are derived
+     * from the upload's ([StorageKey.forVariant], [StorageKey.forVoice],
+     * [StorageKey.forVoiceAac]), so an attempt that
      * wrote an object and then failed, before anything was recorded, leaves
      * nothing a deletion cannot find (review of #108).
      */
@@ -187,7 +221,7 @@ internal class MediaAsset(
             listOf(storageKey) +
                 when (kind) {
                     MediaKind.IMAGE -> ImageVariant.entries.map { StorageKey.forVariant(storageKey, it) }
-                    MediaKind.VOICE -> listOf(StorageKey.forVoice(storageKey))
+                    MediaKind.VOICE -> listOf(StorageKey.forVoice(storageKey), StorageKey.forVoiceAac(storageKey))
                 }
 
     /**
@@ -250,15 +284,27 @@ internal class MediaAsset(
      * is told a held-back one is "not shared" (with the note, unless it is
      * [ModerationVerdict.BLOCKED]); **anyone else** hears it only once it is
      * ready and [partnersMaySeeIt], and until then it is still processing to
-     * them, with no URL and no length (ADR-0049 decision 7).
+     * them, with no URL and no length (ADR-0049 decision 7). Its AAC variant
+     * ([aacKey], ADR-0060) goes with the Opus, to exactly the same people.
      */
     fun heardBy(owner: Boolean): Heard {
         val key = StorageKey.forVoice(storageKey)
         return when {
-            kind != MediaKind.VOICE || durationMs == null -> Heard.Processing
-            status == MediaStatus.READY && (owner || partnersMaySeeIt) -> Heard.Ready(key, durationMs, sensitive = passedSensitive)
-            status == MediaStatus.QUARANTINED && owner -> if (isBlocked) Heard.NotShared(null, null) else Heard.NotShared(key, durationMs)
-            else -> Heard.Processing
+            kind != MediaKind.VOICE || durationMs == null -> {
+                Heard.Processing
+            }
+
+            status == MediaStatus.READY && (owner || partnersMaySeeIt) -> {
+                Heard.Ready(key, durationMs, waveform, passedSensitive, aacKey = aacKey)
+            }
+
+            status == MediaStatus.QUARANTINED && owner -> {
+                if (isBlocked) Heard.NotShared(null, null, null) else Heard.NotShared(key, durationMs, waveform, aacKey)
+            }
+
+            else -> {
+                Heard.Processing
+            }
         }
     }
 
@@ -307,13 +353,19 @@ internal class MediaAsset(
         data class Ready(
             val key: StorageKey,
             val durationMs: Int,
+            val waveform: Waveform? = null,
             val sensitive: Boolean = false,
+            /** Its AAC variant (ADR-0060), when one was made. */
+            val aacKey: StorageKey? = null,
         ) : Heard
 
-        /** To its owner only: held back from the partner (Q10). Without the note itself when it is blocked. */
+        /** To its owner only: held back from the partner (Q10). Without the note itself, or its waveform, when it is blocked. */
         data class NotShared(
             val key: StorageKey?,
             val durationMs: Int?,
+            val waveform: Waveform? = null,
+            /** Its AAC variant (ADR-0060), when one was made; never when blocked. */
+            val aacKey: StorageKey? = null,
         ) : Heard
     }
 

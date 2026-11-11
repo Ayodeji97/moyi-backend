@@ -23,6 +23,7 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldStartWith
+import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -57,6 +58,7 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.util.UUID
@@ -85,7 +87,8 @@ import kotlin.math.sqrt
  *
  * **What is scanned for:** the text of three entries (as submitted, as
  * edited, and the partner's), a password, two access tokens and two refresh
- * tokens, across register, sign-in, pairing, submit, read, edit, the reveal,
+ * tokens, and a support message's subject, body and reference (ADR-0057), across register, sign-in,
+ * pairing, submit, read, edit, the reveal,
  * the archive (the feed with and without `favourites`, one day, a bookmark
  * set and removed, a conditional read that answers `304`), a search, by a
  * word that is watched (and the same word beside bytes that are not UTF-8, a `400`), on this day with a memory, the
@@ -330,12 +333,27 @@ abstract class SecretsNeverLoggedTest(
         get("/bonds/$bond/days", ada).body.contains(BEA_TEXT) shouldBe false
         get("/bonds/$bond/days?favourites=true", ada).status shouldBe 200
         jdbc.queryForObject("SELECT text IS NOT NULL FROM entries WHERE id = ?::uuid", Boolean::class.java, beaEntry) shouldBe true
-        dispatcher.dispatchDue(Instant.now(), DISPATCH_BUDGET).delivered shouldBe 1
+        // Two consumers of the withdrawal: gratitude's erasure and the export's expiry (ADR-0059 decision 12).
+        dispatcher.dispatchDue(Instant.now(), DISPATCH_BUDGET).delivered shouldBe 2
         jdbc.queryForObject("SELECT text IS NULL FROM entries WHERE id = ?::uuid", Boolean::class.java, beaEntry) shouldBe true
         get("/bonds/$bond/today", bea).status shouldBe 200
 
         failingConsumerDoesNotLogItsException()
         pushTokenIsNeverLogged(ada, bond)
+
+        // A support message (FR-102, ADR-0057): its words, keyed and not, and the acknowledgement
+        // email the local sender prints in full, which must say it arrived without repeating it.
+        scan.watch("support subject", SUPPORT_SUBJECT)
+        scan.watch("support body", SUPPORT_BODY)
+        scan.watch("support reference", SUPPORT_REFERENCE)
+        val support = """{"subject":"$SUPPORT_SUBJECT","body":"$SUPPORT_BODY","reference":"$SUPPORT_REFERENCE"}"""
+        val ticket = post("/support/messages", ada, support, idempotent = true)
+        ticket.status shouldBe 201
+        post("/support/messages", ada, """{"subject":"$SUPPORT_SUBJECT","body":""}""").status shouldBe 422
+        post("/support/messages", ada, """{"subject":"$SUPPORT_SUBJECT","body":"$SUPPORT_BODY","reference":"$SUPPORT_REFERENCE "}""")
+            .status shouldBe 422
+        val acknowledged = "Support ticket ${ticket.json["id"].asString()} acknowledgement: ACCEPTED"
+        await().atMost(Duration.ofSeconds(SUPPORT_ACK_SECONDS)).until { acknowledged in output.all }
 
         // A refresh sends the refresh token back; the pair it returns is watched too.
         val refreshed = send("POST", "/auth/refresh", null, """{"refreshToken":"${ada.refresh}"}""")
@@ -432,6 +450,7 @@ abstract class SecretsNeverLoggedTest(
                     "secrets-probe:$user",
                     Instant.now().plusSeconds(PUSH_STALE_SECONDS),
                     PushRecipient(ZoneId.of("UTC"), null, NotificationPreferences.DEFAULTS),
+                    null,
                 ),
             ) shouldBe true
         }
@@ -765,6 +784,10 @@ abstract class SecretsNeverLoggedTest(
         const val BEA_TEXT = "Bea~wrote~hers after"
         const val PASSWORD = "seven~green~kettles~at~dawn"
         const val SEARCH_TERMS = "zqkettlesearch"
+        const val SUPPORT_SUBJECT = "Support~subject~zqlocked"
+        const val SUPPORT_BODY = "Support~body~we cannot see today"
+        const val SUPPORT_REFERENCE = "Support~reference~zq4bf92f3577"
+        const val SUPPORT_ACK_SECONDS = 10L
         const val UNDECODABLE_TERMS = "zqundecodablesearch"
         const val DISPATCHER_SERVLET = "org.springframework.web.servlet.DispatcherServlet"
         const val FILTER_CHAIN_PROXY = "org.springframework.security.web.FilterChainProxy"

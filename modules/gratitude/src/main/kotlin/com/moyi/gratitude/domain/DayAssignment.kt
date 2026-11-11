@@ -1,6 +1,5 @@
 package com.moyi.gratitude.domain
 
-import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 
@@ -43,9 +42,13 @@ import java.time.LocalDate
  *   westward anchor change confirmed in those minutes then moved tomorrow's
  *   start, and the stored row disagreed with the timeline for good
  *   ([BondDay.extendedTo] refuses such a row, a `500` on every later write).
- * - **Older than [OFFLINE_WINDOW] (thirty-six hours)** is treated as too
- *   stale to back-file — chosen to comfortably cover a day spent offline
- *   without opening a window wide enough to rewrite last month's streak.
+ * - **Older than the [LateEntryGrace]** (twelve hours by default; the
+ *   owner's ruling of 2026-11-08 cut it from thirty-six) is treated as too
+ *   stale to back-file. It is the same length the close job waits after a
+ *   day ends before settling it, and must be: see [LateEntryGrace]. A claim
+ *   inside it therefore names a day that has not been settled — unless a
+ *   reveal settled it first (a `REVEALED` day is settled), which the next
+ *   limit catches.
  * - **Landing on a day [isSettled] reports true for** falls back rather than
  *   writing into a day that cannot be revisited. BR-10 makes a closed day's
  *   status authoritative, and BR-1 lets a partner read an entry only once
@@ -96,9 +99,6 @@ import java.time.LocalDate
  * of BR-3a, and the two would drift.
  */
 internal object DayAssignment {
-    private const val OFFLINE_WINDOW_HOURS = 36L
-    private val OFFLINE_WINDOW: Duration = Duration.ofHours(OFFLINE_WINDOW_HOURS)
-
     /**
      * What became of the client's `intendedAt`: it was the instant used, there
      * was none, or which of BR-3a's four limits refused it — in the order
@@ -114,7 +114,7 @@ internal object DayAssignment {
         /** Ahead of the submission instant, by any amount (ruling P11). The entry is on today — where a live write would be. */
         AHEAD_OF_CLOCK,
 
-        /** Older than the thirty-six hour offline window. */
+        /** Older than the [LateEntryGrace] before the submission. */
         TOO_OLD,
 
         /** From before the bond's calendar begins. */
@@ -151,15 +151,16 @@ internal object DayAssignment {
         submittedAt: Instant,
         intendedAt: Instant?,
         calendar: BondCalendar,
+        grace: LateEntryGrace,
         isSettled: (LocalDate) -> Boolean,
     ): Resolution {
-        val claimedDay = intendedAt?.takeIf { withinTheWindow(it, submittedAt) }?.let(calendar::dayAt)
+        val claimedDay = intendedAt?.takeIf { withinTheWindow(it, submittedAt, grace) }?.let(calendar::dayAt)
         // In BR-3a's own order. P11: a claim ahead of the server's clock is never the candidate.
         val claim =
             when {
                 intendedAt == null -> Claim.ABSENT
                 intendedAt.isAfter(submittedAt) -> Claim.AHEAD_OF_CLOCK
-                !withinTheWindow(intendedAt, submittedAt) -> Claim.TOO_OLD
+                !withinTheWindow(intendedAt, submittedAt, grace) -> Claim.TOO_OLD
                 claimedDay == null -> Claim.BEFORE_THE_BOND
                 isSettled(claimedDay.date) -> Claim.DAY_SETTLED
                 else -> Claim.USED
@@ -173,16 +174,18 @@ internal object DayAssignment {
         }
     }
 
-    /** Not ahead of [submittedAt], and no more than [OFFLINE_WINDOW] behind it: the only claims the calendar is asked about. */
+    /** Not ahead of [submittedAt], and no more than [grace] behind it: the only claims the calendar is asked about. */
     private fun withinTheWindow(
         intendedAt: Instant,
         submittedAt: Instant,
-    ): Boolean = !intendedAt.isAfter(submittedAt) && !intendedAt.isBefore(submittedAt.minus(OFFLINE_WINDOW))
+        grace: LateEntryGrace,
+    ): Boolean = !intendedAt.isAfter(submittedAt) && !intendedAt.isBefore(grace.oldestClaimAt(submittedAt))
 
     fun dateFor(
         submittedAt: Instant,
         intendedAt: Instant?,
         calendar: BondCalendar,
+        grace: LateEntryGrace,
         isSettled: (LocalDate) -> Boolean,
-    ): LocalDate = resolve(submittedAt, intendedAt, calendar, isSettled).date
+    ): LocalDate = resolve(submittedAt, intendedAt, calendar, grace, isSettled).date
 }

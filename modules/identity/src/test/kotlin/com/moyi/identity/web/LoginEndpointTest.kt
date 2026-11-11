@@ -1,6 +1,7 @@
 package com.moyi.identity.web
 
 import com.moyi.common.testing.IntegrationTest
+import com.moyi.common.testing.MutableClock
 import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.security.Argon2Properties
 import com.moyi.identity.infra.security.Argon2idPasswordHasher
@@ -33,6 +34,8 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import java.time.Duration
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import javax.sql.DataSource
@@ -46,9 +49,10 @@ import javax.sql.DataSource
  */
 @SpringBootTest(classes = [IdentityTestApplication::class])
 @AutoConfigureMockMvc
-@Import(LoginEndpointTest.RecordingConfiguration::class)
+@Import(LoginEndpointTest.RecordingConfiguration::class, SessionsEndpointTest.TimeConfiguration::class)
 internal class LoginEndpointTest(
     @Autowired private val mockMvc: MockMvc,
+    @Autowired private val clock: MutableClock,
     @Autowired private val hasher: RecordingPasswordHasher,
     @Autowired private val emails: RecordingEmailSender,
     @Autowired dataSource: DataSource,
@@ -61,6 +65,7 @@ internal class LoginEndpointTest(
         hasher.matchesCalls.set(0)
         hasher.dummyCalls.set(0)
         emails.sent.clear()
+        clock.set(Instant.now().truncatedTo(ChronoUnit.MICROS))
     }
 
     // ---- login -------------------------------------------------------------
@@ -241,6 +246,8 @@ internal class LoginEndpointTest(
         val second = refreshToken(rotated.contentAsString)
         second shouldNotBe first
 
+        // Past the grace window, which RefreshGraceWindowTest covers (ADR-0021, amended 2026-11-08).
+        clock.advance(Duration.ofMinutes(1))
         val reuse = refresh(first)
         reuse.status shouldBe 401
         reuse.contentAsString shouldContain "\"code\":\"TOKEN_REUSE_DETECTED\""
@@ -260,6 +267,7 @@ internal class LoginEndpointTest(
         registerAndActivate()
         val first = refreshToken(login().contentAsString)
         refresh(first).status shouldBe 200
+        clock.advance(Duration.ofMinutes(1)) // past the grace window
 
         refresh(first).status shouldBe 401
         await().atMost(WAIT).untilAsserted { emails.sent shouldHaveSize 2 }
@@ -292,32 +300,6 @@ internal class LoginEndpointTest(
         }
         // Expiry is not a reuse: nothing was revoked and nobody was emailed.
         jdbc.queryForObject("SELECT count(*) FROM refresh_tokens WHERE revoked_at IS NOT NULL", Int::class.java) shouldBe 0
-    }
-
-    @Test
-    fun `two concurrent refreshes of one token let one through and treat the other as a reuse`() {
-        // Strict, per doc 09 §3 — which is why doc 13 gives the client a mutex.
-        registerAndActivate()
-        val first = refreshToken(login().contentAsString)
-        val ready = CountDownLatch(1)
-        val executor = Executors.newFixedThreadPool(2)
-        val responses =
-            try {
-                List(2) {
-                    executor.submit<MockHttpServletResponse> {
-                        ready.await()
-                        refresh(first)
-                    }
-                }.also { ready.countDown() }.map { it.get() }
-            } finally {
-                executor.shutdown()
-            }
-
-        responses.count { it.status == 200 } shouldBe 1
-        responses.single { it.status == 401 }.contentAsString shouldContain "\"code\":\"TOKEN_REUSE_DETECTED\""
-        // And the winner's new token is dead too: the family went with it.
-        val winner = refreshToken(responses.single { it.status == 200 }.contentAsString)
-        refresh(winner).status shouldBe 401
     }
 
     // ---- logout ------------------------------------------------------------
@@ -415,6 +397,9 @@ internal class LoginEndpointTest(
         forgot("ada@example.com").status shouldBe 202
         reset(secretIn(awaitEmail(2)), NEW_PASSWORD).status shouldBe 200
         awaitEmail(3)
+        // The key is user and change time; this class's clock stands still unless moved (it is a MutableClock
+        // since the grace-window tests needed one), and two real changes are never at one instant.
+        clock.advance(Duration.ofSeconds(1))
         forgot("ada@example.com").status shouldBe 202
         reset(secretIn(awaitEmail(4)), "yet another good password").status shouldBe 200
         awaitEmail(5)

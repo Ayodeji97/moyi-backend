@@ -645,7 +645,7 @@ internal class EntryChangesTest(
         /** Two days before [NOW] — see [setUp]. */
         val BOND_CREATED: Instant = Instant.parse("2026-09-13T10:00:00Z")
 
-        /** The 15th has ended in Lagos (23:00Z) by more than the closer's margin. */
-        val DAY_AFTER: Instant = Instant.parse("2026-09-16T10:00:00Z")
+        /** The 15th has ended in Lagos (23:00Z) by more than its twelve-hour grace and the closer's margin. */
+        val DAY_AFTER: Instant = Instant.parse("2026-09-16T12:00:00Z")
     }
 }

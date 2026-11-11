@@ -44,6 +44,10 @@ internal class VerificationTokenEntity(
     @Column(nullable = false, updatable = false)
     var expiresAt: Instant,
     var consumedAt: Instant?,
+    /** HMAC of the code (V51); null once a newer email retired it. Changed only by bulk `UPDATE`s on the repository. */
+    var codeHash: String?,
+    var codeExpiresAt: Instant?,
+    var codeAttempts: Int,
 ) : Persistable<UUID> {
     @Transient
     private var new: Boolean = true
@@ -64,5 +68,6 @@ internal class VerificationTokenEntity(
 
     /** No hash in here either: a digest is not the secret, but it is the lookup key, and a log is not where keys go. */
     override fun toString(): String =
-        "VerificationTokenEntity(id=$id, purpose=$purpose, expiresAt=$expiresAt, consumed=${consumedAt != null})"
+        "VerificationTokenEntity(id=$id, purpose=$purpose, expiresAt=$expiresAt, consumed=${consumedAt != null}, " +
+            "holdsCode=${codeHash != null}, codeAttempts=$codeAttempts)"
 }

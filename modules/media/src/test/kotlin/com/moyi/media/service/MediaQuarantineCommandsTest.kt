@@ -162,6 +162,21 @@ internal class MediaQuarantineCommandsTest(
         audit(blocked) shouldContainExactly listOf("DELETED|op-fake-ada|reported: ref FAKE-0001")
     }
 
+    /** ADR-0060: the operator's delete of a voice note takes its AAC variant too, as every deletion does, through media.purge. */
+    @Test
+    fun `delete takes a held voice note's upload, Opus and AAC out of the storage`() {
+        val upload = "in/${UUID.randomUUID()}"
+        val blocked = held("BLOCKED", "KNOWN_AUDIO", upload, kind = "VOICE")
+        val keys = listOf(upload) + listOf("voice.ogg", "voice.m4a").map { "v/${upload.removePrefix("in/")}/$it" }
+        keys.forEach { putBehindTheApi(it, byteArrayOf(1, 2, 3)) }
+
+        moyi("delete", blocked.toString(), "reported: ref FAKE-0002").code shouldBe 0
+        dispatcher.dispatchDue(Instant.now().plus(Duration.ofSeconds(5)), BUDGET)
+
+        keys.forEach { stored(it) shouldBe false }
+        jdbc.queryForObject("SELECT purged_at IS NOT NULL FROM media_assets WHERE id = ?", Boolean::class.java, blocked) shouldBe true
+    }
+
     @Test
     fun `a command refuses an id that is held back by nothing, and one that is not an id at all`() {
         val passed = rows.insert(owner = ada, createdAt = clock.instant())
@@ -275,14 +290,20 @@ internal class MediaQuarantineCommandsTest(
         purgedAt(reported) shouldBe false
     }
 
-    /** FR-044a: only a READY asset is claimed, so what was held back before it was attached is refused with the one refusal. */
+    /**
+     * #149: what was held back before it was attached is attached, as it would have been had moderation been a
+     * moment slower, and stays held back: its verdict, its status and a blocked one's evidence hold are untouched.
+     */
     @Test
-    fun `a held-back asset is not attached to an entry`() {
+    fun `a held-back asset is attached to an entry and stays held back`() {
         val violent = held("QUARANTINED", "EXTREME_VIOLENCE")
         val blocked = held("BLOCKED", "KNOWN_IMAGE")
         for (id in listOf(violent, blocked)) {
-            transactions.execute { attachments.claim(ada, id, AttachableKind.IMAGE, UUID.randomUUID()) } shouldBe false
+            transactions.execute { attachments.claim(ada, id, AttachableKind.IMAGE, UUID.randomUUID()) } shouldBe true
         }
+        status(violent) shouldBe "QUARANTINED|QUARANTINED"
+        status(blocked) shouldBe "QUARANTINED|BLOCKED"
+        evidenceHeld(blocked) shouldBe true
     }
 
     // The four ways a person at psql could undo a hold (review of #113), each refused by the database itself.
@@ -458,8 +479,9 @@ internal class MediaQuarantineCommandsTest(
         reason: String,
         upload: String = "in/${UUID.randomUUID()}",
         attachedTo: UUID? = null,
+        kind: String = "IMAGE",
     ): UUID {
-        val id = rows.insert(owner = ada, createdAt = clock.instant(), upload = upload, attachedTo = attachedTo)
+        val id = rows.insert(owner = ada, kind = kind, createdAt = clock.instant(), upload = upload, attachedTo = attachedTo)
         jdbc.update(
             "UPDATE media_assets SET status = 'QUARANTINED', moderation_verdict = ?, moderated_at = ?, " +
                 "moderation_scores = jsonb_build_object('reason', ?::text), evidence_held = (? = 'BLOCKED') WHERE id = ?",

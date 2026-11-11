@@ -3,15 +3,18 @@ package com.moyi.bond.service
 import com.moyi.bond.domain.Block
 import com.moyi.bond.domain.Bond
 import com.moyi.bond.domain.Membership
+import com.moyi.bond.domain.UserId
 import com.moyi.bond.infra.database.BlockStore
 import com.moyi.bond.infra.database.BondStore
 import com.moyi.bond.infra.database.EntryWithdrawals
 import com.moyi.bond.infra.database.InviteStore
+import com.moyi.bond.infra.database.MembershipRows
 import com.moyi.bond.infra.database.ProposalStore
 import com.moyi.common.events.EventPublisher
 import com.moyi.common.events.OutboxEvent
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 import java.time.Instant
@@ -56,6 +59,7 @@ internal class EndBond(
     private val invites: InviteStore,
     private val proposals: ProposalStore,
     private val withdrawals: EntryWithdrawals,
+    private val memberships: MembershipRows,
     private val events: EventPublisher,
     private val clock: Clock,
 ) {
@@ -124,6 +128,45 @@ internal class EndBond(
         // ended: that bond is exactly where a member who left earlier, or
         // whose partner left first, comes to take their entries back.
         if (withdrawEntries) withdraw(membership, now)
+    }
+
+    /**
+     * Account deletion's share of `bond` (FR-008, ADR-0058 decision 7): every bond [userId] is
+     * still in is ended as their leaving would end it, and nothing else. A leave, not a block:
+     * the partner keeps the archive, is not kept from a new account of the same person, and is
+     * told nothing that a leave would not tell them (doc 26 §2.1). No withdrawal is recorded:
+     * `gratitude` tombstones the person's entries from the same event (BR-10), and a withdrawal
+     * would say something else (BR-10a, `author_deleted_account` stays false there).
+     *
+     * A bond in its cooling-off (`PENDING_DELETION`) keeps that status, as a leave does: both
+     * agreed to destroy it, and one of them going is no reason to undo that ([Bond.end]). A bond
+     * that never had a second member is archived with its live invite revoked.
+     *
+     * The name the person gave each partner (`nickname_for_other`) is emptied first, in every bond
+     * they were ever in: free text they typed does not outlive their account.
+     *
+     * Bonds are locked in id order, so two deletions sharing a bond cannot deadlock each other.
+     * **Idempotent**: a bond the person has already left is not touched, so a redelivery ends
+     * nothing twice. Runs in the caller's transaction, the outbox delivery's.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun endEveryBondOf(userId: UserId): Int {
+        memberships.forgetNicknamesOf(userId)
+        val now = clock.instant()
+        return memberships
+            .of(userId)
+            .filter { it.held }
+            .map { it.bondId }
+            .distinct()
+            .sortedBy { it.value }
+            .count { id ->
+                bonds.lockBond(id, refreshReads = true)
+                val bond = bonds.findByMember(id, userId)
+                val member = bond?.members?.firstOrNull { it.userId == userId && it.isActive }
+                if (bond == null || member == null) return@count false
+                end(bond.end(member.id, now), bond)
+                true
+            }
     }
 
     private fun lockAndLoad(membership: Membership): Bond {
