@@ -5,7 +5,8 @@ file is what the owner does. The console is **off in production** until step 4 i
 
 What exists in A1: sign-in with a password and an authenticator code, three roles, an
 append-only audit log, and one screen (look a user up by id or exact email, metadata only).
-It lives under `/admin` on the API's own host. There is no `admin.getmoyi.app` yet (see
+It lives under `/admin`. The owner ruled (2026-11-11, ADR-0055) that it is reached at
+`admin.getmoyi.app`, DNS only, allowlisted to his own address; that host is not routed yet (see
 "Routing a host of its own").
 
 ## 0. Facts to hold on to
@@ -50,6 +51,12 @@ list empty.
 allowlist is the first.
 
 ## 3. Switch it on
+
+**Not before the trusted proxies are narrowed** (the owner's ruling 5, ADR-0055).
+`MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXIES` is kamal-proxy's whole Docker network,
+`172.18.0.0/16`, so any container on it could claim an allowlisted address through
+`X-Forwarded-For`. A separate pull request narrows it to kamal-proxy alone; switch on only after
+it has merged and deployed.
 
 In `config/deploy.yml`, under `servers.web` only (never the top-level `env`, never the
 `media-worker` role):
@@ -132,11 +139,12 @@ docker exec -i moyi-postgres psql -U moyi -d moyi -c \
 
 ## Routing a host of its own
 
-Doc 10 names `admin.getmoyi.app`. A1 does not need it. If you want it: add the host to
-kamal-proxy for the web role and a DNS-only record for it (not proxied, see "Facts"). The
-allowlist applies to the path, so it works the same on either host.
+Doc 10 names `admin.getmoyi.app`, and the owner ruled (2026-11-11) that the console is reached
+there. To route it: add the host to kamal-proxy for the web role and a DNS-only record for it
+(not proxied, see "Facts"). The allowlist applies to the path, so it works the same on either
+host; the checks in step 3 then use `https://admin.getmoyi.app/admin/login`.
 
 ## What this does not do
 
 No entry content, no moderation queue, no suspension, no job re-runs, no passkeys (ADR-0055,
-questions for the owner). Those are A2 to A5.
+the owner's ruling 1: TOTP only until a second operator joins). Those are A2 to A5.

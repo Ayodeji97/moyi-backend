@@ -3,7 +3,8 @@
 **Status:** Accepted, provisional where marked · **Date:** 2026-11-06 · **Deciders:** made without
 the owner; his to revisit. Daniel asked for the backend work to continue autonomously, so every
 decision the corpus had not already made is the builder's, and the questions only he can answer are
-at the end. It builds on doc 05 §7, doc 09 §4–§5, doc 07 and ADR-0051 (operator functions).
+at the end. **Amended 2026-11-11:** the owner ruled on each of them (see "The owner's rulings").
+It builds on doc 05 §7, doc 09 §4–§5, doc 07 and ADR-0051 (operator functions).
 
 ## Context
 
@@ -144,32 +145,44 @@ ports of identity and bond.
 - **A second password hasher.** Two copies of the memory bound and the cost.
 - **Fuzzy lookup.** An enumeration tool.
 
-## Open questions (the owner's)
+## The owner's rulings (2026-11-11)
 
-1. **TOTP only for v1?** Built: a 15-character minimum, the breached check, TOTP, recovery by
-   re-invitation from the server. The answer changes A1 only if it is "passkeys instead of TOTP".
-2. **Exact-match lookup only?** If support needs "find by name", that is a later, separately audited
-   feature.
-3. **Is the console ever opened beyond your own address?** Built: an allowlist that admits only what
-   you configure, no VPN, no Cloudflare Access. Behind Cloudflare Access the trusted-proxy CIDRs must
-   include Cloudflare's.
-4. **A token holder can tell whether the console is on** (spec §4, found in the Task 4 review).
-   With it off, `/admin/**` with a user's bearer token is `404`; on, from a refused address, it is
-   `401`. And an invalid token's problem detail differs on admin and API paths. The spec's letter was
-   followed ("answers what any unknown path answers"), which is only true of a caller with no token.
-   Is that acceptable, given the caller must already hold a valid user token and be outside the
-   allowlist? Making them identical means the admin refusal would have to answer `404` for a
-   bearer-holder, which differs from the API's own `401` for a missing token.
+The four questions this record left open, and a fifth the review raised, were put to the owner,
+who agreed to each recommendation on 2026-11-11.
+
+1. **TOTP only, no passkeys for now.** A1 stands as built: a 15-character minimum, the breached
+   check, TOTP, recovery by re-invitation from the server. Passkeys are revisited when a second
+   operator joins.
+2. **Exact-match lookup only, by id or full email; no partial search** (privacy: a search box
+   over everyone's emails is an enumeration tool). "Find by name" would be a later, separately
+   audited feature.
+3. **The console is reached at `admin.getmoyi.app`, DNS only (no Cloudflare proxy), allowlisted
+   to the owner's own address.** No VPN and no Cloudflare Access. The matcher stays path-based,
+   so the host is routing only (`ops/admin/README.md`, "Routing a host of its own"); DNS only is
+   what keeps the resolved address the operator's own (decision 6).
+4. **The token holder's on/off oracle is accepted.** With the console off, `/admin/**` with a
+   user's bearer is `404`; on, from a refused address, it is the API's `401`. That reveals only
+   that the console is on, to someone who already holds a valid user token and is outside the
+   allowlist; the spec's "answers what any unknown path answers" holds for a caller with no
+   token, and the difference in an invalid token's problem detail is accepted with it.
+5. **Before switching on, the trusted proxies are narrowed** from `172.18.0.0/16` (the whole
+   Docker network kamal-proxy shares with every other container) to kamal-proxy alone, so that no
+   other container on that network can claim an allowlisted address through `X-Forwarded-For`.
+   That is a separate follow-up pull request, not this one; until it merges the console stays
+   **off** in production, as this pull request ships it.
 
 ## Owed
 
 - A2 to A5 (spec §11): the report queue, suspension, jobs and flags, content access with
   justification, then the `audit_log` retention job.
-- **The owner:** switch it on following `ops/admin/README.md` (key, allowlist, invite); a deploy
-  hook cannot do it for him.
+- **A follow-up pull request:** narrow the trusted proxies to kamal-proxy alone (ruling 5). The
+  console is not switched on before it merges.
+- **The owner:** then switch it on following `ops/admin/README.md` (key, allowlist, the
+  `admin.getmoyi.app` host, invite); a deploy hook cannot do it for him.
 - Deferred minor review findings are in the build ledger, not repeated here.
 
 ## Revisit when
 
-The owner answers any question above; a second operator exists (sessions in memory, the lockout,
-re-invitation); or a screen beyond lookup is built.
+A second operator exists (passkeys, ruling 1; sessions in memory, the lockout, re-invitation);
+the console is wanted from more than the owner's address (ruling 3); or a screen beyond lookup
+is built.
