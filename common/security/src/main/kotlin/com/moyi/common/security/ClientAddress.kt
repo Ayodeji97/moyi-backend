@@ -16,7 +16,7 @@ import java.net.UnknownHostException
  * limit.
  */
 class ClientAddress private constructor(
-    private val inet: InetAddress,
+    internal val inet: InetAddress,
 ) {
     /** Java's canonical text form: dotted quad, or uncompressed colon-hex for IPv6. */
     val hostAddress: String get() = inet.hostAddress

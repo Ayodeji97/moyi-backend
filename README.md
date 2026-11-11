@@ -85,7 +85,10 @@ a refused login. Two more environment values are needed outside `local`:
 the Redis keys, which `local` again generates per process; and
 `MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXIES` (comma-separated CIDRs, or
 `…_PROXIES_0`, `…_PROXIES_1` one per entry), the proxies whose
-`X-Forwarded-For` is believed. Left empty, no header is believed and the
+`X-Forwarded-For` is believed, and
+`MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXY_HOSTS`, the same by name,
+resolved every few seconds to the name's current addresses (production
+sets `kamal-proxy` there and no range: ADR-0062). Both left empty, no header is believed and the
 socket address is the client — which behind kamal-proxy means every
 request shares one per-IP bucket, over-strict and visible rather than
 forgeable and silent. `local` trusts loopback so `curl -H

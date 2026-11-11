@@ -3436,3 +3436,17 @@ Then, the first smoke run: the enrolment page, which every MockMvc test had pass
          buffer, the form's CSRF token then needed a session after the response was committed, and
          Tomcat dropped the connection. The tests all arrived with a session already made. Fixed
          with a real-server test that makes a first visit with no cookie.
+
+## 2026-11-11 · Fix · kamal-proxy trusted by name, not the network it shares (ruling 5, ADR-0062)
+Expected: writing kamal-proxy's own address (`172.18.0.x/32`) into `config/deploy.yml` would be the
+         narrow fix, since the `/16` was only ever meant to cover the proxy.
+Reality: Docker assigns that address, and on a network created without a subnet (Kamal's
+         `docker network create kamal`) a container that is removed gives its address straight to
+         the next one started: measured locally, the probe's `.2` went to the very next
+         `docker run`. A pinned `/32` would be right until the first `kamal proxy reboot`, then
+         possibly the media worker's. The `/16` itself had always trusted the worker, Postgres and
+         Valkey, which nobody had noticed until the admin console gave a forged address something
+         to win.
+Wrong about: a trusted-proxy entry being a fact about the proxy. It is a fact about whoever holds
+         that address now. The container's name is the fact; the address is a cache of it, so it
+         is resolved again every few seconds and dropped, not kept, when it stops resolving.

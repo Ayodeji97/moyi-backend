@@ -18,9 +18,10 @@ It lives under `/admin`. The owner ruled (2026-11-11, ADR-0055) that it is reach
 - Every sign-in, refusal, sign-out and lookup is in `audit_log`. The table refuses `UPDATE`
   and `DELETE`, even from `psql`. Nothing deletes its rows until the retention slice.
 - The address allowlist sees the operator's real public address because production DNS is
-  "DNS only" (no Cloudflare proxy) and the only trusted proxy is kamal-proxy's network
-  (`172.18.0.0/16`). **If the host is ever proxied through Cloudflare, the allowlist sees
-  Cloudflare's addresses, not the operator's.** Then either keep it DNS only, or add
+  "DNS only" (no Cloudflare proxy) and the only trusted proxy is kamal-proxy itself, by its
+  container name (`MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXY_HOSTS: kamal-proxy`, ADR-0062).
+  **If the host is ever proxied through Cloudflare, the allowlist sees Cloudflare's addresses,
+  not the operator's.** Then either keep it DNS only, or add
   Cloudflare's published ranges to `MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXIES` so that
   `X-Forwarded-For` is believed through them (and only then).
 
@@ -52,11 +53,19 @@ allowlist is the first.
 
 ## 3. Switch it on
 
-**Not before the trusted proxies are narrowed** (the owner's ruling 5, ADR-0055).
-`MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXIES` is kamal-proxy's whole Docker network,
-`172.18.0.0/16`, so any container on it could claim an allowlisted address through
-`X-Forwarded-For`. A separate pull request narrows it to kamal-proxy alone; switch on only after
-it has merged and deployed.
+**Not before the trusted proxies are narrowed** (the owner's ruling 5, ADR-0055). They were
+kamal-proxy's whole Docker network, `172.18.0.0/16`, so any container on it (the media worker,
+Postgres, Valkey) could claim an allowlisted address through `X-Forwarded-For`. ADR-0062 narrowed
+them to kamal-proxy alone, trusted by its container name; **this prerequisite is met once a
+release with ADR-0062 is deployed.** Before switching on, check that it is:
+
+```
+ssh root@91.98.71.136 'docker inspect $(docker ps -q --filter label=service=moyi --filter label=role=web) \
+  --format "{{range .Config.Env}}{{println .}}{{end}}"' | grep TRUSTED_PROXY
+```
+
+expect exactly `MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXY_HOSTS=kamal-proxy` and no
+`MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXIES` line.
 
 In `config/deploy.yml`, under `servers.web` only (never the top-level `env`, never the
 `media-worker` role):

@@ -91,6 +91,17 @@ servers:
         # operator's own address, and add the key to `secret` below.
         MOYI_ADMIN_ENABLED: "false"
         # MOYI_ADMIN_ALLOWED_NETWORKS: 203.0.113.7/32
+        # The one proxy whose X-Forwarded-For is believed: kamal-proxy, by its
+        # container name, which Docker's DNS on the `kamal` network resolves to
+        # its current address (ADR-0062). Not the network's range: that held
+        # the media worker, Postgres and Valkey too, any of which could then
+        # name any client, past the rate limits and the admin allowlist (the
+        # owner's ruling 5, ADR-0055). The walk from the right stops at the
+        # first address that is not kamal-proxy's, so a header a client forges
+        # is not believed either (ADR-0023). Without it every request shares
+        # kamal-proxy's one bucket. Under servers.web only: the media worker
+        # serves no requests. Nothing to re-read on a rebuilt server.
+        MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXY_HOSTS: kamal-proxy
       # The API's secrets, merged over the top-level ones (Kamal 2.12,
       # Role#env): the session-signing pair, the HMAC key behind ip_hash and
       # the rate limits, and the email key. The media worker gets none of them.
@@ -210,7 +221,7 @@ proxy:
   # With ssl: true kamal-proxy drops X-Forwarded-For unless told otherwise.
   # Without it every request reaches the app from the proxy's address, and
   # all clients share one rate-limit bucket (ADR-0023). The app believes the
-  # header only from MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXIES.
+  # header only from kamal-proxy (MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXY_HOSTS).
   forward_headers: true
   # No request log at all (owner's ruling D9, 2026-10-24). kamal-proxy logs
   # every request's path and query, which here means search words (?q=) and
@@ -326,16 +337,6 @@ env:
     # A voice note with no verdict is never played to a partner.
     MOYI_MEDIA_MODERATION_KNOWNIMAGES_PROVIDER: none
     MOYI_MEDIA_MODERATION_VOICE_PROVIDER: none
-    # Kamal's Docker network on moyi-prod-1, where kamal-proxy has its address
-    # (`docker network inspect kamal`, read 2026-10-24). An X-Forwarded-For is
-    # believed only from here, so the rate limiter sees each client's own
-    # address, and a header a client forges is not believed, because the
-    # walk from the right stops at the first untrusted address (ADR-0023).
-    # Without it every request shares kamal-proxy's one bucket: seen,
-    # requests from two networks and one with a forged header all landed in
-    # a single per-IP login bucket. The network keeps its range while it
-    # exists; on a rebuilt server, read it again before the first deploy.
-    MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXIES: 172.18.0.0/16
     # Argon2id's iterations, tuned on this server to doc 09's ~150 ms per
     # hash (Argon2Properties; NFR-046's t=2 stays the floor the tests hold).
     # Measured 2026-10-24 on moyi-prod-1, in the production image, with
