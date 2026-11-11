@@ -347,34 +347,74 @@ internal class CloseElapsedDaysTest(
      * not every day there has ever been. A statement that stopped implying `closed_at IS NULL`
      * could not use it.
      *
-     * Deterministic, not a cost race: on the shared test database the planner may also choose
-     * `bond_days_bond_date_key`, which fits the `ORDER BY` and the `LIMIT` and walks every row,
-     * and which it prefers depended on what the other tests had left there (it failed in CI
-     * once). So the competing index is dropped inside this transaction, which is rolled back,
-     * and sequential scans are priced out: what is left is the partial index, or a Seq Scan if
-     * the statement cannot use it.
+     * Deterministic, not a cost race. Which index the planner prefers depends on the statistics,
+     * and on the shared test database those are whatever the other tests left there: an index
+     * that walks `bond_id` in order (`bond_days_bond_date_key`, and later `bond_days_feed_idx`,
+     * read forwards under an Incremental Sort) lets the `LIMIT` stop early, and each has won in
+     * CI. Dropping each competitor by name broke again when the next one won, so every other
+     * index on the table is dropped, whatever it is called and whenever it was added, inside a
+     * transaction that is rolled back; and sequential scans are priced out. What is left is the
+     * partial index, or a Seq Scan if the statement cannot use it.
+     *
+     * The transaction also holds the data that tipped the planner in CI (days that have ended and
+     * are not yet settled, analysed), so that a regression of this guard fails here every time
+     * rather than on whichever run the statistics happen to favour another index.
      */
     @Test
     fun `the scan for days that may have ended can use its index`() {
-        val plan = candidatePlan(dropping = listOf("bond_days_bond_date_key"))
+        val plan = candidatePlan()
 
-        plan shouldContain "bond_days_unclosed_idx"
+        plan shouldContain UNCLOSED_INDEX
         plan shouldNotContain "Seq Scan"
     }
 
-    /** `EXPLAIN` of the job's own statement, with [dropping] dropped in a transaction that is rolled back. */
-    private fun candidatePlan(dropping: List<String>): String =
+    /** `EXPLAIN` of the job's own statement, with every index on `bond_days` but [UNCLOSED_INDEX] gone, rolled back. */
+    private fun candidatePlan(): String =
         dataSource.connection.use { connection ->
             connection.autoCommit = false
             try {
-                // Never queue the other tests behind this lock for long.
-                val setup = listOf("SET LOCAL lock_timeout = '5s'", "SET LOCAL enable_seqscan = off") + dropping.map { "DROP INDEX $it" }
-                connection.createStatement().use { statement -> setup.forEach(statement::execute) }
+                connection.createStatement().use { statement ->
+                    // Never queue the other tests behind these locks for long.
+                    statement.execute("SET LOCAL lock_timeout = '5s'")
+                    statement.execute(ENDED_UNSETTLED_DAYS)
+                    statement.execute("ANALYZE bond_days")
+                    competingIndexes(connection).forEach(statement::execute)
+                    statement.execute("SET LOCAL enable_seqscan = off")
+                }
                 explainCandidates(connection)
             } finally {
                 connection.rollback()
             }
         }
+
+    /**
+     * A statement that removes each index on `bond_days` other than [UNCLOSED_INDEX]. An index
+     * that backs a constraint (the primary key, a unique constraint) cannot be dropped on its
+     * own, so its constraint is, with whatever foreign keys lean on it.
+     */
+    private fun competingIndexes(connection: java.sql.Connection): List<String> =
+        connection
+            .prepareStatement(
+                """
+                SELECT i.relname, c.conname
+                FROM pg_index x
+                JOIN pg_class i ON i.oid = x.indexrelid
+                LEFT JOIN pg_constraint c ON c.conindid = x.indexrelid AND c.conrelid = x.indrelid
+                WHERE x.indrelid = 'bond_days'::regclass AND i.relname <> ?
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setString(1, UNCLOSED_INDEX)
+                statement.executeQuery().use { rows ->
+                    generateSequence {
+                        if (!rows.next()) {
+                            null
+                        } else {
+                            rows.getString(2)?.let { "ALTER TABLE bond_days DROP CONSTRAINT \"$it\" CASCADE" }
+                                ?: "DROP INDEX \"${rows.getString(1)}\""
+                        }
+                    }.toList()
+                }
+            }
 
     /** The statement the job runs, not a copy of it. */
     private fun explainCandidates(connection: java.sql.Connection): String =
@@ -487,5 +527,14 @@ internal class CloseElapsedDaysTest(
          */
         val LAGOS_END: Instant = Instant.parse("2026-09-16T11:01:00Z")
         const val BUDGET = 1_000
+
+        const val UNCLOSED_INDEX = "bond_days_unclosed_idx"
+
+        /** Five thousand bonds, each with a day that ended long before [LAGOS_END] and is not yet settled. */
+        const val ENDED_UNSETTLED_DAYS =
+            "INSERT INTO bond_days (id, bond_id, date, status, anchor_timezone, starts_at, ends_at, created_at) " +
+                "SELECT gen_random_uuid(), gen_random_uuid(), DATE '2026-01-01', 'OPEN', 'UTC', " +
+                "TIMESTAMPTZ '2026-01-01 00:00:00+00', TIMESTAMPTZ '2026-01-02 00:00:00+00', " +
+                "TIMESTAMPTZ '2026-01-01 00:00:00+00' FROM generate_series(1, 5000)"
     }
 }
