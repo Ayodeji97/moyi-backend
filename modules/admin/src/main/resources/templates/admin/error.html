@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/* Rendered for any admin failure (spec §7): the status and fixed words, never a stack trace
+       or an exception's message. Also rendered outside Spring MVC by AdminErrorPage. */-->
+<head th:replace="~{admin/layout :: head('Error')}"></head>
+<body>
+<header th:replace="~{admin/layout :: masthead}"></header>
+<main>
+    <h1 th:text="'Error ' + ${status}">Error</h1>
+    <p th:text="${message}">Something went wrong.</p>
+    <p><a th:href="@{/admin}">Back to the console</a></p>
+</main>
+</body>
+</html>

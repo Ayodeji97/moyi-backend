@@ -1,0 +1,62 @@
+/* The admin console's only stylesheet (served from /admin/static/, CSP style-src 'self').
+   Plain and legible; meaning never rests on colour alone (spec §7, WCAG 2.2 AA). */
+:root {
+    color-scheme: light dark;
+    --ink: #1b1b1b;
+    --paper: #ffffff;
+    --muted: #555555;
+    --line: #8a8a8a;
+    --error: #a1001a;
+    --focus: #0b57d0;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        --ink: #ececec;
+        --paper: #161616;
+        --muted: #b5b5b5;
+        --line: #8a8a8a;
+        --error: #ff8a8a;
+        --focus: #8ab4f8;
+    }
+}
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    font: 1rem/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink);
+    background: var(--paper);
+}
+.masthead { border-bottom: 1px solid var(--line); padding: 0.75rem 1.5rem; }
+.brand { margin: 0; font-weight: 600; }
+main { max-width: 36rem; padding: 1.5rem; }
+h1 { font-size: 1.5rem; }
+h2 { font-size: 1.125rem; margin-top: 2rem; }
+.field { margin-bottom: 1.25rem; }
+label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
+input {
+    width: 100%;
+    padding: 0.5rem;
+    font: inherit;
+    color: inherit;
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+}
+input[aria-invalid="true"] { border: 2px solid var(--error); }
+button {
+    font: inherit;
+    padding: 0.5rem 1.25rem;
+    border: 2px solid var(--ink);
+    border-radius: 4px;
+    background: var(--ink);
+    color: var(--paper);
+    cursor: pointer;
+}
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.hint { margin: 0 0 0.25rem; color: var(--muted); font-size: 0.875rem; }
+/* The word carries the meaning; colour and the bar only repeat it. */
+.error { margin: 0.25rem 0 0; color: var(--error); border-left: 4px solid var(--error); padding-left: 0.5rem; }
+.error::before { content: "Error: "; font-weight: 600; }
+.notice { border-left: 4px solid var(--line); padding-left: 0.5rem; }
+.qr { display: block; image-rendering: pixelated; background: #ffffff; padding: 0.5rem; }
+code { font-size: 1.05rem; letter-spacing: 0.08em; word-break: break-all; }

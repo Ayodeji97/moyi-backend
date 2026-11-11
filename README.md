@@ -211,7 +211,7 @@ flowchart TD
     media["media"]
     notification["notification"]
     scheduling["scheduling"]
-    admin["admin"]
+    admin["admin — console under /admin: sign-in, MFA, audit log (ADR-0055)"]
     analytics["analytics"]
     support["support"]
     export["export"]

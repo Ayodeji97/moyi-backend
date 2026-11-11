@@ -36,6 +36,10 @@ awssdk = "2.57.10"
 # not taken. The BOM and two libraries only, never the starter: the module
 # builds its beans itself, as PushSenderConfiguration does.
 springAi = "2.0.2"
+# TOTP for the admin console's second factor (RFC 6238, spec §6) and the QR code
+# the enrolment page draws for it. Not in the Spring Boot BOM. Task 3 uses them.
+javaOtp = "1.0.0"
+zxing = "3.5.4"
 
 [libraries]
 konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
@@ -51,6 +55,8 @@ junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 awssdk-bom = { module = "software.amazon.awssdk:bom", version.ref = "awssdk" }
 spring-ai-bom = { module = "org.springframework.ai:spring-ai-bom", version.ref = "springAi" }
 spring-ai-openai = { module = "org.springframework.ai:spring-ai-openai" }
+java-otp = { module = "com.eatthepath:java-otp", version.ref = "javaOtp" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 spring-ai-model = { module = "org.springframework.ai:spring-ai-model" }
 # flyway-core / flyway-database-postgresql, the postgresql JDBC driver, and
 # Testcontainers are NOT pinned here — their versions come from the Spring

@@ -9,6 +9,7 @@ dependencies {
     // `app` is the composition root: it depends on every module so that
     // their beans, entities and migrations are on the runtime classpath.
     implementation(projects.modules.identity)
+    implementation(projects.modules.admin)
     // Phase 2: bonds, members, invites and blocks (ADR-0026). Here for the
     // same reason identity is — beans, entities and V9 on the classpath.
     implementation(projects.modules.bond)
@@ -77,6 +78,12 @@ dependencies {
     // autoconfigure into a stack-specific module — needed explicitly now.
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation(projects.common.testing)
+    // The admin chain's tests build a signed-in session the way the sign-in controller does:
+    // a security context, with factor authorities, under Spring's session key (Ruling B).
+    testImplementation("org.springframework.security:spring-security-web")
+    // The sign-in tests compute a current TOTP code from the stored secret, as the
+    // operator's authenticator app would (Ruling B): the same library the console uses.
+    testImplementation(libs.java.otp)
     // TraceContextStaysInsideTest reads the tracer and the propagator the two runtime-only tracing artifacts wire.
     testImplementation("io.micrometer:micrometer-tracing")
     testImplementation("io.opentelemetry:opentelemetry-context")

@@ -4,7 +4,7 @@
 
 **Goal:** A switched-off-by-default admin console under `/admin`: invited operators enrol a password and TOTP, sign in with both factors, and a `SUPPORT` operator can look a user up by id or email, every act recorded in an append-only `audit_log`.
 
-**Architecture:** `modules/admin` holds the console. It has its own `SecurityFilterChain` (`securityMatcher("/admin/**")`, ordered before the API chain), which runs an allowlist filter first, keeps an in-memory `HttpSession`, applies CSRF, and requires `FACTOR_PASSWORD` + `FACTOR_TOTP` through an admin-scoped `AuthorizationManagerFactories.multiFactor()`. The pages are Thymeleaf with htmx vendored locally. Identity and bond each expose admin-only `api` ports. Migration V42 holds the tables, the append-only trigger, and the operator functions `admin_invite` and `admin_disable`.
+**Architecture:** `modules/admin` holds the console. It has its own `SecurityFilterChain` (`securityMatcher("/admin/**")`, ordered before the API chain), which runs an allowlist filter first, keeps an in-memory `HttpSession`, applies CSRF, and requires `FACTOR_PASSWORD` + `FACTOR_TOTP` through an admin-scoped `AuthorizationManagerFactories.multiFactor()`. The pages are Thymeleaf with htmx vendored locally. Identity and bond each expose admin-only `api` ports. Migration V60 holds the tables, the append-only trigger, and the operator functions `admin_invite` and `admin_disable`.
 
 **Tech Stack:** Kotlin 2.4, Spring Boot 4.1.2, Spring Security 7.1.2, Thymeleaf, htmx 2 (vendored), Postgres 18, Flyway, `com.eatthepath:java-otp:1.0.0`, `com.google.zxing:core:3.5.4`, JUnit 6 + kotest assertions + MockMvc + Testcontainers.
 
@@ -22,7 +22,7 @@
 - Session: idle 30 min; absolute 8 h from the password step; cookie `moyi-admin`, `HttpOnly`, `Secure` (except `local`), `SameSite=Strict`, `Path=/admin`.
 - Invitation token: 32 bytes from `gen_random_bytes`, base64url without padding; only `sha256(token)` is stored; it expires after 24 h.
 - Never in a log, an exception message, a page or the audit metadata: a password, a TOTP secret or code, an invitation token, a session id, the email typed into the lookup, or any entry text.
-- Migration version **V42**, in `modules/admin/src/main/resources/db/migration/`.
+- Migration version **V60**, in `modules/admin/src/main/resources/db/migration/`.
 - Admin controllers never appear in `contracts/openapi.json`. `OpenApiContractTest` must pass with no change to the file.
 - Commits: Conventional Commits, subject ≤ 88 characters; run `git config core.hooksPath .githooks` once in the worktree.
 
@@ -67,17 +67,17 @@
 - [ ] **Step 5: Run the module tests and `./gradlew :app:test --tests "*ArchitectureTest*"`; all pass.**
 - [ ] **Step 6: Commit** `feat(identity,bond): admin-only lookup and password ports`
 
-### Task 2: V42, the audit log and the operator functions
+### Task 2: V60, the audit log and the operator functions
 
 **Files:**
 - Modify: `modules/admin/build.gradle.kts` (data-jpa, web, thymeleaf, security, validation, java-otp, zxing core, common:core, common:security, common:web, identity, bond; same test deps as identity's)
 - Modify: `gradle/libs.versions.toml` (`javaOtp = "1.0.0"`, `zxing = "3.5.4"`)
 - Modify: `app/build.gradle.kts` (`implementation(projects.modules.admin)`)
-- Create: `modules/admin/src/main/resources/db/migration/V42__admin_console.sql`
+- Create: `modules/admin/src/main/resources/db/migration/V60__admin_console.sql`
 - Create: `modules/admin/src/main/kotlin/com/moyi/admin/domain/AuditAction.kt`, `AuditOutcome.kt`, `AdminRole.kt`, `AdminStatus.kt`
 - Create: `modules/admin/src/main/kotlin/com/moyi/admin/infra/AdminAccountEntity.kt`, `AdminAccountRepository.kt`, `AuditLogEntity.kt`, `AuditLogRepository.kt`
 - Create: `modules/admin/src/main/kotlin/com/moyi/admin/service/AuditTrail.kt`
-- Test: `modules/admin/src/test/kotlin/com/moyi/admin/infra/V42MigrationTest.kt`, `AuditActionCheckTest.kt`
+- Test: `modules/admin/src/test/kotlin/com/moyi/admin/infra/V60MigrationTest.kt`, `AuditActionCheckTest.kt`
 
 **Interfaces:**
 - Produces:
@@ -85,17 +85,17 @@
   - `enum class AuditOutcome { SUCCEEDED, REFUSED, FAILED }`, `enum class AdminRole { SUPPORT, MODERATOR, ADMIN }`, `enum class AdminStatus { INVITED, ACTIVE, DISABLED }`
   - `internal class AuditTrail { fun record(action: AuditAction, outcome: AuditOutcome, actorId: UUID?, targetType: String?, targetId: String?, justification: String? = null, metadata: Map<String, Any> = emptyMap(), clientAddress: ClientAddress?) }`. It uses `@Transactional(propagation = MANDATORY)`, so an audit row is always part of its caller's transaction, and `actor_type = 'ADMIN'`. The ip hash comes from `PersonalDataHasher`.
   - `AdminAccountEntity` mapping every `admin_accounts` column, plus `AdminAccountRepository.findByEmail(email: String)` and `casTotpStep(id: UUID, step: Long): Int` (`UPDATE … SET totp_last_step = :step WHERE id = :id AND (totp_last_step IS NULL OR totp_last_step < :step)`).
-- Schema (V42), as spec §5 and §8. `admin_accounts` with `failed_attempts int NOT NULL DEFAULT 0 CHECK (>= 0)`. `admin_invitations(admin_id → admin_accounts ON DELETE CASCADE)`. `audit_log` with the `CHECK`s and the index `(target_type, target_id, occurred_at)`. Trigger `audit_log_append_only` `BEFORE UPDATE OR DELETE … RAISE EXCEPTION 'audit_log is append-only'`, plus a `BEFORE TRUNCATE` statement trigger with the same message. `admin_invite(p_email citext, p_role text) RETURNS text` and `admin_disable(p_email citext) RETURNS void`. Each writes its `audit_log` row with `actor_type='OPERATOR'` and `actor_id NULL`. `admin_disable` on an unknown email raises `'no such admin'`. Both functions set `credentials_changed_at = now()`.
+- Schema (V60), as spec §5 and §8. `admin_accounts` with `failed_attempts int NOT NULL DEFAULT 0 CHECK (>= 0)`. `admin_invitations(admin_id → admin_accounts ON DELETE CASCADE)`. `audit_log` with the `CHECK`s and the index `(target_type, target_id, occurred_at)`. Trigger `audit_log_append_only` `BEFORE UPDATE OR DELETE … RAISE EXCEPTION 'audit_log is append-only'`, plus a `BEFORE TRUNCATE` statement trigger with the same message. `admin_invite(p_email citext, p_role text) RETURNS text` and `admin_disable(p_email citext) RETURNS void`. Each writes its `audit_log` row with `actor_type='OPERATOR'` and `actor_id NULL`. `admin_disable` on an unknown email raises `'no such admin'`. Both functions set `credentials_changed_at = now()`.
 
-- [ ] **Step 1: Write failing tests** (`V42MigrationTest`, a `PostgresIntegrationTest` running the full Flyway chain):
+- [ ] **Step 1: Write failing tests** (`V60MigrationTest`, a `PostgresIntegrationTest` running the full Flyway chain):
   - `select admin_invite('op@example.com','SUPPORT')` returns a 43-character base64url string. The account is `INVITED`, the invitation's `token_hash = sha256(decode(token))` and expires in 24 h ± 1 min, and an `audit_log` row `ADMIN_INVITED/SUCCEEDED/OPERATOR` exists whose `metadata` does not contain the token.
   - Re-inviting an `ACTIVE` account nulls `password_hash`, `totp_secret_enc` and `totp_last_step`, resets `failed_attempts`, sets `INVITED`, and moves `credentials_changed_at` forward.
   - `admin_invite(…, 'ROOT')` raises (the role CHECK).
   - `UPDATE audit_log …`, `DELETE FROM audit_log` and `TRUNCATE audit_log` each raise `audit_log is append-only`.
   - `casTotpStep(id, 5)` returns 1, a repeated `casTotpStep(id, 5)` returns 0, and `casTotpStep(id, 4)` returns 0.
 - [ ] **Step 2: Write `AuditActionCheckTest`**: the `CHECK` list on `audit_log.action`, read from `pg_constraint`, equals `AuditAction.entries` names (the rule lives once, in the enum, and the test holds the SQL to it).
-- [ ] **Step 3: Run them, see them fail, implement V42 and the Kotlin, and run them again until they pass.** Then prove the trigger is the mechanism: comment out the `DELETE` arm, see the test fail, and restore it.
-- [ ] **Step 4: Commit** `feat(admin): V42 admin accounts, invitations and an append-only audit log`
+- [ ] **Step 3: Run them, see them fail, implement V60 and the Kotlin, and run them again until they pass.** Then prove the trigger is the mechanism: comment out the `DELETE` arm, see the test fail, and restore it.
+- [ ] **Step 4: Commit** `feat(admin): V60 admin accounts, invitations and an append-only audit log`
 
 ### Task 3: TOTP, the secret cipher, the password policy and the QR code
 

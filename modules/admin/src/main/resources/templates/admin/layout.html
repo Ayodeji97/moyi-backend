@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/* Fragments every admin page shares. Plain semantic HTML (spec §7, NFR-100): no script,
+       no inline style, so the CSP's script-src and style-src 'self' hold. th:text only. */-->
+<head th:fragment="head(title)">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title th:text="${title} + ' · Moyi admin'">Moyi admin</title>
+    <link rel="stylesheet" th:href="@{/admin/static/admin.css}">
+</head>
+<body>
+<header th:fragment="masthead" class="masthead">
+    <p class="brand">Moyi admin</p>
+</header>
+</body>
+</html>

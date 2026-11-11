@@ -15,7 +15,24 @@ spring:
   flyway:
     locations: classpath:db/migration
 
+server:
+  servlet:
+    session:
+      cookie:
+        # http://localhost is not HTTPS: a Secure cookie would never come back.
+        secure: false
+
 moyi:
+  admin:
+    # The console on, for this machine only (spec §4, ADR-0055). The key is a
+    # fixed development value, public in this repository on purpose: it seals
+    # TOTP secrets that exist only in a laptop database. Never use it, or any
+    # key that has appeared in a file, anywhere else.
+    enabled: true
+    allowed-networks:
+      - 127.0.0.1/32
+      - ::1/128
+    totp-key: bW95aS1kZXYtb25seS1hZG1pbi10b3RwLWtleS0wMDE= # gitleaks:allow (public dev key, ADR-0055)
   legal:
     # Required, with no value in application.yml (ADR-0056): every consent row
     # records these versions, so a deployment states its own. Nothing listens on

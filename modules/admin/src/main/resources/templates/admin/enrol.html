@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/layout :: head('Set up your account')}"></head>
+<body>
+<header th:replace="~{admin/layout :: masthead}"></header>
+<main>
+    <h1>Set up your account</h1>
+    <p>For <strong th:text="${page.email}">operator@example.com</strong>.</p>
+
+    <h2>1. Add the console to your authenticator app</h2>
+    <p>Scan this code, or type the key below into the app.</p>
+    <img class="qr" th:src="${page.qrDataUri}" width="256" height="256"
+         alt="QR code holding the key below, for an authenticator app">
+    <p>Key: <code id="secret" th:text="${page.secretBase32}">ABCDEFGH</code></p>
+
+    <h2>2. Choose a password and confirm with a code</h2>
+    <form method="post" th:action="@{/admin/enrol}">
+        <input type="hidden" name="token" th:value="${token}">
+        <div class="field">
+            <label for="password">Password</label>
+            <p id="password-hint" class="hint">15 to 128 characters. Not one that has appeared in a data breach.</p>
+            <input id="password" name="password" type="password" autocomplete="new-password" required
+                   minlength="15" maxlength="128"
+                   th:attr="aria-invalid=${errorField == 'password'} ? 'true',
+                            aria-describedby=${errorField == 'password'} ? 'password-hint password-error' : 'password-hint'">
+            <p th:if="${errorField == 'password'}" id="password-error" class="error" th:text="${error}">Error.</p>
+        </div>
+        <div class="field">
+            <label for="confirm">Password again</label>
+            <input id="confirm" name="confirm" type="password" autocomplete="new-password" required
+                   th:attr="aria-invalid=${errorField == 'confirm'} ? 'true', aria-describedby=${errorField == 'confirm'} ? 'confirm-error'">
+            <p th:if="${errorField == 'confirm'}" id="confirm-error" class="error" th:text="${error}">Error.</p>
+        </div>
+        <div class="field">
+            <label for="code">Code from the app</label>
+            <input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+                   autocomplete="one-time-code" required
+                   th:attr="aria-invalid=${errorField == 'code'} ? 'true', aria-describedby=${errorField == 'code'} ? 'code-error'">
+            <p th:if="${errorField == 'code'}" id="code-error" class="error" th:text="${error}">Error.</p>
+        </div>
+        <button type="submit">Finish setting up</button>
+    </form>
+</main>
+</body>
+</html>

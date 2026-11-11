@@ -77,7 +77,8 @@ re-invitation.
 ## 4. Switching it on, and who may reach it
 
 - `moyi.admin.enabled` defaults to **false** in every profile, including production. Off
-  means no admin chain, no admin controllers and no admin beans
+  means no admin chain, no admin controllers, no filters and no admin web beans (the
+  persistence beans, which serve no request, may exist: ruling D of the build)
   (`@ConditionalOnProperty`, plus `@ConditionalOnWebApplication`, so the media worker,
   which runs with `web-application-type: none`, can never serve it). `/admin/**` then falls
   through to the API chain like any unknown path: `401` problem without a bearer token,
@@ -292,11 +293,12 @@ only `modules/admin` may depend on them.
 
 ## 10. Operations
 
-- Migration **V42** (`modules/admin`): `admin_accounts`, `admin_invitations`, `audit_log`
-  plus its trigger, and the `admin_invite` and `admin_disable` functions. Rollback past V42 drops an unused console. No other module's data changes.
+- Migration **V60** (`modules/admin`): `admin_accounts`, `admin_invitations`, `audit_log`
+  plus its trigger, and the `admin_invite` and `admin_disable` functions. Rollback past V60 drops an unused console. No other module's data changes.
 - New secret `MOYI_ADMIN_TOTP_KEY`, and new config `MOYI_ADMIN_ENABLED` and
-  `MOYI_ADMIN_ALLOWED_NETWORKS`, added to `config/deploy.yml` under `servers.web` only (never
-  the media worker), with `ENABLED` `"false"`. The app's own startup check (§4) is the guard.
+  `MOYI_ADMIN_ALLOWED_NETWORKS`, under `servers.web` only (never the media worker). A1 adds
+  only `MOYI_ADMIN_ENABLED: "false"` to `config/deploy.yml`; the key and the networks join it at
+  switch-on (runbook). The app's own startup check (§4) is the guard.
   A1 does not ship the key into the vault, so production stays off until the owner follows
   the runbook.
 - A runbook, `ops/admin/README.md`: generate the key, invite yourself, enrol, the allowlist
@@ -305,8 +307,9 @@ only `modules/admin` may depend on them.
   (re-invite).
 - Metrics: `moyi_admin_sign_in_total{outcome}` and `moyi_admin_lookup_total`. A sign-in
   failure rate belongs on doc 11's security dashboard.
-- Smoke: `scripts/smoke.sh` gains an admin section. It checks that `/admin` is 404 when off
-  and from a refused address, runs invite → enrol → sign in with a computed code → lookup,
+- Smoke: `scripts/smoke.sh` gains an admin section. It runs with the console on (the local
+  profile), so the switched-off answer (§4: `401` without a bearer, `404` with one) is
+  proven by `AdminDisabledTest`, not by the smoke. It checks that a refused address gets the API's unauthenticated `401` problem with no cookie (§4), runs invite → enrol → sign in with a computed code → lookup,
   and probes that a replayed code, a missing CSRF token and a one-factor session are each
   refused. It then reads `audit_log` to confirm the rows exist and that `UPDATE` and `DELETE`
   raise.
@@ -320,15 +323,19 @@ A4: job status and re-runs (FR-114) and feature flags (FR-115). A5: content acce
 justification (FR-112), which needs the export from Phase 5 week 4 to surface the audit rows.
 Then the retention job for `audit_log`.
 
-## 12. Questions for the owner
+## 12. Questions for the owner, and his rulings (2026-11-11)
 
-1. **Admin password and MFA policy.** Built as: a 15-character minimum, the breached-password
-   check, TOTP only, and recovery by re-invitation from the server. Is TOTP-only acceptable
-   for v1, or do you want WebAuthn/passkeys before launch? *(The answer changes A1 only if it
-   is "passkeys instead of TOTP".)*
-2. **Exact-match lookup only.** Built as: by id or full email, with no partial search. If
-   support work needs "find by name", that is a later, separately audited feature.
-3. **Is the console ever opened beyond your own address?** Built as: an allowlist that admits
-   only what you configure, with no VPN or Cloudflare Access in front. If you plan to use
-   Cloudflare Access, it would replace or sit in front of the allowlist, and the trusted-proxy
-   CIDRs must include Cloudflare's.
+The owner agreed to each recommendation on 2026-11-11. ADR-0055 records them in full.
+
+1. **Admin password and MFA policy.** TOTP only for now, as built (a 15-character minimum, the
+   breached-password check, recovery by re-invitation). No passkeys; revisit when a second
+   operator joins.
+2. **Lookup.** Exact match only, by id or full email; no partial search (privacy). "Find by
+   name" would be a later, separately audited feature.
+3. **Where the console is opened.** At `admin.getmoyi.app`, DNS only (no Cloudflare proxy),
+   allowlisted to the owner's own address. No VPN, no Cloudflare Access.
+4. **The token holder's on/off oracle** (§4: `404` with a bearer when off, `401` from a refused
+   address when on) is accepted: it reveals only that the console is on.
+5. **Trusted proxies.** Before the console is switched on, they are narrowed from
+   `172.18.0.0/16` to kamal-proxy alone, in a separate follow-up pull request. A1 ships with
+   the console off.

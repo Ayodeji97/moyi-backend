@@ -449,6 +449,37 @@ class ArchitectureTest {
     }
 
     @Test
+    fun `only the admin module imports the admin lookups and PasswordHashing`() {
+        // Admin console A1: these ports expose an address, a lock, a session count, a
+        // bond's partner and the password hasher, which no other caller has any use for.
+        // Kotlin's `internal` cannot hide a public `api` interface from a module that
+        // depends on its module, so the import is what this sees. The declaring module
+        // and `admin` may; every other module, `common/*` and `app` may not.
+        val declaredIn =
+            mapOf(
+                "com.moyi.identity.api.UserAdminLookup" to "identity",
+                "com.moyi.identity.api.UserAdminView" to "identity",
+                "com.moyi.identity.api.PasswordHashing" to "identity",
+                "com.moyi.bond.api.BondAdminLookup" to "bond",
+                "com.moyi.bond.api.BondAdminView" to "bond",
+            )
+        val violations =
+            project.files.flatMap { file ->
+                val path = file.normalisedProjectPath
+                val module = Regex("^/modules/([^/]+)/").find(path)?.groupValues?.get(1)
+                file.imports
+                    .filter { import -> declaredIn.keys.any { import.name == it } }
+                    .filter { import -> module != "admin" && module != declaredIn.getValue(import.name) }
+                    .map { "$path: ${it.name}" }
+            }
+
+        assertTrue(
+            violations.isEmpty(),
+            "Only the admin module (and the module declaring them) may import the admin lookups and PasswordHashing. Found: $violations",
+        )
+    }
+
+    @Test
     fun `no event consumer subscribes to a streak breaking or going on`() {
         // ADR-0034 decision 11 (the ruling at :240), ADR-0046: nothing is ever pushed, or done,
         // because a streak ended or went on. A consumer subscribes by naming the event type in
