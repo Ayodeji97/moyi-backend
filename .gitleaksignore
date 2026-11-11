@@ -8,3 +8,15 @@
 # this line exists because the PR scan reads every commit, and history is not
 # rewritten here (force-push is blocked).
 5116b6222f70a451436c196737b23b218be30812:common/core/src/test/kotlin/com/moyi/common/core/PemTest.kt:private-key:14
+#
+# PR #131, commit fb1b8a2: application-local.yml's `moyi.admin.totp-key`, the admin
+# console's fixed development key, public on purpose (ADR-0055, spec §4). It seals
+# TOTP secrets that exist only in a laptop database; production's key is a vault
+# secret that has never been in a file. The file's comment says never to use it
+# anywhere else.
+fb1b8a2e0f4bf8e7bb3ac9137226f296101adf19:app/src/main/resources/application-local.yml:generic-api-key:35
+#
+# PR #131, commit acdffcc: TotpTest's expected otpauth URI. The secret is the
+# RFC 6238 test seed ("12345678901234567890", base32 GEZDGNBV...), published in
+# the RFC's own test vectors. Not a credential.
+acdffcc970591791eab2cbe2d7d5db6cb9ef0407:modules/admin/src/test/kotlin/com/moyi/admin/infra/TotpTest.kt:generic-api-key:60
