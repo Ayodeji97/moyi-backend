@@ -44,6 +44,7 @@ recovery with WAL archiving is Phase 5 (doc 15).
 |---|---|---|---|---|
 | 2026-10-27 | `daily/moyi-2026-10-27T030304Z.dump.age` (74 KB, 30 tables; 3 users, 2 entries) | `4db6532` | 1 m 46 s, two typed passwords included | **Passed**: Flyway validated, signed in as a restored account, an entry's text read back through the API |
 | 2026-11-05 | `daily/moyi-2026-11-05T133437Z.dump.age` (101 KB, 35 tables; 3 users, 2 entries), taken minutes before | `a8e7652` | 1 m 20 s, one typed password (the vault was already unlocked) | **Passed**, as the gate of `ops/postgres/README.md` step 5: the backup was at V36, so the image could boot only by applying V37–V41 to it (Flyway, at boot) before the read-back. The media mirror step was skipped (no `MIRROR_DRILL_KEY_ID` yet). A first attempt with `--version a8e7652` stopped at the image pull: CI tags the full 40-character commit, never the short one |
+| 2026-11-11 | `daily/moyi-2026-11-11T030159Z.dump.age` (3 users, 2 entries) | `ca77fe4` | 2 m 06 s, two typed passwords included | **Passed**, as the gate of the V53→V59 deploy: the backup was at V53, so the image booted only by applying V54, V55, V57, V58 and V59 to it before the read-back. The media mirror step was skipped (no `MIRROR_DRILL_KEY_ID` yet). A first attempt with `--version ca77fe4` stopped at the image pull again; `restore-drill.sh` now resolves any commit name to the full SHA |
 
 ## Consequences
 **Positive:** a lost or compromised server costs at most a day, and its backups
