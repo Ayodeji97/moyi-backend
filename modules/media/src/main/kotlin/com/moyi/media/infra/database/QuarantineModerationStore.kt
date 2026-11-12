@@ -113,9 +113,14 @@ internal class QuarantineModerationStore(
     ): QuarantineDecision<BlockOutcome> {
         val facts = lock(mediaId, FOR_UPDATE)
         val holds = holds(mediaId)
+        // Spec §9.3: a removal can never be followed by a block. V36's function still accepts a
+        // DELETED row its purge has not reached; the console refuses it here, under the lock, so a
+        // delete committed while this waited is seen (ADR-0063 Owed: the script path is closed
+        // only by a change to the function).
         val outcome =
             when {
                 holds.isNotEmpty() -> BlockOutcome.REPORT_HELD
+                facts != null && facts.status == MediaStatus.DELETED && !facts.evidenceHeld -> BlockOutcome.GONE
                 else -> call("media_quarantine_block", mediaId, actor, note)
             }
         return QuarantineDecision(outcome, reportDriven(facts, holds))

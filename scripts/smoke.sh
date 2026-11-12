@@ -658,10 +658,28 @@ keep_body() { [ -n "${SMOKE_BODIES:-}" ] || return 0; mkdir -p "$SMOKE_BODIES"; 
 # run. Under `set -e` a run can die anywhere; left behind, those `PT~` texts
 # would be served to every pt-* user of this database, and the next run's
 # insert would find them already there and skip its pt-PT probe.
+#
+# The admin A2 section's accounts and evidence too: a run that dies inside it would otherwise
+# leave two enabled admin accounts and BLOCKED evidence, which the next media check fails on.
 APP_PID=""
 PR_TRANSLATIONS_IN=0
+M2_CLEANUP=0
+# m2_cleanup: deletes the section's evidence as runbook §2 step 4 does, on the server, and
+# disables its admin accounts. Every id may be unset when the section died early.
+m2_cleanup() {
+  local id n email
+  for id in "${M2_P1:-}" "${M2_Q1:-}" "${M2_Q3:-}"; do
+    [ -n "$id" ] && { quarantine delete "$id" "smoke: reported, ref FAKE-SMOKE-A2" >/dev/null 2>&1 || true; }
+  done
+  for n in mod sup; do
+    email="$(eval "printf '%s' \"\${M2_EMAIL_$n:-}\"")"
+    [ -n "$email" ] && { sql "SELECT admin_disable('$email')" >/dev/null || true; }
+  done
+  return 0
+}
 on_exit() {
   if [ "$PR_TRANSLATIONS_IN" = 1 ]; then sql "DELETE FROM prompt_texts WHERE text LIKE 'PT~ %'" >/dev/null || true; fi
+  if [ "$M2_CLEANUP" = 1 ]; then m2_cleanup; fi
   if [ -n "$APP_PID" ]; then kill "$APP_PID" 2>/dev/null || true; wait "$APP_PID" 2>/dev/null || true; fi
 }
 trap on_exit EXIT
@@ -4150,6 +4168,7 @@ elif [ "$ADM_ON" != 200 ]; then
   skip "admin A2: the whole section (this server has the console off)"
 else
   flush_buckets
+  M2_CLEANUP=1 # from here, however the run ends, on_exit disables the accounts and deletes the evidence
   M2_DIR="$(mktemp -d)"
   vips black "$M2_DIR/black.v" 64 48 --bands 3
   vips linear "$M2_DIR/black.v" "$M2_DIR/black.jpg" "1 1 1" "0 0 0" --uchar
@@ -4359,8 +4378,8 @@ print(a['logKept'], ','.join(x['action'] for x in a['accesses']) or '-', all(x.g
     "$(sql "SELECT count(*) FROM audit_log WHERE actor_id IN ('$M2_MOD', '$M2_ID_sup') AND (coalesce(metadata::text, '') || coalesce(justification, '')) ~* '$M2_DETAIL|@example.com'")" "0"
   if grep -q "$M2_DETAIL" "$MOYI_LOG"; then fail "admin A2: the reporter's detail is in no log line" "it is in $MOYI_LOG"; else pass "admin A2: the reporter's detail is in no log line"; fi
   # Not left for the next run's media check: the evidence goes as runbook §2 step 4 says, on the server.
-  for id in "$M2_P1" "$M2_Q1" "$M2_Q3"; do quarantine delete "$id" "smoke: reported, ref FAKE-SMOKE-A2" >/dev/null 2>&1 || true; done
-  for n in mod sup; do sql "SELECT admin_disable('$(eval "printf '%s' \"\$M2_EMAIL_$n\"")')" >/dev/null || true; done
+  m2_cleanup
+  M2_CLEANUP=0
   rm -rf "$M2_DIR"
 fi
 rm -rf "$ADM_DIR"

@@ -91,6 +91,25 @@ internal class QuarantineModerationRaceTest(
     }
 
     /**
+     * Race 4, the removal race (spec §9.3): a console delete commits while the block waits. The
+     * block must see the DELETED row it waited for and answer `GONE`, not block what the export
+     * may already list as removed. V36's function alone would block it until the purge runs.
+     */
+    @Test
+    fun `a block that waits on a delete sees the deletion and answers gone`() {
+        val photo = quarantined()
+
+        val outcome =
+            whileHeld("SELECT media_quarantine_delete(?, 'op', 'gore')", photo) {
+                transactions.execute { port.block(photo, ACTOR, NOTE) }.outcome
+            }
+
+        outcome shouldBe BlockOutcome.GONE
+        state(photo) shouldBe "DELETED|QUARANTINED|false"
+        logged(photo, "BLOCKED").shouldBeEmpty()
+    }
+
+    /**
      * Race 3: a report filed while the view waits. The view's unlocked first read saw no
      * report; its share lock waits for the hold; the holds it then reads are not the ones it
      * was asked about, so it refuses, and the moderator reloads.

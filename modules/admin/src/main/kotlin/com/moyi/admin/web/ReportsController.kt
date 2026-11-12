@@ -132,13 +132,14 @@ internal class ReportsController(
 
     /** Behind the step-up (spec §10.2): a typed code is proven first, and only then is the uphold asked for. */
     @PostMapping("/admin/reports/{reportId}/uphold")
-    @Suppress("LongParameterList") // The form's four fields, and who asked from where.
+    @Suppress("LongParameterList") // The form's five fields, and who asked from where.
     fun uphold(
         @PathVariable reportId: String,
         @RequestParam(defaultValue = "") expectedReason: String,
         @RequestParam(defaultValue = "") takedown: String,
         @RequestParam(defaultValue = "") note: String,
         @RequestParam(defaultValue = "") code: String,
+        @RequestParam(name = UpholdLabel.FIELD, defaultValue = "") shown: String,
         authentication: Authentication,
         request: HttpServletRequest,
         redirect: RedirectAttributes,
@@ -148,7 +149,7 @@ internal class ReportsController(
         if (id == null || how == null) return ModerationPages.notFound()
         val adminId = ModerationPages.adminId(authentication)
         val from = addresses.orNull(request)
-        val form = upholdForm(id, expectedReason, how, priority = false)
+        val form = upholdForm(id, expectedReason, how, UpholdLabel.posted(shown, how))
         return Decisions.decideGated(form, note, redirect, { secondFactor.prove(request.session, adminId, code, from) }) { proof ->
             when (console.uphold(id, expectedReason, how, note, proof, adminId, from)) {
                 is UpholdResult.Done -> if (how == Takedown.BLOCK) "Upheld: blocked as evidence. Now follow runbook §2." else "Upheld."
@@ -171,26 +172,19 @@ internal class ReportsController(
                 // A report of words or of a member holds nothing: one Uphold records the decision,
                 // as runbook §3.3 tells the operator to type it.
                 case.media.isEmpty() -> {
-                    listOf(
-                        upholdForm(
-                            case.reportId,
-                            case.reason,
-                            if (case.priority) Takedown.BLOCK else Takedown.DELETE,
-                            case.priority,
-                            "Uphold",
-                        ),
-                    )
+                    val takedown = if (case.priority) Takedown.BLOCK else Takedown.DELETE
+                    listOf(upholdForm(case.reportId, case.reason, takedown, UpholdLabel.UPHOLD))
                 }
 
                 // `entry_report_uphold` answers RECLASSIFY_FIRST to a delete of a priority report.
                 case.priority -> {
-                    listOf(upholdForm(case.reportId, case.reason, Takedown.BLOCK, priority = true))
+                    listOf(upholdForm(case.reportId, case.reason, Takedown.BLOCK, UpholdLabel.EVIDENCE))
                 }
 
                 else -> {
                     listOf(
-                        upholdForm(case.reportId, case.reason, Takedown.DELETE, priority = false),
-                        upholdForm(case.reportId, case.reason, Takedown.BLOCK, priority = false),
+                        upholdForm(case.reportId, case.reason, Takedown.DELETE, UpholdLabel.DELETE),
+                        upholdForm(case.reportId, case.reason, Takedown.BLOCK, UpholdLabel.BLOCK),
                     )
                 }
             }.map { it.again(note = "", askCode = askCode, error = null) }
@@ -218,19 +212,13 @@ internal class ReportsController(
         id: UUID,
         expectedReason: String,
         takedown: Takedown,
-        priority: Boolean,
-        label: String? = null,
+        label: UpholdLabel,
     ) = DecisionForm(
         id = "uphold-${takedown.name.lowercase()}",
         back = pageOf(id),
         action = "${pageOf(id)}/uphold",
-        label =
-            label ?: when {
-                takedown == Takedown.DELETE -> "Uphold, delete"
-                priority -> "Block as evidence, then runbook §2"
-                else -> "Uphold, block"
-            },
-        hidden = mapOf(EXPECTED_REASON to expectedReason, "takedown" to takedown.name),
+        label = label.text,
+        hidden = mapOf(EXPECTED_REASON to expectedReason, "takedown" to takedown.name, UpholdLabel.FIELD to label.name),
         gated = true,
     )
 
@@ -274,6 +262,41 @@ internal class ReportsController(
         const val DO_NOT_VIEW = "DO NOT VIEW — runbook §2"
         const val ALREADY_DECIDED = "Already decided by someone else."
         const val STALE = "The report changed after this page was shown. Read it again before deciding."
+    }
+}
+
+/**
+ * An uphold form's label (spec §5.1), which the report's page chose from the report's priority and
+ * whether it holds media. The form carries its key in a hidden field, so that the form re-rendered
+ * after "code needed", "wrong code" or a refused note keeps the label the moderator was shown,
+ * without a second read of the report (which `entry_report_read` would log as a `READ`).
+ *
+ * The key decides the label and nothing else: the uphold is the function's, by the posted
+ * `takedown`, against the report as it stands. A key that is unknown, or that does not fit the
+ * posted takedown, falls back to that takedown's plain label, never to text from the request.
+ */
+internal enum class UpholdLabel(
+    val text: String,
+    private val takedowns: Set<Takedown>,
+) {
+    /** A report that holds nothing: one form records the decision (runbook §3.3). */
+    UPHOLD("Uphold", setOf(Takedown.DELETE, Takedown.BLOCK)),
+    DELETE("Uphold, delete", setOf(Takedown.DELETE)),
+    BLOCK("Uphold, block", setOf(Takedown.BLOCK)),
+
+    /** A priority report's one uphold. */
+    EVIDENCE("Block as evidence, then runbook §2", setOf(Takedown.BLOCK)),
+    ;
+
+    companion object {
+        const val FIELD = "label"
+
+        fun posted(
+            key: String,
+            takedown: Takedown,
+        ): UpholdLabel =
+            entries.firstOrNull { it.name == key && takedown in it.takedowns }
+                ?: if (takedown == Takedown.DELETE) DELETE else BLOCK
     }
 }
 

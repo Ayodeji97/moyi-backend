@@ -155,6 +155,51 @@ class ReportQueueTest(
             listOf("REPORT_RECLASSIFIED|SUCCEEDED", "REPORT_UPHELD|SUCCEEDED", "REPORT_UPHELD|SUCCEEDED")
     }
 
+    /**
+     * The uphold form re-rendered by the step-up ("code needed", "wrong code") keeps the label the
+     * report's page showed. The form is posted as the page rendered it, its hidden fields read
+     * from the page, so the oracle is the page itself and not a restated label.
+     */
+    @Test
+    fun `a re-rendered uphold form keeps its label, for a priority report and for one that holds nothing`() {
+        val (entry, photo) = rig.entryWithPhoto()
+        val priority = rig.report(entry, "MINOR_SEXUAL_CONTENT")
+        val empty = rig.report(UUID.randomUUID(), "HARASSMENT")
+        val stale = rig.session(secondFactorAt = null)
+
+        mapOf(
+            priority to ("uphold-block" to "Block as evidence, then runbook §2"),
+            empty to ("uphold-delete" to "Uphold"),
+        ).forEach { (report, shown) ->
+            val (formId, label) = shown
+            val page = rig.get(stale, "/admin/reports/$report").contentAsString
+            val form = page.substringAfter("""id="$formId"""").substringBefore("</form>")
+            form shouldContain "<h3>$label</h3>"
+            val hidden =
+                Regex("""<input type="hidden" name="([^"]+)" value="([^"]*)">""")
+                    .findAll(form)
+                    .associate { it.groupValues[1] to it.groupValues[2] }
+            val posted = hidden + ("note" to NOTE)
+
+            val codeNeeded = rig.post(stale, "/admin/reports/$report/uphold", posted).response
+            // The rig's session has no authenticator enrolled, so any code is refused.
+            val wrongCode = rig.post(stale, "/admin/reports/$report/uphold", posted + ("code" to "000000")).response
+
+            withClue("$report, code needed") {
+                codeNeeded.status shouldBe 200
+                codeNeeded.contentAsString shouldContain "<h1>$label</h1>"
+                codeNeeded.contentAsString shouldContain """<button type="submit">$label</button>"""
+            }
+            withClue("$report, wrong code") {
+                wrongCode.status shouldBe 401
+                wrongCode.contentAsString shouldContain "<h1>$label</h1>"
+                wrongCode.contentAsString shouldContain """<button type="submit">$label</button>"""
+            }
+        }
+        rig.reportStatus(priority) shouldBe "OPEN|MINOR_SEXUAL_CONTENT"
+        rig.assetState(photo).substringAfter('|') shouldBe "QUARANTINED|false"
+    }
+
     @Test
     fun `a decision on a page whose reason changed is refused stale, and nothing is taken down`() {
         val (entry, photo) = rig.entryWithPhoto()

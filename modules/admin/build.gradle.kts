@@ -59,11 +59,16 @@ dependencies {
 // `app`'s execution data, which covers only classes on this module's class directories.
 // Restated tests in this module would test the same thing twice to move a number (the
 // convention's own warning), and a lower floor or an exclusion would hide real gaps.
+//
+// Only the coverage check depends on `:app:test`. The convention finalizes `test` with the
+// report, so a report that depended on it would make `:modules:admin:test --tests X` run the
+// whole, unfiltered app suite. The report only orders itself after `:app:test` when both run, and
+// reads its data only if it exists, so a module-only run reports this module's own tests.
 val appTestExecution = project(":app").layout.buildDirectory.file("jacoco/test.exec")
 
 tasks.named<JacocoReport>("jacocoTestReport") {
-    dependsOn(":app:test")
-    executionData(appTestExecution)
+    mustRunAfter(":app:test")
+    executionData(files(appTestExecution).filter { it.exists() })
 }
 
 tasks.named<JacocoCoverageVerification>("jacocoTestCoverageVerification") {

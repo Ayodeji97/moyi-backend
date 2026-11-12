@@ -199,6 +199,21 @@ internal class QuarantineModerationTest(
         logged("BLOCKED").shouldBeEmpty()
     }
 
+    @Test
+    fun `block after a console delete answers gone, without calling the function, before the purge runs`() {
+        val photo = quarantined()
+        decide { port.delete(photo, ACTOR, NOTE) }.outcome shouldBe DeleteOutcome.DELETED
+        status(photo) shouldBe "DELETED|QUARANTINED"
+
+        // Spec §9.3: the removal may already be in an export; a block now would make it a tip-off.
+        // V36's function would accept this row (DELETED, purged_at still null); the port must not.
+        decide { port.block(photo, ACTOR, NOTE) } shouldBe QuarantineDecision(BlockOutcome.GONE, false)
+
+        status(photo) shouldBe "DELETED|QUARANTINED"
+        evidenceHeld(photo) shouldBe false
+        logged("BLOCKED").shouldBeEmpty()
+    }
+
     // --- delete ------------------------------------------------------------------------------------------------------
 
     @Test

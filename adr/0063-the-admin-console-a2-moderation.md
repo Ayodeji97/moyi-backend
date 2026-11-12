@@ -146,7 +146,11 @@ persistence bean, ADR-0055 ruling D), `@Transactional(readOnly = true)`. Shown: 
 - unknown or malformed metadata (a purpose that is not one of the four, a `reportDriven` that is not
   a JSON boolean) is withheld, never thrown: it cannot fail an export build;
 - `reportDriven == null` is withheld;
-- the export never carries a `justification`.
+- the export never carries a `justification`;
+- a shown removal stays true only if it is never followed by a block. The console guarantees that
+  itself: the port's block answers `GONE` for a `DELETED` asset not held as evidence, under the row
+  lock, without calling `media_quarantine_block`, which would still accept it until the purge
+  runs. The script path does not (Owed).
 The archive's statement is one sentence for everyone, whatever was withheld (spec §9.3).
 
 **14. The user lookup is now `POST /admin/users`** (`q`, `purpose`, `note`, CSRF). This departs
@@ -268,6 +272,9 @@ acts A2 leaves on the server (holding or blocking an asset outside the queue by 
   ruling 1). Not built in A2.
 - **A5** (content access with a typed justification, FR-112), before A3 (owner ruling 2); then A3,
   A4, and the `audit_log` retention job (ADR-0055, Owed).
+- **The script path can still block a DELETED, unpurged asset after a console removal;** a V62
+  change to `media_quarantine_block` (refuse DELETED unless `evidence_held`) closes it for both
+  paths. Until then, the runbook forbids it (`ops/moderation/takedown.md`, section 1 step 3).
 - **The owner:** switching the console on stays as `ops/admin/README.md` says; inviting a moderator
   is `admin_invite(email, 'MODERATOR')` there.
 

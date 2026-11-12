@@ -79,6 +79,15 @@ Not urgent: nobody but its author can see it. Look at the queue once a day while
    - **If it is child sexual abuse material:** do not delete it. Block it as evidence, then section 2.
      On the server that is `moyi media quarantine block <id> "<why>"`; in the console, **Block as
      evidence** is the first form on the asset's page. It becomes `BLOCKED` and is never released.
+     **On the server, check its status first, and do not block an asset whose status is
+     `DELETED`:**
+     ```
+     SELECT status, moderation_verdict, evidence_held, purged_at FROM media_assets WHERE id = '<id>';
+     ```
+     `media_quarantine_block` still accepts a `DELETED` asset until the purge reaches it, and a
+     console removal may already be listed in its author's data export as "removed"; a block after
+     it would tell them what happened (ADR-0063, Owed). The console refuses it itself (it answers
+     "Already deleted"); the script does not, until V62 changes the function.
    - *Console:* the asset's page offers **Block as evidence**, **Release** and **Delete**, each with a
      note (1 to 400 characters, never shown to the member). Block and delete ask for a code.
    - An unattached quarantined asset is deleted by the hourly reaper a day after it was made, as any
