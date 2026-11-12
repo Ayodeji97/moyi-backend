@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/* The quarantine queue (A2 spec §5.2), in media_quarantine_list's order. A blocked row says not
+       to view it; a row an open report holds is decided in that report. */-->
+<head th:replace="~{admin/layout :: head('Quarantine')}"></head>
+<body>
+<header th:replace="~{admin/layout :: masthead}"></header>
+<nav th:replace="~{admin/layout :: nav(true)}"></nav>
+<main class="wide">
+    <h1>Quarantine</h1>
+    <p th:replace="~{admin/layout :: result}"></p>
+    <p th:if="${#lists.isEmpty(rows)}">Nothing is held back.</p>
+    <table th:unless="${#lists.isEmpty(rows)}" id="quarantine">
+        <thead>
+        <tr><th>Verdict</th><th>Media</th><th>Kind</th><th>Status</th><th>Reason</th><th>Attached</th><th>Held since</th>
+            <th>Age (days)</th><th>Open reports</th></tr>
+        </thead>
+        <tbody>
+        <tr th:each="item : ${rows}" th:attr="data-media=${item.row.mediaId}">
+            <td>
+                <span th:text="${item.row.verdict != null} ? ${item.row.verdict} : '-'"></span>
+                <strong th:if="${item.blocked}" class="warning">DO NOT VIEW — runbook §2</strong>
+            </td>
+            <td><a th:href="@{/admin/quarantine/{id}(id=${item.row.mediaId})}" th:text="${item.row.mediaId}"></a></td>
+            <td th:text="${item.row.kind}"></td>
+            <td th:text="${item.row.status}"></td>
+            <td th:text="${item.row.reason != null} ? ${item.row.reason} : '-'"></td>
+            <td th:text="${item.row.attached} ? 'yes' : 'no'"></td>
+            <td th:text="${item.row.moderatedAt != null} ? ${item.row.moderatedAt} : '-'"></td>
+            <td th:text="${item.ageDays != null} ? ${item.ageDays} : '-'"></td>
+            <td>
+                <span th:text="${item.row.reports}"></span>
+                <span th:if="${item.row.reports > 0}">: decided in the report</span>
+            </td>
+        </tr>
+        </tbody>
+    </table>
+</main>
+</body>
+</html>

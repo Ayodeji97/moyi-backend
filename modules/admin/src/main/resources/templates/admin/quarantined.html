@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/* One held-back asset (A2 spec §5.2): its row, the reports holding it, its history, the View link
+       when §7.4 can allow it, and the decisions, "Block as evidence" first. */-->
+<head th:replace="~{admin/layout :: head('Held-back media')}"></head>
+<body>
+<header th:replace="~{admin/layout :: masthead}"></header>
+<nav th:replace="~{admin/layout :: nav(true)}"></nav>
+<main class="wide">
+    <h1>Held-back media</h1>
+    <dl>
+        <dt>Id</dt><dd th:text="${page.asset.mediaId}"></dd>
+        <dt>Kind</dt><dd th:text="${page.asset.kind}"></dd>
+        <dt>Status</dt><dd th:text="${page.asset.status}"></dd>
+        <dt>Verdict</dt><dd th:text="${page.asset.verdict != null} ? ${page.asset.verdict} : '-'"></dd>
+        <dt>Reason</dt><dd th:text="${page.asset.reason != null} ? ${page.asset.reason} : '-'"></dd>
+        <dt>Attached</dt><dd th:text="${page.asset.attached} ? 'yes' : 'no'"></dd>
+        <dt>Held since</dt><dd th:text="${page.asset.moderatedAt != null} ? ${page.asset.moderatedAt} : '-'"></dd>
+        <dt>Evidence held</dt><dd th:text="${page.asset.evidenceHeld} ? 'yes' : 'no'"></dd>
+    </dl>
+
+    <p th:if="${page.asset.verdict == 'BLOCKED' or page.asset.evidenceHeld}" class="warning" id="blocked">
+        DO NOT VIEW — runbook §2. Deleting blocked evidence is a server step: runbook §2 step 4.</p>
+
+    <section th:unless="${#lists.isEmpty(page.reports)}" aria-labelledby="holding">
+        <h2 id="holding">Open reports holding it</h2>
+        <p>It is decided in the report, not here (runbook §1 step 1).</p>
+        <ul>
+            <li th:each="r : ${page.reports}"><a th:href="@{/admin/reports/{id}(id=${r})}" th:text="${r}"></a></li>
+        </ul>
+    </section>
+
+    <p th:if="${viewable}"><a id="view" th:href="@{/admin/quarantine/{id}(id=${page.asset.mediaId},view='1')}">View</a></p>
+    <figure th:if="${embed}" class="review">
+        <img th:unless="${audio}" th:src="@{/admin/media/{m}/review(m=${page.asset.mediaId},via='QUARANTINE')}"
+             alt="The held photo, as moderation saw it">
+        <audio th:if="${audio}" controls preload="none"
+               th:src="@{/admin/media/{m}/review(m=${page.asset.mediaId},via='QUARANTINE')}"></audio>
+    </figure>
+
+    <section th:unless="${#lists.isEmpty(forms)}" aria-labelledby="decide">
+        <h2 id="decide">Decide</h2>
+        <th:block th:each="f : ${forms}"><form th:replace="~{admin/fragments/decision :: form(${f})}"></form></th:block>
+    </section>
+
+    <h2>History</h2>
+    <table id="history">
+        <thead><tr><th>When</th><th>Who</th><th>What</th><th>Note</th></tr></thead>
+        <tbody>
+        <tr th:each="line : ${page.history}">
+            <td th:text="${line.at}"></td>
+            <td th:text="${line.actor}"></td>
+            <td th:text="${line.action}"></td>
+            <td th:text="${line.note != null} ? ${line.note} : '-'"></td>
+        </tr>
+        </tbody>
+    </table>
+    <p><a th:href="@{/admin/quarantine}">Back to the quarantine queue</a></p>
+</main>
+</body>
+</html>

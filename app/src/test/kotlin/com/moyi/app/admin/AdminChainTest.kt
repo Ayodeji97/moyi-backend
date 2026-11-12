@@ -264,7 +264,7 @@ class AdminChainTest(
 
     private companion object {
         const val CSP =
-            "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+            "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; " +
                 "form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
 
         // The names the sign-in controller and the session guard agree on (plan, Task 4 and 5).

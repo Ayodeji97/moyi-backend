@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/* A decision that decided nothing (A2 spec §10.2): the one form again, the note kept, with the
+       code field when the step-up asks for one or the reason the note was refused. */-->
+<head th:replace="~{admin/layout :: head('Confirm')}"></head>
+<body>
+<header th:replace="~{admin/layout :: masthead}"></header>
+<nav th:replace="~{admin/layout :: nav(true)}"></nav>
+<main>
+    <h1 th:text="${form.label}">Confirm</h1>
+    <p>Nothing has been decided yet.</p>
+    <form th:replace="~{admin/fragments/decision :: form(${form})}"></form>
+    <p><a th:href="@{${form.back}}">Back without deciding</a></p>
+</main>
+</body>
+</html>

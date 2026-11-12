@@ -118,7 +118,7 @@ internal class ModerationConsoleServiceTest(
                 { console.release(photo, NOTE, admin, null) },
                 { console.block(photo, NOTE, proven, admin, null) },
                 { console.delete(photo, NOTE, proven, admin, null) },
-                { console.openForReview(photo, admin, null) },
+                { console.openForReview(photo, ReviewOrigin.Quarantine, admin, null) },
             )
         acting(AdminRole.SUPPORT) { calls.forEach { call -> shouldThrow<AccessDeniedException> { call() } } }
 
@@ -431,7 +431,7 @@ internal class ModerationConsoleServiceTest(
     fun `a moderation quarantine is served, its row written as a quarantine look that no report drove`() {
         val photo = quarantined()
 
-        val copy = acting(AdminRole.MODERATOR) { console.openForReview(photo, admin, null) }.shouldNotBeNull()
+        val copy = acting(AdminRole.MODERATOR) { console.openForReview(photo, ReviewOrigin.Quarantine, admin, null) }.shouldNotBeNull()
 
         FakeMediaStore.closed.get() shouldBe 0 // A committed look hands the copy, open, to the caller.
         copy.use { it.content.readAllBytes() shouldBe FakeMediaStore.BYTES }
@@ -447,21 +447,59 @@ internal class ModerationConsoleServiceTest(
         val (entry, photo) = entryWithPhoto()
         val report = report(entry, "VIOLENCE_OR_SELF_HARM")
 
-        acting(AdminRole.MODERATOR) { console.openForReview(photo, admin, null) }.shouldNotBeNull().close()
+        acting(AdminRole.MODERATOR) { console.openForReview(photo, ReviewOrigin.Report(report), admin, null) }.shouldNotBeNull().close()
 
         audited().single().metadata shouldBe mapOf("via" to "REPORT", "reportId" to report.toString(), "reportDriven" to "true")
     }
 
     @Test
-    fun `a priority or consent report refuses the look before the asset or the store is touched`() {
-        val (minorEntry, minorPhoto) = entryWithPhoto()
-        report(minorEntry, "MINOR_SEXUAL_CONTENT")
-        val (consentEntry, consentPhoto) = entryWithPhoto()
-        report(consentEntry, "NON_CONSENSUAL")
+    fun `a look from a report page that does not hold the asset is refused, the forged id written nowhere`() {
+        val (entry, photo) = entryWithPhoto()
+        report(entry, "VIOLENCE_OR_SELF_HARM")
+        val other = report(entryWithPhoto().first, "VIOLENCE_OR_SELF_HARM")
+        val unknown = UUID.randomUUID()
+        val held = quarantined()
+        Recorder.reset()
 
         acting(AdminRole.MODERATOR) {
-            console.openForReview(minorPhoto, admin, null).shouldBeNull()
-            console.openForReview(consentPhoto, admin, null).shouldBeNull()
+            console.openForReview(photo, ReviewOrigin.Report(other), admin, null).shouldBeNull()
+            console.openForReview(held, ReviewOrigin.Report(unknown), admin, null).shouldBeNull()
+        }
+
+        // Refused on the unlocked read alone: no report lock, no asset lock, no store. The second
+        // reads the asset's unlocked row only to say whether a report drove it.
+        Recorder.calls shouldContainExactly listOf("media.reportsHolding", "media.reportsHolding", "media.asset")
+        FakeMediaStore.opened.shouldBeEmpty()
+        val (forged, unheld) = audited()
+        forged.matches(AuditAction.MEDIA_VIEWED, AuditOutcome.REFUSED, "MEDIA", photo, setOf("reason", "reportDriven"), null)
+        forged.metadata shouldBe mapOf("reason" to "wrong_report", "reportDriven" to "true")
+        unheld.metadata shouldBe mapOf("reason" to "wrong_report", "reportDriven" to "false")
+        audited().forEach {
+            it.metadataText shouldNotContain other.toString()
+            it.metadataText shouldNotContain unknown.toString()
+        }
+    }
+
+    @Test
+    fun `a look from the quarantine page at a reported photo records the quarantine, not a report`() {
+        val (entry, photo) = entryWithPhoto()
+        report(entry, "VIOLENCE_OR_SELF_HARM")
+
+        acting(AdminRole.MODERATOR) { console.openForReview(photo, ReviewOrigin.Quarantine, admin, null) }.shouldNotBeNull().close()
+
+        audited().single().metadata shouldBe mapOf("via" to "QUARANTINE", "reportDriven" to "true")
+    }
+
+    @Test
+    fun `a priority or consent report refuses the look before the asset or the store is touched`() {
+        val (minorEntry, minorPhoto) = entryWithPhoto()
+        val minor = report(minorEntry, "MINOR_SEXUAL_CONTENT")
+        val (consentEntry, consentPhoto) = entryWithPhoto()
+        val consent = report(consentEntry, "NON_CONSENSUAL")
+
+        acting(AdminRole.MODERATOR) {
+            console.openForReview(minorPhoto, ReviewOrigin.Report(minor), admin, null).shouldBeNull()
+            console.openForReview(consentPhoto, ReviewOrigin.Report(consent), admin, null).shouldBeNull()
         }
 
         Recorder.calls shouldNotContain "media.reviewCopy"
@@ -479,7 +517,7 @@ internal class ModerationConsoleServiceTest(
         acting(AdminRole.MODERATOR) { console.release(released, NOTE, admin, null) }
 
         acting(AdminRole.MODERATOR) {
-            listOf(blocked, purged, released).forEach { console.openForReview(it, admin, null).shouldBeNull() }
+            listOf(blocked, purged, released).forEach { console.openForReview(it, ReviewOrigin.Quarantine, admin, null).shouldBeNull() }
         }
 
         FakeMediaStore.opened.shouldBeEmpty()
@@ -492,7 +530,7 @@ internal class ModerationConsoleServiceTest(
         val photo = quarantined()
         FakeMediaStore.unavailable = true
 
-        acting(AdminRole.MODERATOR) { console.openForReview(photo, admin, null) }.shouldBeNull()
+        acting(AdminRole.MODERATOR) { console.openForReview(photo, ReviewOrigin.Quarantine, admin, null) }.shouldBeNull()
 
         val row = audited().single()
         row.matches(AuditAction.MEDIA_VIEWED, AuditOutcome.REFUSED, "MEDIA", photo, setOf("via", "reportDriven", "reason"), null)
@@ -517,7 +555,7 @@ internal class ModerationConsoleServiceTest(
             try {
                 acting(AdminRole.MODERATOR) {
                     transactions.execute { status ->
-                        shouldThrow<RuntimeException> { console.openForReview(photo, admin, null) }
+                        shouldThrow<RuntimeException> { console.openForReview(photo, ReviewOrigin.Quarantine, admin, null) }
                         status.setRollbackOnly()
                         FakeMediaStore.closed.get()
                     }
@@ -541,7 +579,7 @@ internal class ModerationConsoleServiceTest(
         val copy =
             acting(AdminRole.MODERATOR) {
                 transactions.execute { status ->
-                    console.openForReview(photo, admin, null).also {
+                    console.openForReview(photo, ReviewOrigin.Quarantine, admin, null).also {
                         closedBeforeRollback = FakeMediaStore.closed.get()
                         status.setRollbackOnly()
                     }
@@ -635,7 +673,10 @@ internal class ModerationConsoleServiceTest(
                 dismiss.autoCommit = false
                 try {
                     run(dismiss, "SELECT reason FROM entry_reports WHERE id = ? AND status = 'OPEN' FOR UPDATE", report)
-                    val view = CompletableFuture.supplyAsync { acting(AdminRole.MODERATOR) { console.openForReview(photo, admin, null) } }
+                    val view =
+                        CompletableFuture.supplyAsync {
+                            acting(AdminRole.MODERATOR) { console.openForReview(photo, ReviewOrigin.Report(report), admin, null) }
+                        }
                     awaitLockWait(VIEW_REPORT_LOCK)
                     run(dismiss, "SELECT entry_report_dismiss(?, 'op', 'dismissed while viewed')", report)
                     dismiss.commit()
@@ -662,7 +703,7 @@ internal class ModerationConsoleServiceTest(
             CompletableFuture.supplyAsync {
                 acting(AdminRole.MODERATOR) {
                     transactions.execute {
-                        console.openForReview(photo, admin, null)?.use { it.content.readAllBytes() }.also {
+                        console.openForReview(photo, ReviewOrigin.Report(report), admin, null)?.use { it.content.readAllBytes() }.also {
                             viewed.countDown()
                             release.await(DEADLINE_SECONDS, TimeUnit.SECONDS)
                         }

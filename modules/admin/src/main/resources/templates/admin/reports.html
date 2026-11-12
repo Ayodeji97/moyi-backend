@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/* The open reports (A2 spec §5.1), in entry_report_list's order: priority first, then oldest.
+       Ids and facts only; never an entry's words, and never the detail, only whether there is one. */-->
+<head th:replace="~{admin/layout :: head('Reports')}"></head>
+<body>
+<header th:replace="~{admin/layout :: masthead}"></header>
+<nav th:replace="~{admin/layout :: nav(true)}"></nav>
+<main class="wide">
+    <h1>Reports</h1>
+    <p th:if="${#lists.isEmpty(rows)}">No open reports.</p>
+    <table th:unless="${#lists.isEmpty(rows)}" id="reports">
+        <thead>
+        <tr><th>Priority</th><th>Received</th><th>Reason</th><th>Target</th><th>Entry or member</th><th>Media held</th><th>Detail</th><th>Age (days)</th><th>Report</th></tr>
+        </thead>
+        <tbody>
+        <tr th:each="item : ${rows}" th:attr="data-report=${item.row.reportId}">
+            <td><strong th:if="${item.row.priority}" class="warning">DO NOT VIEW — runbook §2</strong><span th:unless="${item.row.priority}">-</span></td>
+            <td th:text="${item.row.receivedAt}"></td>
+            <td th:text="${item.row.reason}"></td>
+            <td th:text="${item.row.target}"></td>
+            <td th:text="${item.row.entryId != null} ? ${item.row.entryId} : ${item.row.reportedMemberId}"></td>
+            <td th:text="${item.row.held}"></td>
+            <td th:text="${item.row.hasDetail} ? 'yes' : 'no'"></td>
+            <td th:text="${item.ageDays}"></td>
+            <td><a th:href="@{/admin/reports/{id}(id=${item.row.reportId})}" th:text="${item.row.reportId}"></a></td>
+        </tr>
+        </tbody>
+    </table>
+</main>
+</body>
+</html>

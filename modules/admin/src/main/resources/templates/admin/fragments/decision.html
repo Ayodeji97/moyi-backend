@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+<!--/* One decision (A2 spec §5.1, §5.2, §10.2): the hidden reason the page showed, a required note,
+       and, for an irreversible act whose second factor is not fresh, a code field. th:text only:
+       the note a moderator typed is shown back escaped. */-->
+<form th:fragment="form(f)" method="post" th:action="@{${f.action}}" class="decision" th:id="${f.id}">
+    <h3 th:text="${f.label}">Dismiss</h3>
+    <p th:if="${f.warning != null}" class="warning" th:text="${f.warning}">Warning.</p>
+    <input th:each="field : ${f.hidden}" type="hidden" th:name="${field.key}" th:value="${field.value}">
+    <div class="field" th:unless="${#lists.isEmpty(f.reasons)}">
+        <label th:for="${f.id + '-reason'}">New reason</label>
+        <select th:id="${f.id + '-reason'}" name="newReason" required>
+            <option th:each="reason : ${f.reasons}" th:value="${reason}" th:text="${reason}">OTHER</option>
+        </select>
+    </div>
+    <div class="field">
+        <label th:for="${f.id + '-note'}">Note</label>
+        <p th:id="${f.id + '-note-hint'}" class="hint" th:text="${f.noteHint}">Required.</p>
+        <textarea th:id="${f.id + '-note'}" name="note" rows="3" required
+                  th:attr="aria-describedby=${f.id + '-note-hint'}" th:text="${f.note}"></textarea>
+    </div>
+    <div class="field" th:if="${f.askCode}">
+        <label th:for="${f.id + '-code'}">Code from your authenticator app</label>
+        <p th:id="${f.id + '-code-hint'}" class="hint">This cannot be undone, so it needs a code proven in the last five minutes.</p>
+        <input th:id="${f.id + '-code'}" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+               autocomplete="one-time-code" required th:attr="aria-describedby=${f.id + '-code-hint'}">
+    </div>
+    <p th:if="${f.error != null}" class="error" role="alert" th:text="${f.error}">Error.</p>
+    <button type="submit" th:text="${f.label}">Dismiss</button>
+</form>
+</body>
+</html>

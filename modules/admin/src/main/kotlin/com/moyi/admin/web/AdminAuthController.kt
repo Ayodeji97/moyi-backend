@@ -3,6 +3,7 @@ package com.moyi.admin.web
 import com.moyi.admin.service.AdminProperties
 import com.moyi.admin.service.AdminSignIn
 import com.moyi.admin.service.ConditionalOnAdminConsole
+import com.moyi.admin.service.ModerationConsole
 import com.moyi.admin.service.PasswordStep
 import com.moyi.admin.service.TotpStep
 import com.moyi.common.security.ClientAddress
@@ -45,6 +46,8 @@ internal class AdminAuthController(
     private val addresses: ClientAddressResolver,
     private val properties: AdminProperties,
     private val clock: Clock,
+    private val console: ModerationConsole,
+    private val secondFactor: SecondFactor,
 ) {
     private val contexts = SecurityContextHolder.getContextHolderStrategy()
     private val contextRepository = HttpSessionSecurityContextRepository()
@@ -128,8 +131,21 @@ internal class AdminAuthController(
         return "redirect:$LOGIN?signedOut"
     }
 
+    /**
+     * The front page. A moderator also sees each queue's open count (A2 spec §5), read through
+     * the ports' count methods, which write no log row and no audit row.
+     */
     @GetMapping("/admin")
-    fun home(): String = "admin/home"
+    fun home(
+        authentication: Authentication,
+        model: Model,
+    ): String {
+        if (secondFactor.moderates(authentication)) {
+            model.addAttribute("moderator", true)
+            model.addAttribute("counts", console.counts())
+        }
+        return "admin/home"
+    }
 
     private fun establish(
         request: HttpServletRequest,
