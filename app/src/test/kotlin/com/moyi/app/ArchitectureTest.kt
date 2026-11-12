@@ -449,12 +449,15 @@ class ArchitectureTest {
     }
 
     @Test
-    fun `only the admin module imports the admin lookups and PasswordHashing`() {
+    fun `only the admin module imports the admin lookups, PasswordHashing and the quarantine port`() {
         // Admin console A1: these ports expose an address, a lock, a session count, a
         // bond's partner and the password hasher, which no other caller has any use for.
+        // A2 adds media's quarantine port and its types: decisions on held-back media and
+        // the bytes of a review copy, for the console only (A2 spec §7.1).
         // Kotlin's `internal` cannot hide a public `api` interface from a module that
         // depends on its module, so the import is what this sees. The declaring module
-        // and `admin` may; every other module, `common/*` and `app` may not.
+        // and `admin` may; every other module, `common/*` and `app` may not. A nested
+        // type (`Review.Allowed`) is its outer type's.
         val declaredIn =
             mapOf(
                 "com.moyi.identity.api.UserAdminLookup" to "identity",
@@ -462,20 +465,37 @@ class ArchitectureTest {
                 "com.moyi.identity.api.PasswordHashing" to "identity",
                 "com.moyi.bond.api.BondAdminLookup" to "bond",
                 "com.moyi.bond.api.BondAdminView" to "bond",
-            )
+            ) +
+                listOf(
+                    "QuarantineModeration",
+                    "QuarantineDecision",
+                    "ReleaseOutcome",
+                    "BlockOutcome",
+                    "DeleteOutcome",
+                    "QuarantineRow",
+                    "QuarantinedAsset",
+                    "ModerationLogLine",
+                    "Review",
+                    "ReviewRefusal",
+                    "ReviewCopy",
+                ).associate { "com.moyi.media.api.$it" to "media" }
         val violations =
             project.files.flatMap { file ->
                 val path = file.normalisedProjectPath
                 val module = Regex("^/modules/([^/]+)/").find(path)?.groupValues?.get(1)
                 file.imports
-                    .filter { import -> declaredIn.keys.any { import.name == it } }
-                    .filter { import -> module != "admin" && module != declaredIn.getValue(import.name) }
-                    .map { "$path: ${it.name}" }
+                    .mapNotNull { import ->
+                        declaredIn.keys
+                            .firstOrNull { import.name == it || import.name.startsWith("$it.") }
+                            ?.let { declared -> import to declared }
+                    }.filter { (_, declared) -> module != "admin" && module != declaredIn.getValue(declared) }
+                    .map { (import, _) -> "$path: ${import.name}" }
             }
 
         assertTrue(
             violations.isEmpty(),
-            "Only the admin module (and the module declaring them) may import the admin lookups and PasswordHashing. Found: $violations",
+            "Only the admin module (and the module declaring them) may import the admin lookups, PasswordHashing and " +
+                "the quarantine port. Found: $violations",
         )
     }
 
