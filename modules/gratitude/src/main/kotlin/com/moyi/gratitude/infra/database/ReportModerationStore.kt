@@ -42,6 +42,9 @@ internal class ReportModerationStore(
 ) : ReportModeration {
     private val jdbc = JdbcClient.create(jdbcTemplate)
 
+    /** The domain's own list, read, never restated: no SQL, and no transaction needed. */
+    override fun reasons(): List<String> = ReportReason.entries.map { it.name }
+
     @Transactional(propagation = Propagation.MANDATORY)
     override fun queue(actor: String): List<ReportRow> =
         jdbc

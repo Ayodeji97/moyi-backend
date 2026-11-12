@@ -9,6 +9,7 @@ import com.moyi.common.security.ClientAddressResolver
 import com.moyi.gratitude.api.DismissOutcome
 import com.moyi.gratitude.api.ReclassifyOutcome
 import com.moyi.gratitude.api.ReportCase
+import com.moyi.gratitude.api.ReportModeration
 import com.moyi.gratitude.api.ReportRow
 import com.moyi.gratitude.api.Takedown
 import com.moyi.gratitude.api.UpholdResult
@@ -36,6 +37,9 @@ import java.util.UUID
  * `MODERATOR` here too, not only in the service, so that a `SUPPORT` session meets the admin
  * `403` page on every route before any id is parsed (spec §4).
  *
+ * The reclassify form's choice is [ReportModeration.reasons]: gratitude's domain's own list, read
+ * here and never restated, which writes nothing and needs no transaction.
+ *
  * Named as a bean: gratitude's member-facing `ReportsController` (the report route) has the
  * default name, and two beans may not share one.
  */
@@ -45,6 +49,7 @@ import java.util.UUID
 @Suppress("TooManyFunctions") // One handler per route of spec §5.1, and the forms they render.
 internal class ReportsController(
     private val console: ModerationConsole,
+    private val reports: ReportModeration,
     private val secondFactor: SecondFactor,
     private val addresses: ClientAddressResolver,
     private val clock: Clock,
@@ -206,7 +211,7 @@ internal class ReportsController(
         "${pageOf(id)}/reclassify",
         "Reclassify",
         mapOf(EXPECTED_REASON to expectedReason),
-        reasons = REASONS - expectedReason,
+        reasons = reports.reasons() - expectedReason,
     )
 
     private fun upholdForm(
@@ -269,13 +274,6 @@ internal class ReportsController(
         const val DO_NOT_VIEW = "DO NOT VIEW — runbook §2"
         const val ALREADY_DECIDED = "Already decided by someone else."
         const val STALE = "The report changed after this page was shown. Read it again before deciding."
-
-        /**
-         * The five report reasons, for the reclassify form's choice. Gratitude's domain owns the
-         * set and the port refuses a name outside it (`UNKNOWN_REASON`), so a list that drifted
-         * would offer a reason the decision then refuses, never decide on one that does not exist.
-         */
-        val REASONS = listOf("NON_CONSENSUAL", "MINOR_SEXUAL_CONTENT", "VIOLENCE_OR_SELF_HARM", "HARASSMENT", "OTHER")
     }
 }
 

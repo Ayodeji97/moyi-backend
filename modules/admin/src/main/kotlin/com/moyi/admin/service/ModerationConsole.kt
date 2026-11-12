@@ -304,10 +304,12 @@ internal class ModerationConsole(
      * 3. the asset under `FOR SHARE`, its holds re-read against step 1's, and media's half.
      *
      * [origin] is the page the moderator came from, which the row records as `via` (spec §9.2).
-     * A report's page is taken at its word only when that report holds the asset: one that does
-     * not is refused `wrong_report` before any lock or the store, and its id is not written, so
-     * a forged origin never reaches the audit log. A report that held the asset at step 1 and
-     * not at step 3 is step 3's `changed`.
+     * It is taken at its word only when step 1's holds agree with it: a report's page only when
+     * that report holds the asset, the quarantine page only when no open report does (that page
+     * offers no View while one does). Either forgery is refused `wrong_origin` before any lock or
+     * the store, and the row names neither the page nor any id the link carried, so a forged
+     * origin never reaches the audit log. A report that held the asset at step 1 and not at
+     * step 3 is step 3's `changed`.
      *
      * The `MEDIA_VIEWED` row is written (and flushed) before the copy is returned, and the
      * transaction commits as this returns, before the caller streams a byte. The caller closes
@@ -324,9 +326,10 @@ internal class ModerationConsole(
         from: ClientAddress?,
     ): ReviewCopy? {
         val holding = media.reportsHolding(mediaId)
+        val believed = believed(origin, holding)
         val look =
-            if (origin is ReviewOrigin.Report && origin.reportId !in holding) {
-                Look.Refused(WRONG_REPORT)
+            if (!believed) {
+                Look.Refused(WRONG_ORIGIN)
             } else {
                 when (reports.reviewableReasons(holding)) {
                     ReasonsReview.PRIORITY_REPORT -> Look.Refused(PRIORITY_REPORT)
@@ -338,7 +341,7 @@ internal class ModerationConsole(
         copy?.let(::closeUnlessCommitted)
         var recorded = false
         try {
-            recordLook(mediaId, holding, origin, look, adminId, from)
+            recordLook(mediaId, holding, origin.takeIf { believed }, look, adminId, from)
             recorded = true
         } finally {
             // A look whose record failed shows nothing: its bytes are never handed back.
@@ -353,28 +356,24 @@ internal class ModerationConsole(
     /**
      * The `MEDIA_VIEWED` row (spec §9.2): which page the look came through, whether a report drove
      * it, and a refusal's reason. A refused look has no answer of the port's to say whether a report
-     * drove it, so the row reads it from the holds and the asset's own hold reason. A report's page
-     * that does not hold the asset is recorded by its refusal alone, with no `via`: neither the
-     * page nor the id it named is a fact.
+     * drove it, so the row reads it from the holds and the asset's own hold reason. An [origin] that
+     * was not believed is null here, and the row is its refusal alone, with no `via`: neither the
+     * page nor an id it named is a fact.
      */
     @Suppress("LongParameterList") // The look's asset, holds, origin and answer, and who asked from where.
     private fun recordLook(
         mediaId: UUID,
         holding: List<UUID>,
-        origin: ReviewOrigin,
+        origin: ReviewOrigin?,
         look: Look,
         adminId: UUID,
         from: ClientAddress?,
     ) {
         val via =
             when (origin) {
-                is ReviewOrigin.Report -> {
-                    if (origin.reportId in holding) mapOf("via" to "REPORT", "reportId" to origin.reportId.toString()) else emptyMap()
-                }
-
-                ReviewOrigin.Quarantine -> {
-                    mapOf("via" to "QUARANTINE")
-                }
+                is ReviewOrigin.Report -> mapOf("via" to "REPORT", "reportId" to origin.reportId.toString())
+                ReviewOrigin.Quarantine -> mapOf("via" to "QUARANTINE")
+                null -> emptyMap()
             }
         val (outcome, facts) =
             when (look) {
@@ -397,6 +396,19 @@ internal class ModerationConsole(
             clientAddress = from,
         )
     }
+
+    /**
+     * Whether step 1's holds agree with the page the link names: a report's page must name a report
+     * that holds the asset, and the quarantine page never offers a look at one a report holds.
+     */
+    private fun believed(
+        origin: ReviewOrigin,
+        holding: List<UUID>,
+    ): Boolean =
+        when (origin) {
+            is ReviewOrigin.Report -> origin.reportId in holding
+            ReviewOrigin.Quarantine -> holding.isEmpty()
+        }
 
     /**
      * Closes [copy] when the transaction ends without committing. Any status but `COMMITTED`: a
@@ -504,7 +516,7 @@ internal class ModerationConsole(
         const val UPHELD = "UPHELD"
         const val PRIORITY_REPORT = "priority_report"
         const val CONSENT_REPORT = "consent_report"
-        const val WRONG_REPORT = "wrong_report"
+        const val WRONG_ORIGIN = "wrong_origin"
         const val OUTCOME = "outcome"
         const val DECISION_METRIC = "moyi.admin.moderation.decision"
         const val REVIEW_METRIC = "moyi.admin.media.review"
@@ -523,7 +535,7 @@ internal class ModerationConsole(
 
 /**
  * The page a look came through (spec §9.2's `via`): a report's, naming it, or the quarantine
- * queue's. The controller passes what the link it served said; the console checks a report's
+ * queue's. The controller passes what the link it served said; the console checks either
  * against the asset's holds before it is believed.
  */
 internal sealed interface ReviewOrigin {

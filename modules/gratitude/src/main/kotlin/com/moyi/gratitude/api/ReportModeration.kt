@@ -23,6 +23,12 @@ import java.util.UUID
  * [note] is the moderator's, written by the function to its own log and nowhere else here.
  */
 interface ReportModeration {
+    /**
+     * The five reasons' names, in the order gratitude's domain declares them: the one list the
+     * console offers, so that a reason added or renamed there reaches the reclassify form too.
+     */
+    fun reasons(): List<String>
+
     /** `entry_report_list`: the open reports, priority first, then oldest. Writes its `LISTED` row. */
     fun queue(actor: String): List<ReportRow>
 

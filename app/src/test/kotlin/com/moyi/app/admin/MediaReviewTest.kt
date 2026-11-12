@@ -118,27 +118,46 @@ class MediaReviewTest(
     }
 
     @Test
-    fun `a report page's link is believed only for a report that holds the asset, and a forged one is never written`() {
+    fun `a link is believed only from a page that offers it, and a forged origin is never written`() {
         val (entry, photo) = rig.entryWithPhoto()
         val report = rig.report(entry, "VIOLENCE_OR_SELF_HARM")
         val other = rig.report(rig.entryWithPhoto().first, "VIOLENCE_OR_SELF_HARM")
         val session = rig.session()
         val admin = rig.adminOf(session)
+        val noPage = rig.get(session, "/admin/no-such-page")
 
         val honest = review(session, photo, "via" to "REPORT", "report" to report.toString())
-        val forged = review(session, photo, "via" to "REPORT", "report" to other.toString())
+        val forged =
+            mapOf(
+                "another report's page" to review(session, photo, "via" to "REPORT", "report" to other.toString()),
+                // The quarantine page offers no View while an open report holds the asset.
+                "the quarantine page" to review(session, photo, "via" to "QUARANTINE"),
+            )
 
         honest.status shouldBe 200
-        forged.status shouldBe 404
-        val (served, refused) = rig.audited(admin)
+        forged.forEach { (case, response) ->
+            withClue(case) {
+                response.status shouldBe 404
+                response.contentAsString shouldBe noPage.contentAsString
+                response.contentType shouldStartWith "text/html"
+            }
+        }
+        val (served, refusedReport, refusedQuarantine) = rig.audited(admin)
         served.head shouldBe "MEDIA_VIEWED|SUCCEEDED|$photo"
         served.metadata shouldContain """"via": "REPORT""""
         served.metadata shouldContain """"reportId": "$report""""
-        refused.head shouldBe "MEDIA_VIEWED|REFUSED|$photo"
-        refused.metadata shouldContain """"reason": "wrong_report""""
-        refused.metadata shouldNotContain "via"
-        refused.metadata shouldNotContain other.toString()
-        ReviewObjectStore.opened.size shouldBe 1
+        listOf(refusedReport, refusedQuarantine).forEach { refused ->
+            withClue(refused.metadata) {
+                refused.head shouldBe "MEDIA_VIEWED|REFUSED|$photo"
+                refused.metadata shouldContain """"reason": "wrong_origin""""
+                refused.metadata shouldContain """"reportDriven": true"""
+                refused.metadata shouldNotContain "via"
+                refused.metadata shouldNotContain "reportId"
+                refused.metadata shouldNotContain other.toString()
+            }
+        }
+        // Only the honest look opened the store.
+        ReviewObjectStore.opened shouldContainExactly listOf("v/${rig.keyOf(photo)}/display.webp")
     }
 
     @Test

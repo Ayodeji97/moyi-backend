@@ -63,6 +63,36 @@ class ReportQueueTest(
         page shouldNotContain "Uphold, delete"
     }
 
+    /**
+     * The oracle is the schema's own CHECK on `entry_reports.reason`, not the port: a port whose list
+     * dropped or added a name would agree with itself, and the database would still refuse or accept
+     * what the form offered.
+     */
+    @Test
+    fun `the reclassify choice is every reason the schema allows, in order, except the report's own`() {
+        val allowed =
+            Regex("'([A-Z_]+)'")
+                .findAll(
+                    rig.jdbc.queryForObject(
+                        "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'entry_reports_reason_check'",
+                        String::class.java,
+                    )!!,
+                ).map { it.groupValues[1] }
+                .toList()
+        val session = rig.session()
+
+        allowed.size shouldBe 5
+        allowed.forEach { reason ->
+            val report = rig.report(rig.entryWithPhoto().first, reason)
+            val page = rig.get(session, "/admin/reports/$report").contentAsString
+            val select = page.substringAfter("""<select id="reclassify-reason"""", "").substringBefore("</select>")
+            withClue(reason) {
+                Regex("""<option value="([A-Z_]+)">""").findAll(select).map { it.groupValues[1] }.toList() shouldContainExactly
+                    allowed - reason
+            }
+        }
+    }
+
     @Test
     fun `dismiss works end to end, says Dismissed, and the decided page says the detail was emptied`() {
         val (entry, photo) = rig.entryWithPhoto()

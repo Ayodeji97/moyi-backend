@@ -22,7 +22,8 @@ import org.springframework.web.servlet.ModelAndView
  * are all the same `404` page.
  *
  * `via` and `report` name the page the link was on (spec §9.2), as the report and quarantine
- * pages build it. The console believes a report's only when that report holds the asset.
+ * pages build it. The console believes a report's only when that report holds the asset, and
+ * the quarantine's only when no open report does.
  *
  * Headers: the served variant's own content type, `inline`, `nosniff` (the chain's default
  * headers) and `Cross-Origin-Resource-Policy: same-origin`. `Cache-Control: no-store` is the

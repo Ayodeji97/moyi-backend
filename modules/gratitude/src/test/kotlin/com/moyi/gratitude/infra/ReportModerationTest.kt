@@ -9,6 +9,7 @@ import com.moyi.gratitude.api.ReportModeration
 import com.moyi.gratitude.api.Takedown
 import com.moyi.gratitude.api.TakedownOutcome
 import com.moyi.gratitude.api.UpholdResult
+import com.moyi.gratitude.domain.ReportReason
 import com.moyi.gratitude.infra.database.ReportModerationStore
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
@@ -50,6 +51,11 @@ internal class ReportModerationTest(
     }
 
     // --- reads -------------------------------------------------------------------------------------------------------
+
+    @Test
+    fun `the reasons are the domain's own, every one in its declared order, read outside any transaction`() {
+        port.reasons() shouldContainExactly ReportReason.entries.map { it.name }
+    }
 
     @Test
     fun `the queue is the function's rows in its order, priority first, and the look is logged once`() {

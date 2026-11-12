@@ -453,7 +453,7 @@ internal class ModerationConsoleServiceTest(
     }
 
     @Test
-    fun `a look from a report page that does not hold the asset is refused, the forged id written nowhere`() {
+    fun `a look from a page that never offered it is refused before any lock, the forged origin written nowhere`() {
         val (entry, photo) = entryWithPhoto()
         report(entry, "VIOLENCE_OR_SELF_HARM")
         val other = report(entryWithPhoto().first, "VIOLENCE_OR_SELF_HARM")
@@ -464,30 +464,25 @@ internal class ModerationConsoleServiceTest(
         acting(AdminRole.MODERATOR) {
             console.openForReview(photo, ReviewOrigin.Report(other), admin, null).shouldBeNull()
             console.openForReview(held, ReviewOrigin.Report(unknown), admin, null).shouldBeNull()
+            // The quarantine page offers no View while an open report holds the asset.
+            console.openForReview(photo, ReviewOrigin.Quarantine, admin, null).shouldBeNull()
         }
 
         // Refused on the unlocked read alone: no report lock, no asset lock, no store. The second
         // reads the asset's unlocked row only to say whether a report drove it.
-        Recorder.calls shouldContainExactly listOf("media.reportsHolding", "media.reportsHolding", "media.asset")
+        Recorder.calls shouldContainExactly
+            listOf("media.reportsHolding", "media.reportsHolding", "media.asset", "media.reportsHolding")
         FakeMediaStore.opened.shouldBeEmpty()
-        val (forged, unheld) = audited()
+        val (forged, unheld, forgedQuarantine) = audited()
         forged.matches(AuditAction.MEDIA_VIEWED, AuditOutcome.REFUSED, "MEDIA", photo, setOf("reason", "reportDriven"), null)
-        forged.metadata shouldBe mapOf("reason" to "wrong_report", "reportDriven" to "true")
-        unheld.metadata shouldBe mapOf("reason" to "wrong_report", "reportDriven" to "false")
+        forged.metadata shouldBe mapOf("reason" to "wrong_origin", "reportDriven" to "true")
+        unheld.metadata shouldBe mapOf("reason" to "wrong_origin", "reportDriven" to "false")
+        forgedQuarantine.matches(AuditAction.MEDIA_VIEWED, AuditOutcome.REFUSED, "MEDIA", photo, setOf("reason", "reportDriven"), null)
+        forgedQuarantine.metadata shouldBe mapOf("reason" to "wrong_origin", "reportDriven" to "true")
         audited().forEach {
             it.metadataText shouldNotContain other.toString()
             it.metadataText shouldNotContain unknown.toString()
         }
-    }
-
-    @Test
-    fun `a look from the quarantine page at a reported photo records the quarantine, not a report`() {
-        val (entry, photo) = entryWithPhoto()
-        report(entry, "VIOLENCE_OR_SELF_HARM")
-
-        acting(AdminRole.MODERATOR) { console.openForReview(photo, ReviewOrigin.Quarantine, admin, null) }.shouldNotBeNull().close()
-
-        audited().single().metadata shouldBe mapOf("via" to "QUARANTINE", "reportDriven" to "true")
     }
 
     @Test
