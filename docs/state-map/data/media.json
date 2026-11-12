@@ -1346,8 +1346,8 @@
     "reason": "A member reported child sexual abuse material. The operator's moyi media quarantine block: BLOCKED and held as evidence (never released, never purged until the operator's delete after the report), QUARANTINED; the media check alarms until that is done.",
     "rule": "ops/moderation/takedown.md §3, Q16, ADR-0051",
     "evidence": "test",
-    "evidenceRef": "MediaQuarantineCommandsTest#block holds reported material as evidence, ready, held back or deleted but not yet purged, and says what is gone",
-    "codeRef": "modules/media/src/main/resources/db/migration/V36__media_moderation.sql#SET moderation_verdict = 'BLOCKED', moderated_at = coalesce(moderated_at, now()),"
+    "evidenceRef": "MediaQuarantineCommandsTest#block holds reported material as evidence, ready or held back, and refuses what is deleted or purged",
+    "codeRef": "modules/media/src/main/resources/db/migration/V62__media_block_deleted_only_under_report.sql#SET moderation_verdict = 'BLOCKED', moderated_at = coalesce(moderated_at, now()),"
   },
   {
     "id": "media-attached-blocked-by-report",
@@ -1364,8 +1364,8 @@
     "reason": "A member reported child sexual abuse material. The operator's moyi media quarantine block: BLOCKED and held as evidence (never released, never purged until the operator's delete after the report), QUARANTINED; the media check alarms until that is done.",
     "rule": "ops/moderation/takedown.md §3, Q16, ADR-0051",
     "evidence": "test",
-    "evidenceRef": "MediaQuarantineCommandsTest#block holds reported material as evidence, ready, held back or deleted but not yet purged, and says what is gone",
-    "codeRef": "modules/media/src/main/resources/db/migration/V36__media_moderation.sql#SET moderation_verdict = 'BLOCKED', moderated_at = coalesce(moderated_at, now()),"
+    "evidenceRef": "MediaQuarantineCommandsTest#block holds reported material as evidence, ready or held back, and refuses what is deleted or purged",
+    "codeRef": "modules/media/src/main/resources/db/migration/V62__media_block_deleted_only_under_report.sql#SET moderation_verdict = 'BLOCKED', moderated_at = coalesce(moderated_at, now()),"
   },
   {
     "id": "media-quarantined-blocked-by-report",
@@ -1382,8 +1382,8 @@
     "reason": "A member reported child sexual abuse material. The operator's moyi media quarantine block: BLOCKED and held as evidence (never released, never purged until the operator's delete after the report), QUARANTINED; the media check alarms until that is done.",
     "rule": "ops/moderation/takedown.md §3, Q16, ADR-0051",
     "evidence": "test",
-    "evidenceRef": "MediaQuarantineCommandsTest#block holds reported material as evidence, ready, held back or deleted but not yet purged, and says what is gone",
-    "codeRef": "modules/media/src/main/resources/db/migration/V36__media_moderation.sql#SET moderation_verdict = 'BLOCKED', moderated_at = coalesce(moderated_at, now()),"
+    "evidenceRef": "MediaQuarantineCommandsTest#block holds reported material as evidence, ready or held back, and refuses what is deleted or purged",
+    "codeRef": "modules/media/src/main/resources/db/migration/V62__media_block_deleted_only_under_report.sql#SET moderation_verdict = 'BLOCKED', moderated_at = coalesce(moderated_at, now()),"
   },
   {
     "id": "media-attached-reported",
@@ -1491,7 +1491,7 @@
     "rule": "FR-100, ADR-0053",
     "evidence": "test",
     "evidenceRef": "ReportCommandsTest#uphold block blocks the photo and holds it as evidence, and the author loses its URL",
-    "codeRef": "modules/media/src/main/resources/db/migration/V38__media_report_holds.sql#v_outcome := media_quarantine_block(r.id, p_actor, p_note);"
+    "codeRef": "modules/media/src/main/resources/db/migration/V62__media_block_deleted_only_under_report.sql#v_outcome := media_quarantine_block(r.id, p_actor, p_note);"
   },
   {
     "id": "media-quarantined-erased-while-reported",
@@ -1528,6 +1528,42 @@
     "evidence": "test",
     "evidenceRef": "MediaReportHoldsTest#a report after the entry was erased holds what is not yet purged, through the entry it was last on",
     "codeRef": "modules/media/src/main/resources/db/migration/V38__media_report_holds.sql#WHERE coalesce(attached_entry_id, last_entry_id) = p_entry"
+  },
+  {
+    "id": "media-deleted-blocked",
+    "region": "media",
+    "from": "DELETED",
+    "action": "event:operator-blocks",
+    "actor": "system",
+    "when": "no report holds it, purged or not",
+    "guards": [],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": null,
+    "code": null,
+    "reason": "Refused, nothing changes: the command answers that a deleted asset is blocked only by a report's uphold. A removal may already be listed in its author's data export, and a block after it would tell them what was found (A2 spec §9.3). The console refuses it the same way.",
+    "rule": "ADR-0063 decision 13 (amended by V62)",
+    "evidence": "test",
+    "evidenceRef": "MediaQuarantineCommandsTest#a block after the operator's delete is refused before the purge has run",
+    "codeRef": "modules/media/src/main/resources/db/migration/V62__media_block_deleted_only_under_report.sql#IF v_status = 'DELETED' AND NOT EXISTS (SELECT 1 FROM media_report_holds WHERE media_id = p_media) THEN"
+  },
+  {
+    "id": "media-deleted-report-upheld-blocked",
+    "region": "media",
+    "from": "DELETED",
+    "action": "event:operator-blocks",
+    "actor": "system",
+    "when": "a report holds it, its objects not yet purged, and the report is upheld as child sexual abuse material",
+    "guards": [],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": null,
+    "code": null,
+    "reason": "BLOCKED and held as evidence, still deleted to everyone; its objects are kept for the report to the authorities (takedown runbook §2). The takedown blocks before it lets its hold go, so the block sees the report.",
+    "rule": "ops/moderation/takedown.md §3, ADR-0063 decision 13",
+    "evidence": "test",
+    "evidenceRef": "MediaReportHoldsTest#an upheld block holds as evidence what its author erased while the report held it",
+    "codeRef": "modules/media/src/main/resources/db/migration/V62__media_block_deleted_only_under_report.sql#v_outcome := media_quarantine_block(r.id, p_actor, p_note);"
   },
   {
     "id": "media-deleted-report-decided",

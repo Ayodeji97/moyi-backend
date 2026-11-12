@@ -39,3 +39,6 @@ __pycache__/
 ### Environment ###
 .env
 .env.local
+
+# Kotlin compiler daemon session state (local, per build)
+.kotlin/

@@ -147,10 +147,14 @@ persistence bean, ADR-0055 ruling D), `@Transactional(readOnly = true)`. Shown: 
   a JSON boolean) is withheld, never thrown: it cannot fail an export build;
 - `reportDriven == null` is withheld;
 - the export never carries a `justification`;
-- a shown removal stays true only if it is never followed by a block. The console guarantees that
-  itself: the port's block answers `GONE` for a `DELETED` asset not held as evidence, under the row
-  lock, without calling `media_quarantine_block`, which would still accept it until the purge
-  runs. The script path does not (Owed).
+- a shown removal stays true only if it is never followed by a block. *Amended by V62
+  (2026-11-12):* `media_quarantine_block` itself answers `GONE` for a `DELETED` asset that no
+  report holds, purged or not, so the console and the script are held to it alike, and the port no
+  longer repeats the check. The rule is "only while a report holds it", not the "refuse `DELETED`
+  unless `evidence_held`" this ADR first owed: that would also have refused the report's
+  `uphold … block` of what its author erased while the report held it, which the runbook promises
+  to keep (takedown.md §3). `media_report_takedown` now blocks before it lets its own hold go, so
+  the block sees the report.
 The archive's statement is one sentence for everyone, whatever was withheld (spec §9.3).
 
 **14. The user lookup is now `POST /admin/users`** (`q`, `purpose`, `note`, CSRF). This departs
@@ -272,9 +276,16 @@ acts A2 leaves on the server (holding or blocking an asset outside the queue by 
   ruling 1). Not built in A2.
 - **A5** (content access with a typed justification, FR-112), before A3 (owner ruling 2); then A3,
   A4, and the `audit_log` retention job (ADR-0055, Owed).
-- **The script path can still block a DELETED, unpurged asset after a console removal;** a V62
-  change to `media_quarantine_block` (refuse DELETED unless `evidence_held`) closes it for both
-  paths. Until then, the runbook forbids it (`ops/moderation/takedown.md`, section 1 step 3).
+- ~~The script path can still block a DELETED, unpurged asset after a console removal~~: closed
+  by V62 (decision 13, amended).
+- **A report hold on an asset a moderator already removed** still lets an `uphold … block` follow
+  the removal (found in V62's review; both cases predate it). (a) A report filed after a removal
+  and before `media.purge` runs: `media_report_hold` holds DELETED, unpurged assets, and the hold
+  then keeps the purge waiting until the report is decided. (b) `moyi media quarantine delete` of
+  a report-held asset: `media_quarantine_delete` has no report check in SQL (only the console's
+  port refuses it), so the hold survives the removal. Closing them is a ruling, not a fix:
+  keeping possible child sexual abuse material as evidence against never contradicting a removal
+  its author has seen. Owner (and the legal check above) before the console goes on.
 - **The owner:** switching the console on stays as `ops/admin/README.md` says; inviting a moderator
   is `admin_invite(email, 'MODERATOR')` there.
 

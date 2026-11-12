@@ -51,9 +51,9 @@ interface QuarantineModeration {
     ): QuarantineDecision<ReleaseOutcome>
 
     /**
-     * Under `FOR UPDATE`: an open report's hold refuses; a `DELETED` asset not held as evidence is
-     * [BlockOutcome.GONE], purged or not (A2 spec §9.3: a removal is never followed by a block);
-     * otherwise `media_quarantine_block`.
+     * Under `FOR UPDATE`: an open report's hold refuses; otherwise `media_quarantine_block`, which
+     * answers [BlockOutcome.GONE] for a `DELETED` asset no report holds, purged or not (V62; A2 spec
+     * §9.3: a removal is never followed by a block).
      */
     fun block(
         mediaId: UUID,
@@ -105,7 +105,7 @@ data class QuarantineDecision<O : Enum<O>>(
 /** `media_quarantine_release`'s answers, and `media_give_back`'s, which it can return. */
 enum class ReleaseOutcome { RELEASED, REMODERATED, NEVER_RELEASED, REPORT_HELD, NOT_QUARANTINED, NOT_HELD_BACK }
 
-/** `media_quarantine_block`'s answers, and the port's [REPORT_HELD] (and its own [GONE] for a deleted asset). */
+/** `media_quarantine_block`'s answers, and the port's [REPORT_HELD]. */
 enum class BlockOutcome { BLOCKED, ALREADY_BLOCKED, GONE, REPORT_HELD }
 
 /** `media_quarantine_delete`'s answers, and the port's [EVIDENCE_SERVER_ONLY] and [REPORT_HELD]. */
