@@ -390,29 +390,53 @@ internal class MediaQuarantineCommandsTest(
     }
 
     @Test
-    fun `block holds reported material as evidence, ready, held back or deleted but not yet purged, and says what is gone`() {
+    fun `block holds reported material as evidence, ready or held back, and refuses what is deleted or purged`() {
         val ready = rows.insert(owner = ada, createdAt = clock.instant())
+        val heldBack = held("QUARANTINED", "NUDITY")
         val deleted = rows.insert(owner = ada, createdAt = clock.instant())
         ownMedia.delete(ada, deleted)
         val purged = rows.insert(owner = ada, createdAt = clock.instant())
         ownMedia.delete(ada, purged)
         purge()
-        // `deleted` was purged by that run too; put it back to "not yet purged", as a report a moment after an erasure finds it.
+        // `deleted` was purged by that run too; put it back to "not yet purged", the window V36 still blocked in.
         jdbc.update("UPDATE media_assets SET purged_at = NULL WHERE id = ?", deleted)
 
         moyi("block", ready.toString(), "report: CSAM, 2026-10-29").out shouldContain "Blocked and held as evidence"
-        moyi("block", deleted.toString(), "report: CSAM, 2026-10-29").code shouldBe 0
-        moyi("block", purged.toString(), "report: CSAM, 2026-10-29").let {
-            it.code shouldBe 1
-            it.err shouldContain "already purged"
+        moyi("block", heldBack.toString(), "report: CSAM, 2026-10-29").code shouldBe 0
+        // V62: a deleted asset no report holds is gone to a block, purged or not (A2 spec §9.3).
+        listOf(deleted, purged).forEach { id ->
+            moyi("block", id.toString(), "report: CSAM, 2026-10-29").let {
+                it.code shouldBe 1
+                it.err shouldContain "only by a report's uphold"
+            }
         }
 
         status(ready) shouldBe "QUARANTINED|BLOCKED"
-        status(deleted) shouldBe "DELETED|BLOCKED"
+        status(heldBack) shouldBe "QUARANTINED|BLOCKED"
+        status(deleted) shouldBe "DELETED|PASSED"
         evidenceHeld(ready) shouldBe true
-        evidenceHeld(deleted) shouldBe true
+        evidenceHeld(deleted) shouldBe false
+        audit(deleted).filter { it.startsWith("BLOCKED") }.shouldBeEmpty()
         moyi("list").out.lines().single { ready.toString() in it } shouldEndWith "DO NOT VIEW — runbook §2"
         moyi("block", ready.toString(), "again").out shouldContain "Already blocked"
+    }
+
+    /**
+     * ADR-0063, Owed, closed by V62: an operator's removal, then a block in the seconds before the
+     * purge runs. V36 accepted it; a removal may already be in its author's data export, so a
+     * block after it would tell them what was found.
+     */
+    @Test
+    fun `a block after the operator's delete is refused before the purge has run`() {
+        val photo = held("QUARANTINED", "NUDITY")
+        moyi("delete", photo.toString(), "not for the partner").code shouldBe 0
+        purgedAt(photo) shouldBe false
+
+        moyi("block", photo.toString(), "report: CSAM, 2026-11-12").code shouldBe 1
+
+        status(photo) shouldBe "DELETED|QUARANTINED"
+        evidenceHeld(photo) shouldBe false
+        audit(photo) shouldContainExactly listOf("DELETED|op-fake-ada|not for the partner")
     }
 
     /**

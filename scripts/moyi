@@ -753,7 +753,7 @@ print(json.dumps({"categories": {k: v == "on" for k, v in (x.split("=") for x in
           BLOCKED)         echo "Blocked and held as evidence: never released. Follow ops/moderation/takedown.md §2 now." ;;
           ALREADY_BLOCKED) echo "Already blocked and held as evidence. Follow ops/moderation/takedown.md §2." ;;
           NOT_READY)       die "that id names nothing ready to hold back (already held back, never made, or deleted)" ;;
-          GONE)            die "that id names nothing left to hold: never made, or deleted and its objects already purged" ;;
+          GONE)            die "that id names nothing left to hold: never made, or deleted (a deleted asset is blocked only by a report's uphold: moyi reports, runbook §3)" ;;
           *)               die "unexpected answer from the database: $result" ;;
         esac
         ;;

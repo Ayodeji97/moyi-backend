@@ -195,6 +195,29 @@ internal class MediaReportHoldsTest(
         purgedAt(photo) shouldBe false
     }
 
+    /**
+     * V62: a deleted asset is blocked only while a report holds it, so the takedown blocks before
+     * it lets its hold go. The runbook's promise (takedown.md §3): "even if its author deleted it
+     * meanwhile".
+     */
+    @Test
+    fun `an upheld block holds as evidence what its author erased while the report held it`() {
+        val upload = "in/${UUID.randomUUID()}"
+        val photo = passed(upload = upload)
+        putBehindTheApi(display(upload), byteArrayOf(1, 2, 3))
+        hold(REPORT)
+        transactions.execute { erasure.releaseAllOf(entry) } shouldBe 1
+
+        takedown(REPORT, "BLOCK") shouldContainExactly listOf("$photo|BLOCKED")
+
+        status(photo).substringBefore('|') shouldBe "DELETED"
+        jdbc.queryForObject("SELECT evidence_held FROM media_assets WHERE id = ?", Boolean::class.java, photo) shouldBe true
+        holdsOf(photo) shouldBe 0
+        purge()
+        stored(display(upload)) shouldBe true
+        purgedAt(photo) shouldBe false
+    }
+
     @Test
     fun `an upheld report deletes what it holds, through the operator's delete`() {
         val photo = passed()
