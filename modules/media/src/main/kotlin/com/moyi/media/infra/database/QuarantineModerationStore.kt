@@ -22,7 +22,7 @@ import com.moyi.media.infra.storage.ObjectStoreUnavailableException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.simple.JdbcClient
-import org.springframework.stereotype.Repository
+import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
@@ -36,8 +36,12 @@ import java.util.UUID
  * under it (the reports holding the asset) is read by a **later** statement: at READ
  * COMMITTED a statement that waited for a lock sees the locked row as committed, but a
  * subquery in it still reads its snapshot from before the wait.
+ *
+ * A `@Component`, not a `@Repository`: with JPA on the classpath (the app), `@Repository`'s
+ * exception translation would wrap this port's own `IllegalStateException` in
+ * `InvalidDataAccessApiUsageException`.
  */
-@Repository
+@Component
 @Suppress("TooManyFunctions") // One port, each of its functions once.
 internal class QuarantineModerationStore(
     jdbcTemplate: JdbcTemplate,

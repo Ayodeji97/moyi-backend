@@ -35,7 +35,11 @@ internal class ReportOutcomeNamesTest(
 
     @Test
     fun `reclassify's outcomes are entry_report_reclassify's answers and the port's stale refusal`() {
-        matches(ReclassifyOutcome.entries.map { it.name }, returnsOf("entry_report_reclassify"), portOnly = setOf("STALE"))
+        matches(
+            ReclassifyOutcome.entries.map { it.name },
+            returnsOf("entry_report_reclassify"),
+            portOnly = setOf("STALE", "UNKNOWN_REASON"),
+        )
     }
 
     /** `entry_report_uphold` answers its two refusals as a row, `outcome := '…'`, not by `RETURN`. */

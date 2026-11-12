@@ -132,8 +132,9 @@ internal class ReportModerationStore(
         actor: String,
         note: String,
     ): ReclassifyOutcome {
-        // The rule is the domain's; the name is not repeated, since a form's junk is no business of a log.
-        requireNotNull(ReportReason.named(newReason)) { "the new reason is not one of the five report reasons" }
+        // The rule is the domain's. Answered before any SQL, and not thrown: a throw inside this
+        // MANDATORY participant would mark the console's transaction rollback-only.
+        if (ReportReason.named(newReason) == null) return ReclassifyOutcome.UNKNOWN_REASON
         return when (gate(reportId, expectedReason)) {
             Gate.NOT_OPEN -> {
                 ReclassifyOutcome.NOT_OPEN

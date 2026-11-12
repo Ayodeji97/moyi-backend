@@ -232,15 +232,20 @@ internal class ReportModerationTest(
     }
 
     @Test
-    fun `reclassify to a reason that is not one of the five is refused before any SQL, without naming it`() {
+    fun `reclassify to a reason that is not one of the five is answered before any SQL, and the transaction goes on`() {
         val (entry) = entryWithPhoto()
         val report = report(entry, "OTHER", at = T0)
 
-        val failure = assertThrows<IllegalArgumentException> { tx { port.reclassify(report, "OTHER", "SPAM_BOT", ACTOR, NOTE) } }
+        val (answer, next) =
+            tx {
+                port.reclassify(report, "OTHER", "SPAM_BOT", ACTOR, NOTE) to
+                    port.dismiss(report, "OTHER", ACTOR, NOTE)
+            }
 
-        failure.message!! shouldNotContain "SPAM_BOT"
+        answer shouldBe ReclassifyOutcome.UNKNOWN_REASON
+        next shouldBe DismissOutcome.DISMISSED
         reason(report) shouldBe "OTHER"
-        log(report).shouldBeEmpty()
+        log(report) shouldContainExactly listOf("DISMISSED|$ACTOR|$NOTE")
     }
 
     // --- uphold ------------------------------------------------------------------------------------------------------
@@ -270,6 +275,19 @@ internal class ReportModerationTest(
         val second = report(entry, "OTHER", at = T0.plusSeconds(1))
         tx { port.uphold(second, "OTHER", Takedown.DELETE, ACTOR, NOTE) } shouldBe
             UpholdResult.Done(listOf(photo to TakedownOutcome.BLOCKED_KEPT))
+        status(photo) shouldBe "QUARANTINED|BLOCKED|true"
+    }
+
+    @Test
+    fun `uphold by block of an asset a first upheld report already blocked answers already blocked`() {
+        val (entry, photo) = entryWithPhoto()
+        val first = report(entry, "VIOLENCE_OR_SELF_HARM", at = T0)
+        val second = report(entry, "OTHER", at = T0.plusSeconds(1))
+
+        tx { port.uphold(first, "VIOLENCE_OR_SELF_HARM", Takedown.BLOCK, ACTOR, NOTE) } shouldBe
+            UpholdResult.Done(listOf(photo to TakedownOutcome.BLOCKED))
+        tx { port.uphold(second, "OTHER", Takedown.BLOCK, ACTOR, NOTE) } shouldBe
+            UpholdResult.Done(listOf(photo to TakedownOutcome.ALREADY_BLOCKED))
         status(photo) shouldBe "QUARANTINED|BLOCKED|true"
     }
 

@@ -81,8 +81,12 @@ interface ReportModeration {
 /** `entry_report_dismiss`'s answers, and the port's [STALE]. */
 enum class DismissOutcome { DISMISSED, NOT_OPEN, STALE }
 
-/** `entry_report_reclassify`'s answers, and the port's [STALE]. */
-enum class ReclassifyOutcome { RECLASSIFIED, SAME_REASON, NOT_OPEN, STALE }
+/**
+ * `entry_report_reclassify`'s answers, and the port's own [STALE] and [UNKNOWN_REASON]. A reason
+ * that is not one of the five is answered, not thrown,
+ * so the console's transaction is not marked rollback-only and its REFUSED audit row still commits.
+ */
+enum class ReclassifyOutcome { RECLASSIFIED, SAME_REASON, NOT_OPEN, STALE, UNKNOWN_REASON }
 
 /** How a report is upheld: what becomes of the media it holds. */
 enum class Takedown { DELETE, BLOCK }
