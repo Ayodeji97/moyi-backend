@@ -3,8 +3,19 @@
 <head th:replace="~{admin/layout :: head('Console')}"></head>
 <body>
 <header th:replace="~{admin/layout :: masthead}"></header>
+<nav th:replace="~{admin/layout :: nav(${moderator == true})}"></nav>
 <main>
     <h1>Signed in</h1>
+    <!--/* Open counts only (A2 spec §5): no "overdue" flag; the alarm in media-check.sh says what is too old. */-->
+    <section th:if="${counts != null}" aria-labelledby="queues">
+        <h2 id="queues">Queues</h2>
+        <dl>
+            <dt><a th:href="@{/admin/reports}">Open reports</a></dt>
+            <dd id="open-reports" th:text="${counts.reports}">0</dd>
+            <dt><a th:href="@{/admin/quarantine}">Held-back media</a></dt>
+            <dd id="open-quarantine" th:text="${counts.quarantine}">0</dd>
+        </dl>
+    </section>
     <form method="post" th:action="@{/admin/logout}">
         <button type="submit">Sign out</button>
     </form>

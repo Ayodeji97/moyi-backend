@@ -119,7 +119,12 @@ admin module keeps its log it implements the interface, from its own side of the
 archive carries `{logKept: true, accesses: [{at, action, justification}]}` with no change here.
 **Not covered by the seam:** the operator's reads of the person's support tickets through `moyi
 support` (`support_ticket_log`), which are recorded but are not "admin access" in T-10's sense. *Owner
-may rule that they should be listed too.*
+may rule that they should be listed too.* *Implemented by A2 (ADR-0063 decision 13, 2026-11-12):
+`AdminAccessDisclosure` implements the interface, unconditionally, so `logKept` is `true`. Only rows
+that no later event can turn into a tip-off are listed (a lookup made at the member's request or for
+operations, and the removal of their own media from a moderation quarantine), never with a
+justification; the statement is one sentence for everyone, whatever was withheld. Its wording and the
+withholding itself are **[legal: confirm]** (ADR-0063, open questions 1 and 2).*
 
 **9. Built by a job, with a claim; expired by a job; erased with the account.**
 `scheduling.DataExportJob` runs two ShedLocked timers: every minute it asks `export` to build up to
@@ -250,6 +255,6 @@ operations and one schema; oasdiff reports no breaking change.
 
 ## Revisit when
 
-The admin console keeps its audit log (implement `AdminAccessLog`); an account-level push category
+~~The admin console keeps its audit log (implement `AdminAccessLog`)~~ (done, ADR-0063); an account-level push category
 exists; an archive's build approaches the claim's fifteen minutes; or the owner rules on an open
 question above.

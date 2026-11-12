@@ -12,5 +12,17 @@
 <header th:fragment="masthead" class="masthead">
     <p class="brand">Moyi admin</p>
 </header>
+<!--/* The pages' navigation (A2 spec §5): the queues for a moderator only. Not on the error page,
+       which every refused read shares byte for byte, whoever reads it. */-->
+<nav th:fragment="nav(moderator)" class="nav" aria-label="Console">
+    <ul>
+        <li><a th:href="@{/admin}">Home</a></li>
+        <li th:if="${moderator}"><a th:href="@{/admin/reports}">Reports</a></li>
+        <li th:if="${moderator}"><a th:href="@{/admin/quarantine}">Quarantine</a></li>
+        <li><a th:href="@{/admin/users}">User lookup</a></li>
+    </ul>
+</nav>
+<!--/* A decision's one-line result, from the flash (spec §5.1): chosen from the outcome, never the note. */-->
+<p th:fragment="result" th:if="${result}" class="notice" role="status" th:text="${result}">Dismissed.</p>
 </body>
 </html>

@@ -6,9 +6,19 @@ ADR-0051's. Doc 20:22-23's launch checklist ("content moderation and takedown po
 "law-enforcement request procedure written") is met only once the owner has had the parts marked
 **[legal: confirm]** checked by someone qualified. Nothing here is legal advice.
 
-**Who runs it:** the operator (today, the owner). There is no admin console before Phase 5; every
-step below is `scripts/moyi media quarantine …` on the server, with `MOYI_OPERATOR` set to your
-name. Every look and every decision is written to `media_moderation_log`, under that name.
+**Who runs it:** the operator (today, the owner). Every step below is `scripts/moyi media
+quarantine …` on the server, with `MOYI_OPERATOR` set to your name. Every look and every decision is
+written to `media_moderation_log`, under that name.
+
+**Or the admin console, once it is switched on** (A2, ADR-0063; `ops/admin/README.md`): an account
+with the `MODERATOR` role (or `ADMIN`) does the same steps under **Reports** and **Quarantine**. The
+console calls the same database functions, so every rule below holds unchanged; it records you as
+`admin:<your account id>` in the same logs, and adds a row to `audit_log` for every look and decision.
+An uphold, a block and a delete ask for a fresh authenticator code (one proven in the last five
+minutes). The console is **off in production** until the legal checks of ADR-0063 are done; until
+then, the script is the path. What stays on the server either way: deleting `BLOCKED` evidence
+(section 2 step 4), and holding or blocking an asset that is not in the queue (`moyi media quarantine
+hold|block`, for a report that came by email).
 
 ```
 ssh root@91.98.71.136
@@ -48,12 +58,17 @@ holds it, and it is decided there, never here.
 
 Not urgent: nobody but its author can see it. Look at the queue once a day while it is not empty.
 
-1. `moyi media quarantine list`. Skip every row marked `held by a report`: section 3 decides it, and
-   `release` refuses it (`REPORT_HELD`, recorded) while the report is open.
+1. `moyi media quarantine list` (console: **Quarantine**). Skip every row marked `held by a report`:
+   section 3 decides it, and `release` refuses it (`REPORT_HELD`, recorded) while the report is open.
+   The console offers no decision on such a row; it links to the report.
 2. To decide, you have to see it, **if its verdict is `QUARANTINED`** (never a `BLOCKED` row: section
    2). The photo is its author's and private; look only at the one you are deciding on. Get its display variant's key from the row
    (`SELECT storage_key FROM media_assets WHERE id = '<id>'`, then `v/<the part after in/>/display.webp`)
    and fetch it with the R2 dashboard. Do not save a copy.
+   *Console:* **Quarantine → the asset → View** shows the display variant in the page, streamed
+   through the application (no storage URL), and records the look as `MEDIA_VIEWED`. The console
+   never shows a `BLOCKED` asset, nor one held by a `MINOR_SEXUAL_CONTENT` or `NON_CONSENSUAL` report:
+   it answers "not found", and records the refusal.
 3. Decide:
    - **A false positive** (a film still, a cooking video, a costume, a painting):
      `moyi media quarantine release <id> "<why, in a few words>"`. The partner sees it at their next
@@ -61,6 +76,22 @@ Not urgent: nobody but its author can see it. Look at the queue once a day while
      goes back to moderation (`REMODERATED`).
    - **Real violence or gore:** `moyi media quarantine delete <id> "<why>"`. Its objects leave the
      storage within seconds. If it shows a crime against a person (not a film), treat it as section 3.
+   - **If it is child sexual abuse material:** do not delete it. Block it as evidence, then section 2.
+     On the server that is `moyi media quarantine block <id> "<why>"`; in the console, **Block as
+     evidence** is the first form on the asset's page. It becomes `BLOCKED` and is never released.
+     **On the server, check its status first, and do not block an asset whose status is
+     `DELETED`:**
+     ```
+     SELECT status, moderation_verdict, evidence_held, purged_at FROM media_assets WHERE id = '<id>';
+     ```
+     `media_quarantine_block` still accepts a `DELETED` asset until the purge reaches it, and a
+     console removal may already be listed in its author's data export as "removed"; a block after
+     it would tell them what happened (ADR-0063, Owed). The console refuses it itself (it answers
+     "Already deleted"); the script does not, until V62 changes the function. Evidence its author
+     deleted under a report is not lost by this rule: the report's `uphold … block` keeps it (section
+     3, step 1).
+   - *Console:* the asset's page offers **Block as evidence**, **Release** and **Delete**, each with a
+     note (1 to 400 characters, never shown to the member). Block and delete ask for a code.
    - An unattached quarantined asset is deleted by the hourly reaper a day after it was made, as any
      unattached upload is (ADR-0050). An attached one waits for you.
 
@@ -101,7 +132,8 @@ What you do:
    - **[legal: confirm]** whether the account must be preserved, suspended, or left untouched until
      the authority answers. Do not tell the uploader (tipping off). Do not tell the partner.
 4. **Preserve, then delete, as the authority directs.** The asset and its row stay as they are until
-   then. When you may delete it:
+   then. **On the server only:** the console refuses to delete `BLOCKED` evidence (ADR-0063, the
+   owner's ruling 4). When you may delete it:
    `moyi media quarantine delete <id> "reported: <authority> <reference>, <date>"`. The note is the
    record that it was reported; write the reference. Its objects leave the storage within seconds.
    **[legal: confirm]** how long it must be kept before deletion if the authority says nothing.
@@ -132,12 +164,22 @@ moyi reports show <reportId>           # the reporter's detail and what the repo
 
 A `MINOR_SEXUAL_CONTENT` row ends `DO NOT VIEW — runbook §2`, and so does `show`'s reason line.
 
+*In the console:* **Reports** is `list`, in the same order, priority first, each row with its age
+in days; **Reports → the report** is `show` (the reporter's detail, what it holds, its history), with
+the decisions below as forms on that page: **Dismiss**, **Reclassify**, and **Uphold** (delete or
+block). Each form carries the reason the page showed: if another moderator reclassified the report
+meanwhile, nothing is decided and the page says to read it again. A priority report offers only
+"Block as evidence, then runbook §2", and shows its media as `DO NOT VIEW`. A report holding nothing
+(words, a member) shows one **Uphold** that records the decision (`delete` for an ordinary report,
+`block` for a priority one), as the commands below say to type.
+
 1. **Sexual content involving a minor** (`MINOR_SEXUAL_CONTENT`, marked DO NOT VIEW). **You never
    open its photo or voice note, at any step.** What you do:
    1. `moyi reports show <reportId>` and read only the reporter's detail.
    2. Unless the detail itself plainly says the reason was chosen by mistake (for example "this is me,
       an adult, I did not want it shared"), block without viewing:
-      `moyi reports uphold <reportId> block "report <date>"`. Everything the report holds is made
+      `moyi reports uphold <reportId> block "report <date>"` (console: the report's only uphold,
+      "Block as evidence"). Everything the report holds is made
       `BLOCKED` and held as evidence, never released, even if its author deleted it meanwhile.
    3. Then section 2 from step 1: note what the system holds (no image), report to the authorities,
       preserve, and delete only as section 2 step 4 says.
@@ -153,15 +195,19 @@ A `MINOR_SEXUAL_CONTENT` row ends `DO NOT VIEW — runbook §2`, and so does `sh
    voice note are deleted and purged within seconds. The author's own withdraw and erase (D5) remain
    theirs. Do not tell the author.
 3. **Violence or self-harm, harassment, anything else** (never a DO NOT VIEW report: that is step 1):
-   look at the photo as section 1 says, read the detail, and decide:
+   look at the photo as section 1 says (console: **View** beside the held photo on the report's page),
+   read the detail, and decide:
    - not what was reported: `moyi reports dismiss <reportId> "<why>"`. What the report held back is
      given back exactly as it was: shown to the reporter again if it had passed moderation, or handed
      back to moderation if it had not been moderated yet. Unless another open report, or moderation
      itself, holds it: then it stays held.
    - what was reported: `moyi reports uphold <reportId> delete "<what was found>"`.
    - a report about **words** (harassment, a threat): the report holds nothing back, and upholding it
-     deletes nothing; the words stay unless their author erases them. Reading an entry's words is
-     content access (doc 09: an admin's, with justification): read them only to decide a report that
+     deletes nothing; the words stay unless their author erases them. **Decide it from the reporter's
+     detail.** Reading an entry's words is content access (FR-112, doc 09: an `ADMIN`'s, with a typed
+     justification, disclosed), which the console does not offer until A5. The owner ruled
+     (2026-11-11, ADR-0063 ruling 2) that **once the console is switched on, entry text is no longer
+     read at `psql`** to decide a report. Until then, read the words only to decide a report that
      names them, and say so in the note. There is no takedown of words in v1 (ADR-0053, question 3);
      a threat to someone's safety is section 4's territory and the reporter's to take to the police.
    - a report about **the other member** (target `MEMBER`, ADR-0053 decision 14; `show` names
@@ -171,8 +217,9 @@ A `MINOR_SEXUAL_CONTENT` row ends `DO NOT VIEW — runbook §2`, and so does `sh
      member report is upheld by `block` (nothing to block; it records the decision) after step 1's
      report to the authority, or reclassified first. The reported member is never told.
 4. Every decision empties the detail the reporter wrote (it is needed only to decide) and is
-   recorded with your name and note in `entry_report_log`; what became of the media is in
-   `media_moderation_log`. `uphold … delete` never deletes a `BLOCKED` asset: it says so
+   recorded with your name (in the console, `admin:<your account id>`) and note in
+   `entry_report_log`; what became of the media is in `media_moderation_log`; a console decision is
+   also one row in `audit_log`. `uphold … delete` never deletes a `BLOCKED` asset: it says so
    (`BLOCKED_KEPT`), and that evidence goes only by section 2.
 5. **What a report holds is kept while it is open, whoever deletes it** (ADR-0053 decision 8a). The
    author may delete or withdraw the entry, or edit the photo out and delete it; to them it is gone,

@@ -153,8 +153,9 @@ internal class AdminSecurityConfiguration {
         const val LOGIN = "/admin/login"
         const val TOTP = "/admin/login/totp"
 
+        /** A2 added `media-src 'self'`, so that the review copy of a voice note plays in an `<audio>` (A2 spec §7.4). */
         const val CONTENT_SECURITY_POLICY =
-            "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+            "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; " +
                 "form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
 
         /** Written as the response commits, so it holds whatever a handler set before. */

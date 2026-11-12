@@ -1,10 +1,13 @@
 # The admin console: switching it on, using it, and switching it off
 
 ADR-0055 and `docs/superpowers/specs/2026-11-06-admin-console-a1-design.md` say why. This
-file is what the owner does. The console is **off in production** until step 4 is done.
+file is what the owner does. The console is **off in production** until step 4 is done, and is not switched on before the
+legal checks ADR-0063 owes (GDPR Art. 15/23, DSA Art. 16(5)/17) are done.
 
-What exists in A1: sign-in with a password and an authenticator code, three roles, an
-append-only audit log, and one screen (look a user up by id or exact email, metadata only).
+What exists: sign-in with a password and an authenticator code, three roles, an append-only
+audit log (A1, ADR-0055); a user lookup by id or exact email, metadata only, with a stated
+purpose; and, for a `MODERATOR` or `ADMIN`, the report queue and the quarantined media (A2,
+ADR-0063). The moderation steps themselves are `ops/moderation/takedown.md`'s.
 It lives under `/admin`. The owner ruled (2026-11-11, ADR-0055) that it is reached at
 `admin.getmoyi.app`, DNS only, allowlisted to his own address; that host is not routed yet (see
 "Routing a host of its own").
@@ -15,7 +18,8 @@ It lives under `/admin`. The owner ruled (2026-11-11, ADR-0055) that it is reach
   on the server. There is no page, endpoint or wizard that makes one.
 - Sessions live in the application's memory. **A deploy signs the operator out**, and so does
   a restart. This is accepted for one operator.
-- Every sign-in, refusal, sign-out and lookup is in `audit_log`. The table refuses `UPDATE`
+- Every sign-in, refusal, sign-out, lookup, step-up, look at a queue or a held photo, and
+  moderation decision is in `audit_log`. The table refuses `UPDATE`
   and `DELETE`, even from `psql`. Nothing deletes its rows until the retention slice.
 - The address allowlist sees the operator's real public address because production DNS is
   "DNS only" (no Cloudflare proxy) and the only trusted proxy is kamal-proxy itself, by its
@@ -101,6 +105,22 @@ stored). Roles: `SUPPORT` (user lookup), `MODERATOR`, `ADMIN`; each includes tho
 Running it again for the same email resets that account: password, authenticator and lockout are
 cleared, live sessions end, and only the newest link works. That is also the recovery path.
 
+### Inviting a moderator
+
+The same function, with the role `MODERATOR`:
+
+```
+docker exec -i moyi-postgres psql -U moyi -d moyi -Atc \
+  "SELECT admin_invite('moderator@example.com', 'MODERATOR')"
+```
+
+Send the person the link of step 5 by a channel you trust; they enrol from an allowed address
+(add theirs to `MOYI_ADMIN_ALLOWED_NETWORKS` first, step 2, and redeploy). A moderator sees
+**Reports** and **Quarantine** and decides them as `ops/moderation/takedown.md` says; an uphold, a
+block and a delete ask for a code proven in the last five minutes. Today there is one operator,
+who decides alone (ADR-0063, the owner's ruling 5); a second pair of eyes on a block is revisited
+when a second moderator is invited.
+
 ## 5. Enrol
 
 Open, from the allowed address:
@@ -143,8 +163,16 @@ docker exec -i moyi-postgres psql -U moyi -d moyi -c \
 ```
 
 `ADMIN_SIGN_IN` / `REFUSED` rows with no `actor_id` are sign-ins for an email nobody holds
-(the email is not recorded). The Prometheus counters are `moyi_admin_sign_in_total{outcome}` and
-`moyi_admin_lookup_total`.
+(the email is not recorded). A lookup's `metadata.purpose` says why it was made; a `SAFETY` or
+`LEGAL` lookup carries its note as `justification`. A moderation decision's note is its
+`justification`, and the module logs (`entry_report_log`, `media_moderation_log`) name the same
+admin as `admin:<account id>`. The Prometheus counters are `moyi_admin_sign_in_total{outcome}`,
+`moyi_admin_lookup_total`, `moyi_admin_moderation_decision_total{queue, decision, outcome}` and
+`moyi_admin_media_review_total{outcome}`.
+
+A member's data export lists only a lookup made at their request or for operations
+(`ACCOUNT_LOOKED_UP`) and the removal of their own media from a moderation quarantine
+(`MEDIA_REMOVED`), never a note; everything else is withheld (ADR-0063 decision 13).
 
 ## Routing a host of its own
 
@@ -153,7 +181,23 @@ there. To route it: add the host to kamal-proxy for the web role and a DNS-only 
 (not proxied, see "Facts"). The allowlist applies to the path, so it works the same on either
 host; the checks in step 3 then use `https://admin.getmoyi.app/admin/login`.
 
+## What stays on the server
+
+The console never does these; they are `scripts/moyi` or `psql` on the server, as before:
+
+- creating, resetting and disabling an admin (`admin_invite`, `admin_disable`);
+- **deleting `BLOCKED` evidence**, after the authority's report (`moyi media quarantine delete`,
+  runbook §2 step 4; the owner's ruling 4 in ADR-0063);
+- holding or blocking an asset that is not in the quarantine queue, by id (`moyi media quarantine
+  hold|block`, for a report that came by email);
+- the support inbox (`moyi support`, ADR-0057);
+- the TOTP key, the allowlist and the switch itself (deploy-time configuration).
+
+Once the console is on, an entry's words are no longer read at `psql` to decide a report (the
+owner's ruling 2, runbook §3.3).
+
 ## What this does not do
 
-No entry content, no moderation queue, no suspension, no job re-runs, no passkeys (ADR-0055,
-the owner's ruling 1: TOTP only until a second operator joins). Those are A2 to A5.
+No entry content (A5, content access with a typed justification, is built next), no suspension,
+no job re-runs, no passkeys (ADR-0055, the owner's ruling 1: TOTP only until a second operator
+joins). Those are A3 to A5.

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/* One report (A2 spec §5.1, §7.2, §7.3): its facts, the reporter's detail (this page only), the
+       media it holds and whether each may be viewed, its history, and the decision forms. */-->
+<head th:replace="~{admin/layout :: head('Report')}"></head>
+<body>
+<header th:replace="~{admin/layout :: masthead}"></header>
+<nav th:replace="~{admin/layout :: nav(true)}"></nav>
+<main class="wide">
+    <h1>Report</h1>
+    <p th:replace="~{admin/layout :: result}"></p>
+    <dl>
+        <dt>Id</dt><dd th:text="${page.case.reportId}"></dd>
+        <dt>Reason</dt><dd th:text="${page.case.reason}"></dd>
+        <dt>Priority</dt><dd th:text="${page.case.priority} ? 'yes: DO NOT VIEW — runbook §2' : 'no'"></dd>
+        <dt>Status</dt><dd th:text="${page.case.status}"></dd>
+        <dt>Target</dt><dd th:text="${page.case.target}"></dd>
+        <dt th:if="${page.case.entryId != null}">Entry</dt><dd th:if="${page.case.entryId != null}" th:text="${page.case.entryId}"></dd>
+        <dt th:if="${page.case.reportedMemberId != null}">Reported member</dt>
+        <dd th:if="${page.case.reportedMemberId != null}" th:text="${page.case.reportedMemberId}"></dd>
+        <dt>Bond</dt><dd th:text="${page.case.bondId}"></dd>
+        <dt>Received</dt><dd th:text="${page.case.receivedAt}"></dd>
+    </dl>
+
+    <h2>The reporter's detail</h2>
+    <p th:if="${page.case.status != 'OPEN'}">Emptied when decided.</p>
+    <blockquote th:if="${page.case.status == 'OPEN' and page.case.detail != null}" id="detail" th:text="${page.case.detail}"></blockquote>
+    <p th:if="${page.case.status == 'OPEN' and page.case.detail == null}">The reporter wrote no detail.</p>
+    <p class="hint">The entry's words are not shown here. Reading them is content access (FR-112), which needs the
+        ADMIN role and a typed justification.</p>
+
+    <h2>Media it holds</h2>
+    <p th:if="${#lists.isEmpty(held)}">None: this report is decided from the detail.</p>
+    <table th:unless="${#lists.isEmpty(held)}" id="held">
+        <thead><tr><th>Media</th><th>Kind</th><th>Status</th><th>Verdict</th><th>View</th></tr></thead>
+        <tbody>
+        <tr th:each="m : ${held}">
+            <td th:text="${m.mediaId}"></td>
+            <td th:text="${m.kind}"></td>
+            <td th:text="${m.status}"></td>
+            <td th:text="${m.verdict != null} ? ${m.verdict} : '-'"></td>
+            <td>
+                <strong th:if="${m.barred != null}" class="warning" th:text="${m.barred}"></strong>
+                <a th:if="${m.barred == null}" th:href="@{/admin/reports/{id}(id=${page.case.reportId},view=${m.mediaId})}">View</a>
+            </td>
+        </tr>
+        </tbody>
+    </table>
+    <figure th:if="${embed != null}" class="review">
+        <img th:unless="${embed.audio}" th:src="@{/admin/media/{m}/review(m=${embed.mediaId},via='REPORT',report=${page.case.reportId})}"
+             alt="The held photo, as moderation saw it">
+        <audio th:if="${embed.audio}" controls preload="none"
+               th:src="@{/admin/media/{m}/review(m=${embed.mediaId},via='REPORT',report=${page.case.reportId})}"></audio>
+        <figcaption th:text="${embed.mediaId}"></figcaption>
+    </figure>
+
+    <section th:unless="${#lists.isEmpty(forms)}" aria-labelledby="decide">
+        <h2 id="decide">Decide</h2>
+        <th:block th:each="f : ${forms}"><form th:replace="~{admin/fragments/decision :: form(${f})}"></form></th:block>
+    </section>
+
+    <h2>History</h2>
+    <table id="history">
+        <thead><tr><th>When</th><th>Who</th><th>What</th><th>Note</th></tr></thead>
+        <tbody>
+        <tr th:each="line : ${page.history}">
+            <td th:text="${line.at}"></td>
+            <td th:text="${line.actor}"></td>
+            <td th:text="${line.action}"></td>
+            <td th:text="${line.note != null} ? ${line.note} : '-'"></td>
+        </tr>
+        </tbody>
+    </table>
+    <p><a th:href="@{/admin/reports}">Back to the reports</a></p>
+</main>
+</body>
+</html>

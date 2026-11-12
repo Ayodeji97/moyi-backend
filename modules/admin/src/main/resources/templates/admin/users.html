@@ -5,9 +5,30 @@
 <header th:replace="~{admin/layout :: masthead}"></header>
 <main>
     <h1>User lookup</h1>
-    <form method="get" th:action="@{/admin/users}">
-        <label for="q">User id or exact email</label>
-        <input id="q" name="q" type="text" autocomplete="off" required>
+    <!--/* A POST (A2 spec §9.3, owner ruling 6): the note never goes into a URL. th:text and th:value
+           only: what the admin typed is shown back escaped. */-->
+    <form method="post" th:action="@{/admin/users}">
+        <div class="field">
+            <label for="q">User id or exact email</label>
+            <input id="q" name="q" type="text" autocomplete="off" required th:value="${q}">
+        </div>
+        <div class="field">
+            <label for="purpose">Why</label>
+            <p id="purpose-hint" class="hint">MEMBER_REQUEST: the member asked support for help. OPERATIONS: a fault being
+                investigated. Both are listed in the member's data export. SAFETY (a report or moderation case) and LEGAL
+                (a law-enforcement request) are not listed, and need a note.</p>
+            <select id="purpose" name="purpose" required aria-describedby="purpose-hint">
+                <option value="" th:selected="${purpose == null}">Choose one</option>
+                <option th:each="p : ${purposes}" th:value="${p}" th:text="${p}" th:selected="${p == purpose}">MEMBER_REQUEST</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="note">Note</label>
+            <p id="note-hint" class="hint" th:text="|Required for SAFETY and LEGAL, at most ${noteMax} characters: why, and the case or request it is for. Never shown to the member.|">Required for SAFETY and LEGAL.</p>
+            <textarea id="note" name="note" rows="3" aria-describedby="note-hint"
+                      th:text="${note}"></textarea>
+        </div>
+        <p th:if="${error != null}" class="error" role="alert" th:text="${error}">Error.</p>
         <button type="submit">Look up</button>
     </form>
 

@@ -60,3 +60,28 @@ button {
 .notice { border-left: 4px solid var(--line); padding-left: 0.5rem; }
 .qr { display: block; image-rendering: pixelated; background: #ffffff; padding: 0.5rem; }
 code { font-size: 1.05rem; letter-spacing: 0.08em; word-break: break-all; }
+/* A2's pages: the navigation, the queues' tables, the decision forms and the review copy. */
+.nav { border-bottom: 1px solid var(--line); padding: 0 1.5rem; }
+.nav ul { display: flex; flex-wrap: wrap; gap: 1.25rem; list-style: none; margin: 0; padding: 0.5rem 0; }
+main.wide { max-width: 72rem; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9375rem; }
+th, td { text-align: left; vertical-align: top; padding: 0.375rem 0.5rem; border-bottom: 1px solid var(--line); word-break: break-word; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; }
+dt { font-weight: 600; }
+dd { margin: 0; word-break: break-word; }
+blockquote { margin: 0.5rem 0; padding: 0.5rem 1rem; border-left: 4px solid var(--line); white-space: pre-wrap; }
+/* The words carry the warning ("DO NOT VIEW — runbook §2"); the weight and bar only repeat it. */
+.warning { font-weight: 600; border-left: 4px solid var(--error); padding-left: 0.5rem; }
+.decision { border: 1px solid var(--line); border-radius: 4px; padding: 1rem; margin: 1rem 0; max-width: 36rem; }
+.decision h3 { margin-top: 0; font-size: 1rem; }
+textarea, select {
+    width: 100%;
+    padding: 0.5rem;
+    font: inherit;
+    color: inherit;
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+}
+.review img { display: block; max-width: 100%; height: auto; }
+.review audio { width: 100%; }

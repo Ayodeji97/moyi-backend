@@ -203,7 +203,7 @@ The console's actor string is `admin:<accountId>` (42 characters, inside both lo
 | Uphold | `ReportModeration.uphold` | `entry_report_uphold(id, 'DELETE'\|'BLOCK', actor, note)` → `media_report_takedown` → `media_quarantine_delete` / `_block` / `media_report_let_go` | per asset: `DELETED`, `BLOCKED`, `ALREADY_BLOCKED`, `BLOCKED_KEPT`, `GONE`, `NOT_QUARANTINED`; or `NOT_OPEN`, `RECLASSIFY_FIRST`; `STALE` | `REPORT_UPHELD` | **yes** |
 | Quarantine queue | `QuarantineModeration.queue` | `media_quarantine_list(actor)` (logs `LISTED`) | rows | `QUARANTINE_QUEUE_VIEWED` | no |
 | Release | `QuarantineModeration.release` | `media_quarantine_release(id, actor, note)` → maybe `media_give_back` | `RELEASED`, `REMODERATED`, `NEVER_RELEASED`, `REPORT_HELD`, `NOT_QUARANTINED` | `MEDIA_RELEASED` | no |
-| Block as evidence | `QuarantineModeration.block` | `SELECT … FOR UPDATE` on the asset (refuses `REPORT_HELD`), then `media_quarantine_block(id, actor, note)` | `BLOCKED`, `ALREADY_BLOCKED`, `GONE`; port's `REPORT_HELD` | `MEDIA_BLOCKED` | **yes** |
+| Block as evidence | `QuarantineModeration.block` | `SELECT … FOR UPDATE` on the asset (refuses `REPORT_HELD`; answers `GONE` for a `DELETED` asset not held as evidence, §9.3), then `media_quarantine_block(id, actor, note)` | `BLOCKED`, `ALREADY_BLOCKED`, `GONE`; port's `REPORT_HELD` | `MEDIA_BLOCKED` | **yes** |
 | Delete | `QuarantineModeration.delete` | `SELECT … FOR UPDATE` on the asset (refuses `EVIDENCE_SERVER_ONLY`, `REPORT_HELD`), then `media_quarantine_delete(id, actor, note)` | `DELETED`, `NOT_QUARANTINED`; port's `EVIDENCE_SERVER_ONLY`, `REPORT_HELD` | `MEDIA_DELETED` | **yes** |
 | View | `QuarantineModeration.reportsHolding`, `ReportModeration.reviewableReasons`, `QuarantineModeration.reviewCopy` | none: holds read unlocked, then `FOR SHARE` on those reports, then `FOR SHARE` on the asset and the holds re-read (§7.4), then the object store | a copy, or refused (§7) | `MEDIA_VIEWED` | no |
 | Step-up | `AdminSignIn.stepUp` | none (A1's TOTP check and step CAS) | accepted, refused | `ADMIN_STEP_UP` | — |
@@ -245,9 +245,10 @@ the read and the call would have had its fresh evidence deleted by the console. 
 4. otherwise `media_quarantine_delete`, whose own `UPDATE` re-takes the lock this transaction
    already holds.
 
-A block that wants the row waits for the delete to commit, and finds it `DELETED` (purged, or
-about to be: `GONE` or, if not yet purged, blocked as evidence of a deleted asset, which V36
-allows). A block that got the row first makes the delete wait, and the delete then sees
+A block that wants the row waits for the delete to commit, and finds it `DELETED`. The port's
+block then answers `GONE` without calling the function, purged or not (§9.3: V36's function alone
+would still block it as evidence of a deleted asset until the purge runs, and a removal already
+in an export would become a tip-off). A block that got the row first makes the delete wait, and the delete then sees
 `BLOCKED` and refuses. Either order keeps the evidence rule. `QuarantineModeration.block` takes
 the same lock first and refuses `REPORT_HELD` for step 3's reason (the report's uphold is where
 a reported asset is blocked, so that the report and its media are decided together).
@@ -443,10 +444,18 @@ The only safe set is acts whose disclosure no later event can change. So, until 
   `target_id = user`), when its purpose is `MEMBER_REQUEST` (the member asked support for help) or
   `OPERATIONS` (a fault being investigated);
 - **the removal of the member's own photo or voice note from a moderation quarantine**
-  (`MEDIA_DELETED/SUCCEEDED` with `reportDriven: false`), as `MEDIA_REMOVED`. It is stable: the
-  port's delete refuses anything `BLOCKED` or held (§6.3), and a deleted asset's objects are purged
-  within seconds, after which `media_quarantine_block` answers `GONE`. A removal can therefore
-  never be followed by a block that would make it a tip-off.
+  (`MEDIA_DELETED/SUCCEEDED` with `reportDriven: false`), as `MEDIA_REMOVED`. It is stable **in
+  the console**: the port's delete refuses anything `BLOCKED` or held (§6.3), and the port's block
+  answers `GONE` for a `DELETED` asset not held as evidence, under the row lock it already takes,
+  without calling `media_quarantine_block`. That function alone would accept such a row until the
+  purge reaches it (V36 takes `status = 'DELETED' AND purged_at IS NULL`), so the guard, not the
+  purge, is what keeps a console removal from being followed by a console block. *(Revised after
+  the whole-branch review, which found the window between the removal and the asynchronous
+  purge.)* **The script path still has that window:** `moyi media quarantine block` calls the
+  function directly, so it can block a `DELETED`, unpurged asset after a console removal, and the
+  export that already listed the removal would then refer to blocked evidence. Until a V62 change
+  to `media_quarantine_block` (refuse `DELETED` unless `evidence_held`) closes it for both paths,
+  the takedown runbook (section 1 step 3) forbids blocking a `DELETED` asset (ADR-0063, Owed).
 
 **Withheld by default:**
 - views and releases (`MEDIA_VIEWED`, `MEDIA_RELEASED`): either could later precede a block;

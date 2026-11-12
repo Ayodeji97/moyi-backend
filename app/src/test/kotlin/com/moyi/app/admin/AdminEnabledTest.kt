@@ -18,6 +18,11 @@ import org.springframework.test.context.ActiveProfiles
  * Loopback is a trusted proxy here so that the real-server requests can say which address
  * they come from through `X-Forwarded-For`, as kamal-proxy does in production. `MockMvc`
  * requests set `remoteAddr` to a non-proxy address, so their header is never believed.
+ *
+ * Media's object store answers a review copy's read with fixed bytes ([ReviewObjectStore]) and
+ * refuses everything else, as the test profile's unavailable store does. The data export's
+ * storage keeps archives in memory ([ExportArchives]), so a test can build an export through the
+ * real job and read what it disclosed.
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -30,7 +35,7 @@ import org.springframework.test.context.ActiveProfiles
 )
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Import(AdminEnabledTest.TimeConfiguration::class)
+@Import(AdminEnabledTest.TimeConfiguration::class, ReviewObjectStore::class, ExportArchives::class)
 abstract class AdminEnabledTest : IntegrationTest() {
     @TestConfiguration
     class TimeConfiguration {

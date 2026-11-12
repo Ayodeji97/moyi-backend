@@ -21,6 +21,7 @@ import com.moyi.support.api.ExportedTicket
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -113,6 +114,7 @@ internal class ArchiveContentsTest(
         archive["supportMessages"].single()["body"].asString() shouldBe "help me"
         archive["supportMessages"].single()["reference"].asString() shouldBe "trace-77"
         archive["adminAccess"]["logKept"].asBoolean() shouldBe false
+        archive["adminAccess"]["statement"].asString() shouldStartWith "No administrator access to your account"
         archive["adminAccess"]["accesses"].isEmpty shouldBe true
         output.all shouldNotContain WORDS
         output.all shouldNotContain "ada@example.com"
@@ -169,24 +171,43 @@ internal class ArchiveContentsTest(
     }
 
     @Test
-    fun `an administrator-access log, once one is kept, is carried as it is`() {
+    fun `an administrator-access log, once one is kept, is carried as it is, under one sentence whether or not it lists anything`() {
         written()
+        val one = AdminAccess(Instant.parse("2026-10-20T12:00:00Z"), "ACCOUNT_LOOKED_UP", null)
+
+        val listing = archiveWith(listOf(one))["adminAccess"]
+        val empty = archiveWith(emptyList())["adminAccess"]
+
+        listing["logKept"].asBoolean() shouldBe true
+        listing["accesses"].single()["action"].asString() shouldBe "ACCOUNT_LOOKED_UP"
+        listing["accesses"].single()["at"].asString() shouldBe "2026-10-20T12:00:00Z"
+        listing["accesses"].single()["justification"].isNull shouldBe true
+        empty["logKept"].asBoolean() shouldBe true
+        empty["accesses"].isEmpty shouldBe true
+        // A2 spec §9.3: the same sentence, byte for byte, for a member with access listed and one without, so that
+        // whether anything was withheld can never be read off the statement.
+        listing["statement"].asString().toByteArray() shouldBe empty["statement"].asString().toByteArray()
+        listing["statement"].asString() shouldBe
+            "Administrator access to your account or to what you wrote is recorded. This lists it, oldest first, " +
+            "except access the law or a safety review requires us not to disclose."
+    }
+
+    /** The archive [ArchiveWriter] makes with an administrator-access log that answers [accesses]. */
+    private fun archiveWith(accesses: List<AdminAccess>): JsonNode {
         val log =
             object : AdminAccessLog {
-                override fun accessesTo(userId: UUID) =
-                    listOf(AdminAccess(Instant.parse("2026-10-20T12:00:00Z"), "VIEWED_ENTRY", "A report about this entry"))
+                override fun accessesTo(userId: UUID) = accesses
             }
         val factory = DefaultListableBeanFactory().apply { registerSingleton("adminAccessLog", log) }
         val provider = factory.getBeanProvider(AdminAccessLog::class.java)
         val withLog = ArchiveWriter(people, people, people, people, storage as ExportStorage, provider, json)
         val zip = Files.createTempFile("archive", ".zip")
-
-        withLog.write(UUID.randomUUID(), ada, clock.instant(), zip)
-
-        val archive = json.readTree(unzip(Files.readAllBytes(zip)).getValue("moyi-export.json"))
-        Files.delete(zip)
-        archive["adminAccess"]["logKept"].asBoolean() shouldBe true
-        archive["adminAccess"]["accesses"].single()["action"].asString() shouldBe "VIEWED_ENTRY"
+        try {
+            withLog.write(UUID.randomUUID(), ada, clock.instant(), zip)
+            return json.readTree(unzip(Files.readAllBytes(zip)).getValue("moyi-export.json"))
+        } finally {
+            Files.delete(zip)
+        }
     }
 
     @Test

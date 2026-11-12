@@ -68,13 +68,14 @@ internal class AdminConsoleDriver(
             }.andReturn()
             .response
 
-    /** Invites [email], enrols it with [password] at the clock's [now], and returns its TOTP secret. */
+    /** Invites [email] as [role], enrols it with [password] at the clock's [now], and returns its TOTP secret. */
     fun enrol(
         email: String,
         password: String,
         now: Instant,
+        role: String = "SUPPORT",
     ): ByteArray {
-        val token = invite(email)
+        val token = invite(email, role)
         val session = MockHttpSession()
         enrolPage(token, session).status shouldBe 200
         val secret = secretOf(email)

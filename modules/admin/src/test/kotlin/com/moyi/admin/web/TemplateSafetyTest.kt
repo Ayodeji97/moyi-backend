@@ -13,7 +13,8 @@ import java.io.File
  */
 internal class TemplateSafetyTest {
     private val templates =
-        File("src/main/resources/templates/admin").listFiles { f -> f.extension == "html" }.orEmpty().toList()
+        // Walked, not listed: A2's decision form is a fragment in a folder of its own.
+        File("src/main/resources/templates/admin").walkTopDown().filter { it.isFile && it.extension == "html" }.toList()
 
     @Test
     fun `no admin template prints unescaped, scripts inline or binds an event attribute`() {

@@ -82,6 +82,37 @@ class UserLookupTest(
         rows.forEach { (it["metadata"] as String) shouldNotContain user.email.substringBefore('@') }
     }
 
+    /**
+     * A2 spec §9.3: a partner's link (`GET /admin/users?q=<id>`) only fills in the form. Nothing is
+     * read until the admin says why, in a POST, so the GET shows no account and audits nothing.
+     * The query itself is in the form's field, so the page is checked for the user's other facts.
+     */
+    @Test
+    fun `GET with an existing user's id or email only fills in the form, shows no user data and audits nothing`() {
+        val user = user()
+        val session = admin("SUPPORT")
+        val before = auditCount("USER_LOOKED_UP")
+        mapOf(user.id.toString() to user.email, user.email to user.id.toString()).forEach { (q, other) ->
+            withClue(q) {
+                val page =
+                    mockMvc
+                        .get("/admin/users") {
+                            with { it.apply { remoteAddr = AdminConsoleDriver.ALLOWED } }
+                            this.session = session
+                            param("q", q)
+                        }.andReturn()
+                        .response
+                page.status shouldBe 200
+                page.contentAsString shouldContain "value=\"$q\""
+                page.contentAsString shouldNotContain other
+                page.contentAsString shouldNotContain "Ada Test"
+                page.contentAsString shouldNotContain "No account matches."
+            }
+        }
+        auditCount("USER_LOOKED_UP") shouldBe before
+        audit(user.id.toString()).size shouldBe 0
+    }
+
     @Test
     fun `the page holds no entry text and not the partner's email, and links the partner's lookup`() {
         val user = user()
@@ -172,17 +203,39 @@ class UserLookupTest(
         val email: String,
     )
 
+    /**
+     * A lookup as the form sends it (A2 spec §9.3): a POST with the session's CSRF token and a
+     * disclosed purpose, which takes no note. The token is the session's, read off the first page
+     * that session is shown a form on: the home page with both factors, the code page with only the
+     * password, so that what the test sees is the role and factor checks, never a missing token.
+     */
     private fun lookup(
         session: MockHttpSession,
         q: String,
-    ): MockHttpServletResponse =
-        mockMvc
-            .get("/admin/users") {
+    ): MockHttpServletResponse {
+        val token =
+            listOf("/admin", "/admin/login/totp").firstNotNullOfOrNull { path ->
+                val page =
+                    mockMvc
+                        .get(path) {
+                            with { it.apply { remoteAddr = AdminConsoleDriver.ALLOWED } }
+                            this.session = session
+                        }.andReturn()
+                        .response
+                runCatching { AdminConsoleDriver.csrfFrom(page) }.getOrNull()
+            }
+        checkNotNull(token) { "no page gave this session a CSRF token" }
+        return mockMvc
+            .post("/admin/users") {
                 with { it.apply { remoteAddr = AdminConsoleDriver.ALLOWED } }
                 this.session = session
+                contentType = MediaType.APPLICATION_FORM_URLENCODED
+                param("_csrf", token)
                 param("q", q)
+                param("purpose", "MEMBER_REQUEST")
             }.andReturn()
             .response
+    }
 
     private fun actorOf(session: MockHttpSession): UUID =
         (session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY) as SecurityContextImpl)

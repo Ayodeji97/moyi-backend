@@ -399,5 +399,8 @@ table, three functions. No new error code. Two new consumers and one new event. 
 ## Revisit when
 
 A hash list is wired. The owner rules on voice. Rekognition's taxonomy moves past version 7 (the
-label names are read). The Phase 5 console replaces the script (it reads `media_moderation_log`,
-and should call the same functions).
+label names are read). ~~The Phase 5 console replaces the script (it reads `media_moderation_log`,
+and should call the same functions).~~ *The A2 console (ADR-0063, 2026-11-12) now calls the same
+functions through `media.api.QuarantineModeration`, as `admin:<accountId>`, unchanged; delete and
+block take the asset's row lock first, and deleting `BLOCKED` evidence stays on the server. The script
+remains while the console is off.*

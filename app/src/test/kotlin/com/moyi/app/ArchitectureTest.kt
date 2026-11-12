@@ -40,6 +40,42 @@ class ArchitectureTest {
          */
         private val project: KoScope by lazy { Konsist.scopeFromProject() }
 
+        /**
+         * A2's two admin-only ports and every type they carry (A2 spec §3, §7.1): the only
+         * things `modules/admin` may import from [MODERATED_APIS], and things only `admin`
+         * and their declaring module may import at all.
+         */
+        private val A2_MODERATION_TYPES =
+            listOf(
+                "QuarantineModeration",
+                "QuarantineDecision",
+                "ReleaseOutcome",
+                "BlockOutcome",
+                "DeleteOutcome",
+                "QuarantineRow",
+                "QuarantinedAsset",
+                "ModerationLogLine",
+                "Review",
+                "ReviewRefusal",
+                "ReviewCopy",
+            ).map { "com.moyi.media.api.$it" } +
+                listOf(
+                    "ReportModeration",
+                    "DismissOutcome",
+                    "ReclassifyOutcome",
+                    "Takedown",
+                    "TakedownOutcome",
+                    "UpholdResult",
+                    "ReportRow",
+                    "ReportCase",
+                    "HeldMedia",
+                    "ReportLogLine",
+                    "ReasonsReview",
+                ).map { "com.moyi.gratitude.api.$it" }
+
+        /** The `api` packages A2's console reaches for its two queues, and for nothing else. */
+        private val MODERATED_APIS = setOf("com.moyi.gratitude.api", "com.moyi.media.api")
+
         /** The domain modules, per doc 25 §6. */
         private val MODULES =
             setOf(
@@ -449,12 +485,16 @@ class ArchitectureTest {
     }
 
     @Test
-    fun `only the admin module imports the admin lookups and PasswordHashing`() {
+    fun `only the admin module imports the admin lookups, PasswordHashing and the moderation ports`() {
         // Admin console A1: these ports expose an address, a lock, a session count, a
         // bond's partner and the password hasher, which no other caller has any use for.
+        // A2 adds media's quarantine port and gratitude's report port, with their types:
+        // decisions on held-back media and on members' reports, the reporter's detail and
+        // the bytes of a review copy, for the console only (A2 spec §7.1).
         // Kotlin's `internal` cannot hide a public `api` interface from a module that
         // depends on its module, so the import is what this sees. The declaring module
-        // and `admin` may; every other module, `common/*` and `app` may not.
+        // and `admin` may; every other module, `common/*` and `app` may not. A nested
+        // type (`Review.Allowed`) is its outer type's.
         val declaredIn =
             mapOf(
                 "com.moyi.identity.api.UserAdminLookup" to "identity",
@@ -462,20 +502,91 @@ class ArchitectureTest {
                 "com.moyi.identity.api.PasswordHashing" to "identity",
                 "com.moyi.bond.api.BondAdminLookup" to "bond",
                 "com.moyi.bond.api.BondAdminView" to "bond",
-            )
+            ) + A2_MODERATION_TYPES.associateWith { it.removePrefix("com.moyi.").substringBefore('.') }
+
+        // A wildcard import of a declaring package (`com.moyi.media.api.*`) reaches every
+        // type in it, so it counts as importing each of them. Konsist flags it with
+        // `isWildcard`; its name may or may not keep the `.*`.
+        fun declaredFor(
+            importName: String,
+            wildcard: Boolean,
+        ): String? =
+            declaredIn.keys.firstOrNull {
+                if (wildcard) {
+                    it.substringBeforeLast('.') == importName.removeSuffix(".*")
+                } else {
+                    importName == it || importName.startsWith("$it.")
+                }
+            }
+        // Positive controls: the matcher is not vacuous for an exact, a nested or a wildcard import.
+        assertTrue(declaredFor("com.moyi.media.api.QuarantineModeration", false) != null, "exact import not matched")
+        assertTrue(declaredFor("com.moyi.media.api.Review.Allowed", false) != null, "nested import not matched")
+        assertTrue(declaredFor("com.moyi.media.api", true) != null, "wildcard import not matched")
+        assertTrue(declaredFor("com.moyi.media.api.*", true) != null, "wildcard import with .* not matched")
+        assertTrue(declaredFor("com.moyi.media.api.MediaLookup", false) == null, "an unrelated api type was matched")
+        assertTrue(declaredFor("com.moyi.gratitude.api.UpholdResult.Done", false) != null, "gratitude's nested import not matched")
+        assertTrue(declaredFor("com.moyi.gratitude.api.*", true) != null, "gratitude's wildcard import not matched")
+        assertTrue(declaredFor("com.moyi.gratitude.api.ArchiveExports", false) == null, "an unrelated gratitude type was matched")
+        assertTrue(project.files.isNotEmpty(), "the scope saw no files")
         val violations =
             project.files.flatMap { file ->
                 val path = file.normalisedProjectPath
                 val module = Regex("^/modules/([^/]+)/").find(path)?.groupValues?.get(1)
                 file.imports
-                    .filter { import -> declaredIn.keys.any { import.name == it } }
-                    .filter { import -> module != "admin" && module != declaredIn.getValue(import.name) }
-                    .map { "$path: ${it.name}" }
+                    .mapNotNull { import ->
+                        declaredFor(import.name, import.isWildcard)?.let { declared -> import to declared }
+                    }.filter { (_, declared) -> module != "admin" && module != declaredIn.getValue(declared) }
+                    .map { (import, _) -> "$path: ${import.name}" }
             }
 
         assertTrue(
             violations.isEmpty(),
-            "Only the admin module (and the module declaring them) may import the admin lookups and PasswordHashing. Found: $violations",
+            "Only the admin module (and the module declaring them) may import the admin lookups, PasswordHashing and " +
+                "the moderation ports. Found: $violations",
+        )
+    }
+
+    @Test
+    fun `the admin module imports from gratitude's and media's api only the moderation ports and their types`() {
+        // A2 spec §7.1 and §12: the console reaches gratitude and media for the two queues and
+        // nothing else, so no entry-reading type (an archive, an image view) can be reached by
+        // accident. A wildcard import of either package reaches every type in it, so it is a
+        // violation whatever it is used for; a nested type is its outer type's.
+        fun outsideModeration(
+            importName: String,
+            wildcard: Boolean,
+        ): Boolean {
+            val name = importName.removeSuffix(".*")
+            val guarded = MODERATED_APIS.firstOrNull { name == it || name.startsWith("$it.") }
+            return when {
+                guarded == null -> false
+                name == guarded -> wildcard
+                else -> "$guarded.${name.removePrefix("$guarded.").substringBefore('.')}" !in A2_MODERATION_TYPES
+            }
+        }
+        // Positive controls: the matcher is not vacuous for an exact, a nested or a wildcard import.
+        assertTrue(outsideModeration("com.moyi.gratitude.api.ArchiveExports", false), "a gratitude api type was let through")
+        assertTrue(outsideModeration("com.moyi.media.api.ImageViews", false), "a media api type was let through")
+        assertTrue(outsideModeration("com.moyi.gratitude.api", true), "a gratitude wildcard was let through")
+        assertTrue(outsideModeration("com.moyi.media.api.*", true), "a media wildcard with .* was let through")
+        assertTrue(!outsideModeration("com.moyi.gratitude.api.ReportModeration", false), "the report port was refused")
+        assertTrue(!outsideModeration("com.moyi.gratitude.api.UpholdResult.Done", false), "a nested port type was refused")
+        assertTrue(!outsideModeration("com.moyi.media.api.Review.Allowed", false), "a nested media port type was refused")
+        assertTrue(!outsideModeration("com.moyi.identity.api.UserAdminLookup", false), "an A1 port was refused")
+        assertTrue(!outsideModeration("com.moyi.media.apiary.Anything", false), "a package sharing the prefix was matched")
+        val adminFiles = project.files.filter { it.normalisedProjectPath.startsWith("/modules/admin/") }
+        assertTrue(adminFiles.isNotEmpty(), "the scope saw no admin files")
+        val violations =
+            adminFiles.flatMap { file ->
+                file.imports
+                    .filter { outsideModeration(it.name, it.isWildcard) }
+                    .map { "${file.normalisedProjectPath}: ${it.name}" }
+            }
+
+        assertTrue(
+            violations.isEmpty(),
+            "modules/admin may import from gratitude.api and media.api only the moderation ports and their types " +
+                "(A2 spec §7.1). Found: $violations",
         )
     }
 
