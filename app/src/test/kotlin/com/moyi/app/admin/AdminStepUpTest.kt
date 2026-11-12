@@ -48,6 +48,20 @@ class AdminStepUpTest(
     }
 
     @Test
+    fun `a new password step in the same session drops the proof an earlier sign-in made`() {
+        val (first, secret) = enrolled()
+        val (second) = enrolled()
+        val session = MockHttpSession()
+        console.password(session, first, PASSWORD).status shouldBe 302
+        console.code(session, code(secret, clock.instant().plusSeconds(30))).status shouldBe 302
+        session.getAttribute(SECOND_FACTOR_AT) shouldBe clock.instant()
+
+        console.password(session, second, PASSWORD).status shouldBe 302
+
+        session.getAttribute(SECOND_FACTOR_AT).shouldBeNull()
+    }
+
+    @Test
     fun `a refused code records nothing`() {
         val (email, secret) = enrolled()
         val session = MockHttpSession()

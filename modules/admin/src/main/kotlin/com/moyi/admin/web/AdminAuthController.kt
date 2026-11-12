@@ -138,6 +138,9 @@ internal class AdminAuthController(
     ) {
         request.getSession(true)
         request.changeSessionId()
+        // A proof of the second factor belongs to the sign-in that made it: every new
+        // establishment starts without one, and only an accepted code writes it back.
+        request.session.removeAttribute(AdminAuthorities.SECOND_FACTOR_AT)
         csrfTokens.saveToken(null, request, response)
         val context = contexts.createEmptyContext().apply { this.authentication = authentication }
         contexts.context = context
