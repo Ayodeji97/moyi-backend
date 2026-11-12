@@ -69,14 +69,22 @@ interface ReportModeration {
     ): UpholdResult
 
     /**
-     * Gratitude's half of the view rule (spec §7.4 step 2): true when every **open** report
-     * among [reportIds] has a reason whose media may be looked at. Takes those reports
+     * Gratitude's half of the view rule (spec §7.4 step 2): [ReasonsReview.REVIEWABLE] when every
+     * **open** report among [reportIds] has a reason whose media may be looked at, otherwise which
+     * kind of report forbids it, as the console audits the refusal. Takes those reports
      * `FOR SHARE`, so that a reclassify or a decision in flight makes this wait, and none can
-     * commit before the caller's transaction does. An empty collection is true: no report
+     * commit before the caller's transaction does. An empty collection is reviewable: no report
      * forbids the look.
      */
-    fun reviewableReasons(reportIds: Collection<UUID>): Boolean
+    fun reviewableReasons(reportIds: Collection<UUID>): ReasonsReview
 }
+
+/**
+ * What the reasons of the open reports holding an asset say about looking at it (spec §7.4):
+ * the refusal reasons `priority_report` and `consent_report` the console audits. A priority
+ * report outranks a consent report when both hold the asset.
+ */
+enum class ReasonsReview { REVIEWABLE, PRIORITY_REPORT, CONSENT_REPORT }
 
 /** `entry_report_dismiss`'s answers, and the port's [STALE]. */
 enum class DismissOutcome { DISMISSED, NOT_OPEN, STALE }

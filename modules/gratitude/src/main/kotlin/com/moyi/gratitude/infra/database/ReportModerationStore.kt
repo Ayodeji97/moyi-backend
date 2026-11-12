@@ -2,6 +2,7 @@ package com.moyi.gratitude.infra.database
 
 import com.moyi.gratitude.api.DismissOutcome
 import com.moyi.gratitude.api.HeldMedia
+import com.moyi.gratitude.api.ReasonsReview
 import com.moyi.gratitude.api.ReclassifyOutcome
 import com.moyi.gratitude.api.ReportCase
 import com.moyi.gratitude.api.ReportLogLine
@@ -169,14 +170,22 @@ internal class ReportModerationStore(
         }
 
     @Transactional(propagation = Propagation.MANDATORY)
-    override fun reviewableReasons(reportIds: Collection<UUID>): Boolean =
-        jdbc
-            // In id order, so that two looks at once take their share locks in one order.
-            .sql("SELECT reason FROM entry_reports WHERE id = ANY(:ids) AND status = 'OPEN' ORDER BY id FOR SHARE")
-            .param("ids", reportIds.toTypedArray())
-            .query(String::class.java)
-            .list()
-            .all { reasonOf(checkNotNull(it) { "entry_reports holds a report with no reason" }).mediaReviewable }
+    override fun reviewableReasons(reportIds: Collection<UUID>): ReasonsReview {
+        val barred =
+            jdbc
+                // In id order, so that two looks at once take their share locks in one order.
+                .sql("SELECT reason FROM entry_reports WHERE id = ANY(:ids) AND status = 'OPEN' ORDER BY id FOR SHARE")
+                .param("ids", reportIds.toTypedArray())
+                .query(String::class.java)
+                .list()
+                .map { reasonOf(checkNotNull(it) { "entry_reports holds a report with no reason" }) }
+                .filterNot { it.mediaReviewable }
+        return when {
+            barred.any { it.priority } -> ReasonsReview.PRIORITY_REPORT
+            barred.isNotEmpty() -> ReasonsReview.CONSENT_REPORT
+            else -> ReasonsReview.REVIEWABLE
+        }
+    }
 
     /**
      * The stale check (spec §6.2): the report's row `FOR UPDATE`, then its reason against the

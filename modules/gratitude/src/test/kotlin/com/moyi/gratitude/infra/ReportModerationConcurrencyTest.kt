@@ -2,6 +2,7 @@ package com.moyi.gratitude.infra
 
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.gratitude.api.DismissOutcome
+import com.moyi.gratitude.api.ReasonsReview
 import com.moyi.gratitude.api.ReportModeration
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
@@ -58,7 +59,7 @@ internal class ReportModerationConcurrencyTest(
                 transactions.execute { port.reviewableReasons(listOf(report)) }
             }
 
-        reviewable shouldBe false
+        reviewable shouldBe ReasonsReview.PRIORITY_REPORT
     }
 
     /** Spec §8: a dismiss made on a page whose reason was reclassified under it is stale, and does nothing. */

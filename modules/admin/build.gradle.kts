@@ -12,6 +12,12 @@ dependencies {
     implementation(projects.modules.identity)
     implementation(projects.modules.bond)
 
+    // A2's two moderation ports (spec §3): `gratitude.api.ReportModeration` and
+    // `media.api.QuarantineModeration`. ArchitectureTest lets this module import nothing
+    // else from either `api`.
+    implementation(projects.modules.gratitude)
+    implementation(projects.modules.media)
+
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")

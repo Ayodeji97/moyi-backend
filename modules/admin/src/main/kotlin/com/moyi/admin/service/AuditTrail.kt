@@ -60,6 +60,9 @@ internal class AuditTrail(
                 ipHash = clientAddress?.let { hasher.mac(it.hostAddress.toByteArray(Charsets.UTF_8)) },
             ),
         )
+        // Written now, not at commit: a failed write then throws inside the audited method,
+        // before it returns what it found (a lookup's data, a review copy's bytes).
+        rows.flush()
     }
 
     private companion object {

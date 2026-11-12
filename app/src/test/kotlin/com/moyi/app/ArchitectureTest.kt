@@ -70,6 +70,7 @@ class ArchitectureTest {
                     "ReportCase",
                     "HeldMedia",
                     "ReportLogLine",
+                    "ReasonsReview",
                 ).map { "com.moyi.gratitude.api.$it" }
 
         /** The `api` packages A2's console reaches for its two queues, and for nothing else. */

@@ -24,3 +24,10 @@ internal object StepUp {
         now: Instant,
     ): Boolean = secondFactorAt != null && !secondFactorAt.isAfter(now) && !now.isAfter(secondFactorAt.plus(WINDOW.toJavaDuration()))
 }
+
+/**
+ * An irreversible act (an uphold, a quarantine block, a quarantine delete) asked for without
+ * the second factor proven within [StepUp.WINDOW] (A2 spec §10.2). Thrown before anything is
+ * read or written; the controller answers it with the code field.
+ */
+internal class StepUpRequired : RuntimeException("A second factor proven within the last five minutes is required.")

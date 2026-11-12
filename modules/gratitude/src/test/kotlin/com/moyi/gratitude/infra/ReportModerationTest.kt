@@ -3,6 +3,7 @@ package com.moyi.gratitude.infra
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.gratitude.api.DismissOutcome
 import com.moyi.gratitude.api.HeldMedia
+import com.moyi.gratitude.api.ReasonsReview
 import com.moyi.gratitude.api.ReclassifyOutcome
 import com.moyi.gratitude.api.ReportModeration
 import com.moyi.gratitude.api.Takedown
@@ -340,7 +341,7 @@ internal class ReportModerationTest(
     // --- the view rule's gratitude half ------------------------------------------------------------------------------
 
     @Test
-    fun `reviewable reasons are true only when every open report among the ids has a reviewable reason`() {
+    fun `reasons are reviewable only when every open report among the ids has a reviewable reason, and say which bars it`() {
         val (entry) = entryWithPhoto()
         val harassment = report(entry, "HARASSMENT", at = T0)
         val violence = report(entry, "VIOLENCE_OR_SELF_HARM", at = T0)
@@ -349,12 +350,13 @@ internal class ReportModerationTest(
         val decidedMinor = report(entry, "MINOR_SEXUAL_CONTENT", at = T0)
         jdbc.queryForList("SELECT * FROM entry_report_uphold(?, 'BLOCK', 'op', 'done')", decidedMinor)
 
-        tx { port.reviewableReasons(emptyList()) } shouldBe true
-        tx { port.reviewableReasons(listOf(harassment, violence)) } shouldBe true
-        tx { port.reviewableReasons(listOf(harassment, minor)) } shouldBe false
-        tx { port.reviewableReasons(listOf(consent)) } shouldBe false
-        tx { port.reviewableReasons(listOf(harassment, decidedMinor)) } shouldBe true
-        tx { port.reviewableReasons(listOf(UUID.randomUUID())) } shouldBe true
+        tx { port.reviewableReasons(emptyList()) } shouldBe ReasonsReview.REVIEWABLE
+        tx { port.reviewableReasons(listOf(harassment, violence)) } shouldBe ReasonsReview.REVIEWABLE
+        tx { port.reviewableReasons(listOf(harassment, minor)) } shouldBe ReasonsReview.PRIORITY_REPORT
+        tx { port.reviewableReasons(listOf(consent)) } shouldBe ReasonsReview.CONSENT_REPORT
+        tx { port.reviewableReasons(listOf(consent, minor)) } shouldBe ReasonsReview.PRIORITY_REPORT
+        tx { port.reviewableReasons(listOf(harassment, decidedMinor)) } shouldBe ReasonsReview.REVIEWABLE
+        tx { port.reviewableReasons(listOf(UUID.randomUUID())) } shouldBe ReasonsReview.REVIEWABLE
     }
 
     // --- the transaction ---------------------------------------------------------------------------------------------
