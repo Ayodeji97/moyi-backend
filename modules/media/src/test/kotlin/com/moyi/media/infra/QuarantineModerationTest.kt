@@ -289,6 +289,14 @@ internal class QuarantineModerationTest(
     }
 
     @Test
+    fun `a storage that cannot be reached refuses the look as unavailable instead of throwing`() {
+        val id = quarantined()
+        store.unavailable = true
+        tx { port.reviewCopy(id, emptySet()) } shouldBe Review.Refused(ReviewRefusal.UNAVAILABLE)
+        store.opened.size shouldBe 1
+    }
+
+    @Test
     fun `blocked, deleted evidence, unheld, purged and unknown assets are refused without touching the store`() {
         val reported = purged(attachedTo = entry)
         jdbc.update("INSERT INTO media_report_holds (media_id, report_id) VALUES (?, ?)", reported, REPORT)

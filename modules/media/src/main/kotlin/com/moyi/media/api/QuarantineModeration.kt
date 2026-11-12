@@ -166,7 +166,7 @@ sealed interface Review {
 
 /**
  * Why a look is refused, as the console audits it (spec §7.4). Media's own: [BLOCKED],
- * [PURGED], [NOT_HELD], [MISSING], [CHANGED]; gratitude's half answers the reports' reasons.
+ * [PURGED], [NOT_HELD], [MISSING], [UNAVAILABLE], [CHANGED]; gratitude's half answers the reports' reasons.
  */
 enum class ReviewRefusal(
     val code: String,
@@ -177,6 +177,12 @@ enum class ReviewRefusal(
 
     /** The variant is not in the store (purged under a race, or never made): a refusal, not a `500`. */
     MISSING("missing"),
+
+    /**
+     * The storage could not be reached or is not configured: a refusal the console can audit,
+     * not a `500` that rolls the look back.
+     */
+    UNAVAILABLE("unavailable"),
 
     /** The reports holding it are not the set the caller locked: reload and look again. */
     CHANGED("changed"),

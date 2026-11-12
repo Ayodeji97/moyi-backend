@@ -18,6 +18,7 @@ import com.moyi.media.domain.ModerationVerdict
 import com.moyi.media.domain.ModeratorReview
 import com.moyi.media.domain.StorageKey
 import com.moyi.media.infra.storage.ObjectStore
+import com.moyi.media.infra.storage.ObjectStoreUnavailableException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.simple.JdbcClient
@@ -151,9 +152,19 @@ internal class QuarantineModerationStore(
                 else -> null
             }
         val served = if (refusal == null) served(facts) else null
-        val content = served?.let { (key, _) -> store.open(key) }
+        var unavailable = false
+        val content =
+            served?.let { (key, _) ->
+                try {
+                    store.open(key)
+                } catch (_: ObjectStoreUnavailableException) {
+                    unavailable = true
+                    null
+                }
+            }
         return when {
             refusal != null -> Review.Refused(refusal)
+            unavailable -> Review.Refused(ReviewRefusal.UNAVAILABLE)
             served == null || content == null -> Review.Refused(ReviewRefusal.MISSING)
             else -> Review.Allowed(reportDriven(facts, holds), ReviewCopy(mediaId, served.second, content))
         }

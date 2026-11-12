@@ -3,6 +3,7 @@ package com.moyi.media.infra
 import com.moyi.media.domain.StorageKey
 import com.moyi.media.domain.StoredObject
 import com.moyi.media.infra.storage.ObjectStore
+import com.moyi.media.infra.storage.ObjectStoreUnavailableException
 import com.moyi.media.infra.storage.PresignedUpload
 import java.io.InputStream
 import java.net.URI
@@ -20,6 +21,9 @@ import java.util.concurrent.CopyOnWriteArrayList
 internal class RecordingObjectStore : ObjectStore {
     private val objects = ConcurrentHashMap<String, ByteArray>()
 
+    /** When true, [open] throws as an unreachable or unconfigured storage does. */
+    @Volatile var unavailable: Boolean = false
+
     /** Every key [open] was asked for, in order, found or not. */
     val opened: MutableList<String> = CopyOnWriteArrayList()
 
@@ -33,6 +37,7 @@ internal class RecordingObjectStore : ObjectStore {
     fun reset() {
         objects.clear()
         opened.clear()
+        unavailable = false
     }
 
     override fun presignUpload(
@@ -53,6 +58,7 @@ internal class RecordingObjectStore : ObjectStore {
 
     override fun open(key: StorageKey): InputStream? {
         opened += key.value
+        if (unavailable) throw ObjectStoreUnavailableException("No media storage is configured (test).")
         return objects[key.value]?.inputStream()
     }
 

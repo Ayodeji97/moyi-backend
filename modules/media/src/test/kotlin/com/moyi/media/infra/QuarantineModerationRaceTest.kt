@@ -194,7 +194,7 @@ internal class QuarantineModerationRaceTest(
         val REPORT: UUID = UUID.fromString("0f0f0f0f-0000-4000-8000-00000000fc01")
 
         /** The port's lock or one of the functions it calls: a delete or a block, waiting. */
-        const val ANY_PORT_STATEMENT = "%media_%"
+        const val ANY_PORT_STATEMENT = "%media\\_%"
 
         /** The view's share lock on the asset, and nothing else (race 3). */
         const val SHARE_LOCK = "%FROM media_assets WHERE id =%FOR SHARE%"

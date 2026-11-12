@@ -479,15 +479,35 @@ class ArchitectureTest {
                     "ReviewRefusal",
                     "ReviewCopy",
                 ).associate { "com.moyi.media.api.$it" to "media" }
+
+        // A wildcard import of a declaring package (`com.moyi.media.api.*`) reaches every
+        // type in it, so it counts as importing each of them. Konsist flags it with
+        // `isWildcard`; its name may or may not keep the `.*`.
+        fun declaredFor(
+            importName: String,
+            wildcard: Boolean,
+        ): String? =
+            declaredIn.keys.firstOrNull {
+                if (wildcard) {
+                    it.substringBeforeLast('.') == importName.removeSuffix(".*")
+                } else {
+                    importName == it || importName.startsWith("$it.")
+                }
+            }
+        // Positive controls: the matcher is not vacuous for an exact, a nested or a wildcard import.
+        assertTrue(declaredFor("com.moyi.media.api.QuarantineModeration", false) != null, "exact import not matched")
+        assertTrue(declaredFor("com.moyi.media.api.Review.Allowed", false) != null, "nested import not matched")
+        assertTrue(declaredFor("com.moyi.media.api", true) != null, "wildcard import not matched")
+        assertTrue(declaredFor("com.moyi.media.api.*", true) != null, "wildcard import with .* not matched")
+        assertTrue(declaredFor("com.moyi.media.api.MediaLookup", false) == null, "an unrelated api type was matched")
+        assertTrue(project.files.isNotEmpty(), "the scope saw no files")
         val violations =
             project.files.flatMap { file ->
                 val path = file.normalisedProjectPath
                 val module = Regex("^/modules/([^/]+)/").find(path)?.groupValues?.get(1)
                 file.imports
                     .mapNotNull { import ->
-                        declaredIn.keys
-                            .firstOrNull { import.name == it || import.name.startsWith("$it.") }
-                            ?.let { declared -> import to declared }
+                        declaredFor(import.name, import.isWildcard)?.let { declared -> import to declared }
                     }.filter { (_, declared) -> module != "admin" && module != declaredIn.getValue(declared) }
                     .map { (import, _) -> "$path: ${import.name}" }
             }
