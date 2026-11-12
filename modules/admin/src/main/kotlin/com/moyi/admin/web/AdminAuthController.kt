@@ -105,6 +105,9 @@ internal class AdminAuthController(
                         FactorGrantedAuthority.fromAuthority(AdminAuthorities.FACTOR_TOTP) +
                         SimpleGrantedAuthority("ROLE_${step.role.name}")
                 establish(request, response, UsernamePasswordAuthenticationToken.authenticated(adminId, null, authorities))
+                // The code just proven opens the step-up window (A2 spec §10.2): an irreversible
+                // act within five minutes of signing in needs no second code.
+                request.session.setAttribute(AdminAuthorities.SECOND_FACTOR_AT, clock.instant())
                 "redirect:$HOME"
             }
 

@@ -41,6 +41,9 @@ import java.util.UUID
  * compare-and-set in the database, so the same step is accepted once even when two requests
  * carry it at the same moment (RFC 6238 §5.2).
  *
+ * **Step-up.** [stepUp] proves the second factor again for an irreversible act (A2 spec §10.2),
+ * through the same [verifyCode] as [totp]: one lockout, one replay check, never two copies.
+ *
  * Each `ADMIN_SIGN_IN` row also moves `moyi.admin.sign_in{outcome}` (Prometheus:
  * `moyi_admin_sign_in_total`). Nothing here ever logs or records an email, a password or a code.
  */
@@ -92,36 +95,14 @@ internal class AdminSignIn(
     }
 
     @Transactional
-    @Suppress("ReturnCount") // One return per reason a code is refused, then the acceptance.
     fun totp(
         adminId: UUID,
         code: String,
         from: ClientAddress?,
     ): TotpStep {
-        // Locked for the rest of the step: see the class comment.
-        val account = accounts.findForUpdateById(adminId)
-        val sealed = account?.totpSecretEnc
-        if (account == null || sealed == null || account.status != AdminStatus.ACTIVE) {
-            recordRefusal(account?.getId(), STEP_TOTP, "not_active", from)
-            return TotpStep.Refused
-        }
-        if (isLocked(account)) {
-            recordRefusal(adminId, STEP_TOTP, "locked", from)
-            return TotpStep.Refused
-        }
-        val step = totp.matchingStep(cipher.decrypt(sealed), code)
-        // The step is spent here or not at all; a code at or before the last spent step is a replay.
-        val reason =
-            when {
-                step == null -> "wrong_code"
-                accounts.casTotpStep(adminId, step) != 1 -> "replayed_code"
-                else -> null
-            }
-        if (reason != null) {
-            countFailure(account)
-            recordRefusal(adminId, STEP_TOTP, reason, from)
-            return TotpStep.Refused
-        }
+        val account =
+            verifyCode(adminId, code) { actorId, reason -> recordRefusal(actorId, STEP_TOTP, reason, from) }
+                ?: return TotpStep.Refused
         accounts.clearFailures(adminId)
         audit.record(
             action = AuditAction.ADMIN_SIGN_IN,
@@ -132,6 +113,46 @@ internal class AdminSignIn(
             clientAddress = from,
         )
         succeeded.increment()
+        return TotpStep.Accepted(account.role)
+    }
+
+    /**
+     * The second factor proven again by a signed-in admin before an irreversible act (A2 spec
+     * §10.2). The same path as [totp], through [verifyCode]: the same row lock, the same
+     * lockout count (a wrong step-up code is a failure like a wrong sign-in code, and five of
+     * them, in any mix with the sign-in steps, lock the account), and the same replay
+     * compare-and-set, so a code spent signing in cannot be spent again here, nor the reverse.
+     * A correct code ends the run of failures, as a completed sign-in does. Each answer is an
+     * `ADMIN_STEP_UP` row; the caller records the time in the session's
+     * `admin.secondFactorAt`, which [StepUp.isFresh] reads.
+     */
+    @Transactional
+    fun stepUp(
+        adminId: UUID,
+        code: String,
+        from: ClientAddress?,
+    ): TotpStep {
+        val account =
+            verifyCode(adminId, code) { actorId, reason ->
+                audit.record(
+                    action = AuditAction.ADMIN_STEP_UP,
+                    outcome = AuditOutcome.REFUSED,
+                    actorId = actorId,
+                    targetType = null,
+                    targetId = null,
+                    metadata = mapOf("reason" to reason),
+                    clientAddress = from,
+                )
+            } ?: return TotpStep.Refused
+        accounts.clearFailures(adminId)
+        audit.record(
+            action = AuditAction.ADMIN_STEP_UP,
+            outcome = AuditOutcome.SUCCEEDED,
+            actorId = adminId,
+            targetType = null,
+            targetId = null,
+            clientAddress = from,
+        )
         return TotpStep.Accepted(account.role)
     }
 
@@ -148,6 +169,47 @@ internal class AdminSignIn(
             targetId = null,
             clientAddress = from,
         )
+    }
+
+    /**
+     * The one code check, for [totp] and [stepUp]. Locks the account row first (see the class
+     * comment), then refuses an account that cannot sign in, a locked one, a wrong code and a
+     * replayed one, in that order. A wrong or replayed code is counted toward the lockout; a
+     * refusal for the account's state is not. Every refusal is handed to [refuse] with its
+     * reason, never the code, and answered with `null`; an accepted code has spent its step.
+     */
+    private fun verifyCode(
+        adminId: UUID,
+        code: String,
+        refuse: (actorId: UUID?, reason: String) -> Unit,
+    ): AdminAccountEntity? {
+        val account = accounts.findForUpdateById(adminId)
+        val sealed = account?.totpSecretEnc
+        val reason =
+            when {
+                account == null || sealed == null || account.status != AdminStatus.ACTIVE -> "not_active"
+                isLocked(account) -> "locked"
+                else -> spend(adminId, sealed, code)?.also { countFailure(account) }
+            }
+        if (reason != null) refuse(account?.getId(), reason)
+        return account.takeIf { reason == null }
+    }
+
+    /**
+     * Spends the code's time step, or says why not. The step is spent here or not at all; a
+     * code at or before the last spent step is a replay.
+     */
+    private fun spend(
+        adminId: UUID,
+        sealed: String,
+        code: String,
+    ): String? {
+        val step = totp.matchingStep(cipher.decrypt(sealed), code)
+        return when {
+            step == null -> "wrong_code"
+            accounts.casTotpStep(adminId, step) != 1 -> "replayed_code"
+            else -> null
+        }
     }
 
     private fun isLocked(account: AdminAccountEntity): Boolean = account.lockedUntil?.isAfter(clock.instant()) == true

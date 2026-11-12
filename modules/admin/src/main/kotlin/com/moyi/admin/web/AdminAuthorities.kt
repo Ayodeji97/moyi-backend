@@ -21,4 +21,10 @@ internal object AdminAuthorities {
 
     /** The password step's time plus the absolute lifetime, an `Instant`. */
     const val ABSOLUTE_DEADLINE = "admin.absoluteDeadline"
+
+    /**
+     * When the second factor was last proven, an `Instant`: set by the sign-in's code step and
+     * by a step-up (A2 spec §10.2). The service reads it through `StepUp.isFresh`.
+     */
+    const val SECOND_FACTOR_AT = "admin.secondFactorAt"
 }
