@@ -278,6 +278,14 @@ acts A2 leaves on the server (holding or blocking an asset outside the queue by 
   A4, and the `audit_log` retention job (ADR-0055, Owed).
 - ~~The script path can still block a DELETED, unpurged asset after a console removal~~: closed
   by V62 (decision 13, amended).
+- **A report hold on an asset a moderator already removed** still lets an `uphold … block` follow
+  the removal (found in V62's review; both cases predate it). (a) A report filed after a removal
+  and before `media.purge` runs: `media_report_hold` holds DELETED, unpurged assets, and the hold
+  then keeps the purge waiting until the report is decided. (b) `moyi media quarantine delete` of
+  a report-held asset: `media_quarantine_delete` has no report check in SQL (only the console's
+  port refuses it), so the hold survives the removal. Closing them is a ruling, not a fix:
+  keeping possible child sexual abuse material as evidence against never contradicting a removal
+  its author has seen. Owner (and the legal check above) before the console goes on.
 - **The owner:** switching the console on stays as `ops/admin/README.md` says; inviting a moderator
   is `admin_invite(email, 'MODERATOR')` there.
 
