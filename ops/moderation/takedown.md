@@ -87,7 +87,9 @@ Not urgent: nobody but its author can see it. Look at the queue once a day while
      `media_quarantine_block` still accepts a `DELETED` asset until the purge reaches it, and a
      console removal may already be listed in its author's data export as "removed"; a block after
      it would tell them what happened (ADR-0063, Owed). The console refuses it itself (it answers
-     "Already deleted"); the script does not, until V62 changes the function.
+     "Already deleted"); the script does not, until V62 changes the function. Evidence its author
+     deleted under a report is not lost by this rule: the report's `uphold … block` keeps it (section
+     3, step 1).
    - *Console:* the asset's page offers **Block as evidence**, **Release** and **Delete**, each with a
      note (1 to 400 characters, never shown to the member). Block and delete ask for a code.
    - An unattached quarantined asset is deleted by the hourly reaper a day after it was made, as any
