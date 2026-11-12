@@ -18,12 +18,20 @@ import java.util.UUID
 internal enum class ReportReason(
     /** Reviewed first, and never viewed by the operator: the takedown runbook's §2 (Q16). Never blocked by the route. */
     val priority: Boolean = false,
+    /**
+     * Gratitude's half of the admin console's view rule (A2 spec §7.4): may a moderator look at
+     * the photo or voice note a report for this reason holds? Never for [MINOR_SEXUAL_CONTENT]
+     * (runbook §2, §3.1: never viewed, at any step) nor [NON_CONSENSUAL] (runbook §3.2: decided
+     * on the reporter's word, since looking is the harm itself; the owner's ruling, §14a Q3).
+     * Media's half is `ModeratorReview`; the console asks both.
+     */
+    val mediaReviewable: Boolean = true,
 ) {
     /** Intimate imagery of the reporter, or of anyone, shared without consent (Q16: no classifier can judge consent). */
-    NON_CONSENSUAL,
+    NON_CONSENSUAL(mediaReviewable = false),
 
     /** Sexual content involving a minor. Held back like any other, and marked for priority review; a person decides. */
-    MINOR_SEXUAL_CONTENT(priority = true),
+    MINOR_SEXUAL_CONTENT(priority = true, mediaReviewable = false),
 
     /** Violence, gore or self-harm. */
     VIOLENCE_OR_SELF_HARM,
