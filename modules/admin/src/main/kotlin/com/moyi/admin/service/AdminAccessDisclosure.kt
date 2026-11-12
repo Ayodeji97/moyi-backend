@@ -40,7 +40,9 @@ internal class AdminAccessDisclosure(
             if (action == null || outcome == null) {
                 null
             } else {
-                Disclosure.shows(action, outcome, row.purpose, row.reportDriven)?.let { AdminAccess(row.at, it, justification = null) }
+                Disclosure
+                    .shows(action, outcome, row.targetType, row.purpose, row.reportDriven)
+                    ?.let { AdminAccess(row.at, it, justification = null) }
             }
         }
 }

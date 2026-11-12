@@ -14,6 +14,11 @@ package com.moyi.admin.domain
  * - the successful removal of the member's own media from a moderation quarantine, with no
  *   report behind it (`reportDriven == false`), as [MEDIA_REMOVED].
  *
+ * Each action is shown only on the target it is about: a lookup on a `USER` row, a removal on a
+ * `MEDIA` one. The query reads both targets for every action, so it is this rule, and no `WHERE`
+ * clause, that withholds a `MEDIA_DELETED` row written against an account, or a `USER_LOOKED_UP`
+ * row written against one of the member's media.
+ *
  * Withheld: everything else. Views and releases, because either could precede a block; every
  * act a report drove, because in a bond of two it names the reporter; every block; lookups for
  * `SAFETY` or `LEGAL`; a lookup with no purpose (a row written before A2); every refusal; and
@@ -25,16 +30,23 @@ internal object Disclosure {
     const val ACCOUNT_LOOKED_UP = "ACCOUNT_LOOKED_UP"
     const val MEDIA_REMOVED = "MEDIA_REMOVED"
 
+    /** The `audit_log.target_type` of a row about a member's account. */
+    const val USER = "USER"
+
+    /** The `audit_log.target_type` of a row about one of a member's media. */
+    const val MEDIA = "MEDIA"
+
     fun shows(
         action: AuditAction,
         outcome: AuditOutcome,
+        targetType: String?,
         purpose: LookupPurpose?,
         reportDriven: Boolean?,
     ): String? =
         when {
             outcome != AuditOutcome.SUCCEEDED -> null
-            action == AuditAction.USER_LOOKED_UP && purpose?.disclosed == true -> ACCOUNT_LOOKED_UP
-            action == AuditAction.MEDIA_DELETED && reportDriven == false -> MEDIA_REMOVED
+            action == AuditAction.USER_LOOKED_UP && targetType == USER && purpose?.disclosed == true -> ACCOUNT_LOOKED_UP
+            action == AuditAction.MEDIA_DELETED && targetType == MEDIA && reportDriven == false -> MEDIA_REMOVED
             else -> null
         }
 }

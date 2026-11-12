@@ -24,8 +24,9 @@ import javax.sql.DataSource
  * made once through the console, over HTTP, as a moderator makes it, and once on the twin by the
  * very statement `scripts/moyi` sends through `ops_sql` (cited at each call, with psql's
  * `:'name'` variables as JDBC parameters). Then every effect is compared: the assets (status,
- * verdict, scores, the evidence hold, whether deleted), the report holds, the reports, the two
- * modules' own log rows by action, and the outbox events by type. Excepted: who acted (the actor
+ * verdict, scores, the evidence hold, whether deleted, the entry attached to, whether moderated and
+ * whether that was restamped), the report holds, the reports, the two modules' own log rows by
+ * action and note, and the outbox events by type, each with its NULLs kept in place. Excepted: who acted (the actor
  * strings, which differ by design) and the ids and times the functions make for themselves.
  */
 class ConsoleMatchesScriptTest(
@@ -189,7 +190,18 @@ class ConsoleMatchesScriptTest(
         after shouldBe effects(twin, case)
     }
 
-    /** Everything a decision can change about [case], with who acted and the functions' own ids and times left out. */
+    /**
+     * Everything a decision can change about [case], with who acted and the functions' own ids and times left out.
+     * Each row is one string of every column it compares, in a fixed place, **a NULL written as [NULL]**: `format`
+     * with `coalesce`, never `concat_ws`, which drops a NULL and moves every column after it up one place.
+     *
+     * `moderated_at` is compared as what it is, not when: null, still the instant the case was seeded with
+     * (`created_at`, which the rig sets to the same instant), or stamped since. The two databases decide at
+     * different instants, so a stamp's value differs, but whether a decision stamped it must not.
+     *
+     * The two modules' logs have no outcome column: a row is its action and its note, which says what was
+     * decided (`to moderation: ` before it for a remoderation, the reason for a verdict).
+     */
     private data class Effects(
         val asset: String,
         val holds: List<String?>,
@@ -206,21 +218,26 @@ class ConsoleMatchesScriptTest(
         Effects(
             asset =
                 jdbc.queryForObject(
-                    "SELECT concat_ws('|', status, moderation_verdict, moderation_scores::text, evidence_held, deleted_at IS NULL) " +
+                    "SELECT format('%s|%s|%s|%s|%s|%s|%s', ${kept("status")}, ${kept("moderation_verdict")}, " +
+                        "${kept("moderation_scores::text")}, ${kept("evidence_held::text")}, deleted_at IS NULL, " +
+                        "${kept("attached_entry_id::text")}, " +
+                        "CASE WHEN moderated_at IS NULL THEN '$NULL' WHEN moderated_at = created_at THEN 'seeded' ELSE 'stamped' END) " +
                         "FROM media_assets WHERE id = ?",
                     String::class.java,
                     case.media,
                 )!!,
             holds =
                 jdbc.queryForList(
-                    "SELECT media_id || '|' || report_id FROM media_report_holds WHERE media_id = ? ORDER BY report_id",
+                    "SELECT format('%s|%s', media_id, ${kept("report_id::text")}) FROM media_report_holds " +
+                        "WHERE media_id = ? ORDER BY report_id",
                     String::class.java,
                     case.media,
                 ),
             report =
                 case.report?.let {
                     jdbc.queryForObject(
-                        "SELECT concat_ws('|', status, reason, detail IS NULL, resolved_at IS NULL) FROM entry_reports WHERE id = ?",
+                        "SELECT format('%s|%s|%s|%s', ${kept("status")}, ${kept("reason")}, detail IS NULL, resolved_at IS NULL) " +
+                            "FROM entry_reports WHERE id = ?",
                         String::class.java,
                         it,
                     )
@@ -228,17 +245,21 @@ class ConsoleMatchesScriptTest(
             reportLog =
                 case.report
                     ?.let {
-                        jdbc.queryForList("SELECT action FROM entry_report_log WHERE report_id = ? ORDER BY at, id", String::class.java, it)
+                        jdbc.queryForList(
+                            "SELECT format('%s|%s', action, ${kept("note")}) FROM entry_report_log WHERE report_id = ? ORDER BY at, id",
+                            String::class.java,
+                            it,
+                        )
                     }.orEmpty(),
             mediaLog =
                 jdbc.queryForList(
-                    "SELECT action FROM media_moderation_log WHERE media_id = ? ORDER BY at, id",
+                    "SELECT format('%s|%s', action, ${kept("note")}) FROM media_moderation_log WHERE media_id = ? ORDER BY at, id",
                     String::class.java,
                     case.media,
                 ),
             events =
                 jdbc.queryForList(
-                    "SELECT concat_ws('|', aggregate_type, aggregate_id, event_type) FROM outbox_events " +
+                    "SELECT format('%s|%s|%s', ${kept("aggregate_type")}, aggregate_id, ${kept("event_type")}) FROM outbox_events " +
                         "WHERE aggregate_id IN (?::uuid, ?::uuid, ?::uuid) ORDER BY 1",
                     String::class.java,
                     case.media,
@@ -247,9 +268,15 @@ class ConsoleMatchesScriptTest(
                 ),
         )
 
+    /** [column], or [NULL] in its place when it holds none. */
+    private fun kept(column: String) = "coalesce($column, '$NULL')"
+
     companion object {
         /** `$OPERATOR`, as `scripts/moyi` passes it: a typed name, where the console passes `admin:<id>`. */
         private const val ACTOR = "daniel"
+
+        /** A NULL column, in [effects]' strings: a sign no column holds. */
+        private const val NULL = "∅"
 
         private val name = "moyi_twin_${UUID.randomUUID().toString().replace("-", "")}"
 

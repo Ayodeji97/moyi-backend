@@ -82,6 +82,37 @@ class UserLookupTest(
         rows.forEach { (it["metadata"] as String) shouldNotContain user.email.substringBefore('@') }
     }
 
+    /**
+     * A2 spec §9.3: a partner's link (`GET /admin/users?q=<id>`) only fills in the form. Nothing is
+     * read until the admin says why, in a POST, so the GET shows no account and audits nothing.
+     * The query itself is in the form's field, so the page is checked for the user's other facts.
+     */
+    @Test
+    fun `GET with an existing user's id or email only fills in the form, shows no user data and audits nothing`() {
+        val user = user()
+        val session = admin("SUPPORT")
+        val before = auditCount("USER_LOOKED_UP")
+        mapOf(user.id.toString() to user.email, user.email to user.id.toString()).forEach { (q, other) ->
+            withClue(q) {
+                val page =
+                    mockMvc
+                        .get("/admin/users") {
+                            with { it.apply { remoteAddr = AdminConsoleDriver.ALLOWED } }
+                            this.session = session
+                            param("q", q)
+                        }.andReturn()
+                        .response
+                page.status shouldBe 200
+                page.contentAsString shouldContain "value=\"$q\""
+                page.contentAsString shouldNotContain other
+                page.contentAsString shouldNotContain "Ada Test"
+                page.contentAsString shouldNotContain "No account matches."
+            }
+        }
+        auditCount("USER_LOOKED_UP") shouldBe before
+        audit(user.id.toString()).size shouldBe 0
+    }
+
     @Test
     fun `the page holds no entry text and not the partner's email, and links the partner's lookup`() {
         val user = user()

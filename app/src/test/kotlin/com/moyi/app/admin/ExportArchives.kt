@@ -74,6 +74,11 @@ class ExportArchives {
          * request route writes it, then [DataExportJobs.prepareDue] **called with no transaction
          * open** (the build holds none, and a caller's transaction would hide a `MANDATORY` read).
          * It must come out `READY`; the answer is the archive's `moyi-export.json`, as stored.
+         *
+         * **This export and no other.** The database is shared by every test class, and others leave
+         * exports waiting; the job takes the oldest first (`ORDER BY requested_at, id`). So the row is
+         * requested a second before every export already waiting (or now, if none is), and the job is
+         * run for **one**: it can only be this one. No production path is needed, or changed.
          */
         fun build(
             jobs: DataExportJobs,
@@ -83,12 +88,14 @@ class ExportArchives {
         ): ByteArray {
             val id = UUID.randomUUID()
             jdbc.update(
-                "INSERT INTO data_exports (id, user_id, status, requested_at) VALUES (?, ?, 'PREPARING', ?)",
+                "INSERT INTO data_exports (id, user_id, status, requested_at) " +
+                    "SELECT ?, ?, 'PREPARING', least(?::timestamptz, (SELECT min(requested_at) - interval '1 second' " +
+                    "FROM data_exports WHERE status = 'PREPARING'))",
                 id,
                 userId,
                 Timestamp.from(clock.instant()),
             )
-            jobs.prepareDue(BATCH)
+            jobs.prepareDue(1) shouldBe 1
             jdbc.queryForObject("SELECT status FROM data_exports WHERE id = ?", String::class.java, id) shouldBe "READY"
             val key = jdbc.queryForObject("SELECT storage_key FROM data_exports WHERE id = ?", String::class.java, id)!!
             return document(Store.archive(key))
@@ -136,8 +143,5 @@ class ExportArchives {
         }
 
         private const val DOCUMENT = "moyi-export.json"
-
-        /** Every export the shared database holds waiting is built in one run, so the one a test asked for is among them. */
-        private const val BATCH = 100
     }
 }

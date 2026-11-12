@@ -258,6 +258,7 @@ internal class ModerationConsoleServiceTest(
                 .shows(
                     AuditAction.valueOf(row.action),
                     AuditOutcome.valueOf(row.outcome),
+                    row.targetType,
                     row.metadata["purpose"]?.let(LookupPurpose::valueOf),
                     row.metadata["reportDriven"]?.toBooleanStrictOrNull(),
                 ).shouldBeNull()

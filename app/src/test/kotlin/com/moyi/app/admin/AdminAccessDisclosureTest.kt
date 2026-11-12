@@ -174,8 +174,9 @@ class AdminAccessDisclosureTest(
 
     /**
      * Rows the console never writes, seeded as SQL can write them, each beside a positive control: a purpose that
-     * is not one, a `reportDriven` that is not a JSON boolean, a lookup row whose target is not a `USER`, and a
-     * removal of someone else's photo. None is listed for Ada, and her export is still built (`READY`).
+     * is not one, a `reportDriven` that is not a JSON boolean, a lookup row whose target is not a `USER`, a
+     * removal written against Ada's account and a lookup written against her photo, and a removal of someone
+     * else's photo. None is listed for Ada, and her export is still built (`READY`).
      */
     @Test
     fun `a row whose metadata is malformed or whose target is not the member's is withheld, and the export is still built`() {
@@ -191,6 +192,9 @@ class AdminAccessDisclosureTest(
         seed("USER_LOOKED_UP", "ADMIN_ACCOUNT", ada, """{"purpose": "MEMBER_REQUEST"}""")
         seed("USER_LOOKED_UP", "REPORT", ada, """{"purpose": "OPERATIONS"}""")
         seed("MEDIA_DELETED", "MEDIA", beas, """{"result": "DELETED", "reportDriven": false}""")
+        // Read by the query (a USER row of Ada's, a MEDIA row of hers), but each action on the other's target.
+        seed("MEDIA_DELETED", "USER", ada, """{"result": "DELETED", "reportDriven": false}""")
+        seed("USER_LOOKED_UP", "MEDIA", adas, """{"purpose": "MEMBER_REQUEST"}""")
         // The controls: a well-formed removal of Ada's own photo is listed for her, and Bea's for Bea.
         seed("MEDIA_DELETED", "MEDIA", adasOther, """{"result": "DELETED", "reportDriven": false}""")
 

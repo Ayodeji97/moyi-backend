@@ -14,8 +14,9 @@ import java.util.UUID
  * The audit rows about one member, for the data export's disclosure (A2 spec §9.3): every row
  * whose target is the member's account (`USER`) or one of their media (`MEDIA`), oldest first,
  * read through V60's `audit_log_target_idx (target_type, target_id, occurred_at)`. Which of them
- * the export shows is `Disclosure.shows`'s to say, not this query's: it reads every action, so
- * that the rule is written in one place.
+ * the export shows is `Disclosure.shows`'s to say, not this query's: it reads every action on
+ * either target, and hands each row's `target_type` on, so that the rule (which action on which
+ * target) is written in one place.
  *
  * `target_id` is `text`, so the member's id and their media ids are bound as text: the media ids
  * as **one** `text[]` parameter (a `uuid[]` would not compare with `text`).
@@ -38,11 +39,11 @@ internal class AdminAccessRows(
         jdbc
             .sql(
                 """
-                SELECT occurred_at, id, action, outcome, metadata ->> 'purpose' AS purpose,
+                SELECT occurred_at, id, action, outcome, target_type, metadata ->> 'purpose' AS purpose,
                        (metadata -> 'reportDriven')::text AS report_driven
                 FROM audit_log WHERE target_type = 'USER' AND target_id = :user
                 UNION ALL
-                SELECT occurred_at, id, action, outcome, metadata ->> 'purpose' AS purpose,
+                SELECT occurred_at, id, action, outcome, target_type, metadata ->> 'purpose' AS purpose,
                        (metadata -> 'reportDriven')::text AS report_driven
                 FROM audit_log WHERE target_type = 'MEDIA' AND target_id = ANY(:media)
                 ORDER BY occurred_at, id
@@ -57,10 +58,11 @@ internal class AdminAccessRows(
         val at: Instant,
         val action: AuditAction?,
         val outcome: AuditOutcome?,
+        val targetType: String,
         val purpose: LookupPurpose?,
         val reportDriven: Boolean?,
     ) {
-        override fun toString(): String = "AccessRow(at=$at, action=$action, outcome=$outcome)"
+        override fun toString(): String = "AccessRow(at=$at, action=$action, outcome=$outcome, targetType=$targetType)"
     }
 
     private companion object {
@@ -70,6 +72,7 @@ internal class AdminAccessRows(
                     at = rs.getTimestamp("occurred_at").toInstant(),
                     action = AuditAction.entries.firstOrNull { it.name == rs.getString("action") },
                     outcome = AuditOutcome.entries.firstOrNull { it.name == rs.getString("outcome") },
+                    targetType = rs.getString("target_type"),
                     purpose = LookupPurpose.named(rs.getString("purpose")),
                     reportDriven = jsonBoolean(rs.getString("report_driven")),
                 )
