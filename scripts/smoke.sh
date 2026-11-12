@@ -318,6 +318,21 @@
 # 55531, Valkey 56531, MinIO 59531), the jar booted by hand (local profile, the five crons at */5) and
 # --attach: 1716 passed, 0 failed, 1 skipped (the tag across the erasure, the poller having won the
 # race), 42 admin checks among them. Before the merge, on 2026-11-06, at V42: 1369, 0, 0, 35 sections.
+# Since the admin console A2 (FR-100, FR-101, FR-113, FR-116, ADR-0063) a second admin section has an
+# invited MODERATOR decide a report filed through the API: the queue and the report's page (the detail,
+# never the words), the review copy (image/webp, no-store, audited), the home counts writing no LISTED,
+# a dismiss with no code and a second one "Already decided", entry_report_log naming admin:<id>, a
+# priority report's photo the 404 page and MEDIA_VIEWED/REFUSED, SUPPORT 403 everywhere, a POST without
+# CSRF 403, a held photo blocked as evidence with a code and its delete then refused, a console removal
+# listed as MEDIA_REMOVED in its author's export and a view in nobody's; then, five minutes after its
+# sign-in (the one wait it adds), an uphold without a code asks for one. The lookup is a POST with a
+# purpose (a SAFETY one without a note 400), and the export's logKept is True. Last run on 2026-11-12, on
+# feat/admin-console-a2 at 3f78399 (its jar built from that tree), on a fresh database that applied 55
+# migrations to V61, against its own compose project (moyi-a2t8: Postgres 55563, Valkey 56563, MinIO
+# 59563), the jar booted by hand (local profile, the five crons at */5) and --attach: 1801 passed,
+# 0 failed, 0 skipped, 73 "admin A2" checks among them. A run before it on the same stack failed one
+# probe (late entries: "the job has run since", the ShedLock floor named under #126) and then stopped
+# in the A2 section on `tr` meeting the review copy's bytes, fixed by LC_ALL=C.
 # Since semantic search S1 (FR-204, ADR-0054) it runs with the embedding provider `none`, as the
 # local profile and production name it: search 200 by words alone; "Remember when" 200 from the
 # words' ranking alone (and a plain question whose words are not all in one entry answers no day),
@@ -3987,7 +4002,7 @@ ADM_DIR="$(mktemp -d)"
 adm_code() { # <jar> <curl args…>: status in ADM_CODE, body in ADM_BODY, headers in ADM_HEADERS
   local jar="$1"; shift
   ADM_CODE="$(curl -s -o "$ADM_DIR/body" -D "$ADM_DIR/hdrs" -w '%{http_code}' -c "$jar" -b "$jar" "$@")"
-  ADM_BODY="$(cat "$ADM_DIR/body")"; ADM_HEADERS="$(tr -d '\r' < "$ADM_DIR/hdrs")"
+  ADM_BODY="$(LC_ALL=C tr -d '\000' < "$ADM_DIR/body")"; ADM_HEADERS="$(tr -d '\r' < "$ADM_DIR/hdrs")"
 }
 adm_csrf() { printf '%s' "$ADM_BODY" | python3 -c 'import re,sys; m=re.search(r"name=\"_csrf\"[^>]*value=\"([^\"]+)\"|value=\"([^\"]+)\"[^>]*name=\"_csrf\"", sys.stdin.read()); print((m.group(1) or m.group(2)) if m else "")'; }
 adm_secret() { printf '%s' "$ADM_BODY" | python3 -c 'import re,sys; m=re.search(r"id=\"secret\"[^>]*>([A-Z2-7]+)<", sys.stdin.read()); print(m.group(1) if m else "")'; }
@@ -3998,6 +4013,7 @@ adm_is() { # <label> <want-status> [<want-location-substring>]
   else pass "$1 ($ADM_CODE)"; fi
 }
 adm_code "$ADM_DIR/probe" "$ADM/login"
+ADM_ON="$ADM_CODE" # kept: every later adm_code overwrites ADM_CODE, and the A2 section asks again
 if ! command -v oathtool >/dev/null; then
   skip "admin: the whole section (oathtool not installed: brew install oath-toolkit)"
 elif [ "$PSQL_OK" != 1 ]; then
@@ -4117,6 +4133,235 @@ else
 
   sql "SELECT admin_disable('$AD_EMAIL')" >/dev/null || true
   db_is "admin: admin_disable disables the account" "$(sql "SELECT status FROM admin_accounts WHERE email='$AD_EMAIL'")" "DISABLED"
+fi
+
+echo; echo "admin console A2 — the report queue and quarantined media, for a moderator (FR-100, FR-101, FR-113, FR-116, ADR-0063)"
+# Spec §13 of docs/superpowers/specs/2026-11-11-admin-console-a2-design.md: a report filed through the API is
+# decided by an invited MODERATOR in the console, the same functions underneath. Codes: every accepted code
+# (enrolment, sign-in, step-up) spends its 30-second step, and the next must be a later one (the replay
+# compare-and-set), so m2_code picks the next unspent step inside the ±1 window, waiting for the clock
+# when it must. The step-up is fresh for five minutes after sign-in, so "an uphold without a recent code
+# asks for one" is checked last, on a session signed in at the start of the section and never stepped up.
+if ! command -v oathtool >/dev/null; then
+  skip "admin A2: the whole section (oathtool not installed: brew install oath-toolkit)"
+elif [ "$PSQL_OK" != 1 ]; then
+  skip "admin A2: the whole section (psql not reachable through docker compose)"
+elif [ "$ADM_ON" != 200 ]; then
+  skip "admin A2: the whole section (this server has the console off)"
+else
+  flush_buckets
+  M2_DIR="$(mktemp -d)"
+  vips black "$M2_DIR/black.v" 64 48 --bands 3
+  vips linear "$M2_DIR/black.v" "$M2_DIR/black.jpg" "1 1 1" "0 0 0" --uchar
+  for n in 1 2 3; do
+    vips black "$M2_DIR/red$n.v" $((60 + n)) 48 --bands 3
+    vips linear "$M2_DIR/red$n.v" "$M2_DIR/red$n.jpg" "1 1 1" "220 20 20" --uchar
+  done
+  M2_DETAIL="smoke-a2-reporter-detail-$RANDOM$RANDOM"
+  verified_account "a2-author" "203.0.113.240"; M2_A="$ACCOUNT_ACCESS"
+  verified_account "a2-reporter" "203.0.113.241"; M2_B="$ACCOUNT_ACCESS"
+  verified_account "a2-viewed" "203.0.113.242"; M2_C="$ACCOUNT_ACCESS"
+  upload_photo "$M2_A" "$M2_DIR/black.jpg" image/jpeg; M2_P1="$PHOTO_ID"
+  upload_photo "$M2_A" "$M2_DIR/red1.jpg" image/jpeg; M2_Q1="$PHOTO_ID"
+  upload_photo "$M2_A" "$M2_DIR/red2.jpg" image/jpeg; M2_Q2="$PHOTO_ID"
+  upload_photo "$M2_C" "$M2_DIR/red3.jpg" image/jpeg; M2_Q3="$PHOTO_ID"
+  for id in "$M2_P1" "$M2_Q1" "$M2_Q2"; do await_photo "$M2_A" "$id" >/dev/null; done
+  await_photo "$M2_C" "$M2_Q3" >/dev/null
+  is "admin A2: the reported photo has passed moderation" "$(await_verdict "$M2_P1")" "PASSED"
+  is "admin A2: …and three red ones are held back by it" "$(await_verdict "$M2_Q1")|$(await_verdict "$M2_Q2")|$(await_verdict "$M2_Q3")" "QUARANTINED|QUARANTINED|QUARANTINED"
+  expect "admin A2: a bond for the author and the reporter" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $M2_A" -d "$(bond_body "Us")"
+  M2_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+  M2_INV="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+  expect "admin A2: …joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$M2_INV/accept" -H "Authorization: Bearer $M2_B"
+  expect "admin A2: the author writes with the photo" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$M2_BOND/entries" -H "Authorization: Bearer $M2_A" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"a2 words\",\"imageMediaId\":\"$M2_P1\"}"
+  M2_ENTRY="$(printf '%s' "$LAST_BODY" | jget id)"
+  expect "admin A2: the reporter writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$M2_BOND/entries" -H "Authorization: Bearer $M2_B" -H "Idempotency-Key: $(new_key)" -d '{"text":"and mine"}'
+  expect "admin A2: the reporter files a report with a photo through the API" 201 '"reason":"VIOLENCE_OR_SELF_HARM"' -- -X POST "$API/entries/$M2_ENTRY/report" -H "Authorization: Bearer $M2_B" -H "Idempotency-Key: $(new_key)" -d "{\"reason\":\"VIOLENCE_OR_SELF_HARM\",\"detail\":\"$M2_DETAIL\"}"
+  M2_R1="$(printf '%s' "$LAST_BODY" | jget id)"
+
+  # m2_code <secret var name>: the next unspent step's code in M2_CODE (M2_STEP_<name> remembers the last).
+  m2_code() {
+    local name="$1" last cur s
+    last="$(eval "printf '%s' \"\${M2_STEP_$name:-0}\"")"
+    while :; do
+      cur=$(( $(date +%s) / 30 ))
+      s=$(( last + 1 > cur - 1 ? last + 1 : cur - 1 ))
+      [ "$s" -le $(( cur + 1 )) ] && break
+      sleep 1
+    done
+    eval "M2_STEP_$name=$s"
+    M2_CODE="$(oathtool --totp -b -N "@$(( s * 30 ))" "$(eval "printf '%s' \"\$M2_SECRET_$name\"")")"
+  }
+  # m2_admin <name> <role>: invites, enrols and leaves the account's secret in M2_SECRET_<name>, its id in M2_ID_<name>.
+  m2_admin() {
+    local name="$1" role="$2" email token secret
+    email="a2-$name-$RANDOM$RANDOM@example.com"
+    eval "M2_EMAIL_$name='$email'"
+    token="$(sql "SELECT admin_invite('$email', '$role')")"
+    adm_code "$ADM_DIR/m2-enrol-$name" "$ADM/enrol?token=$token"
+    secret="$(adm_secret)"; AD_CSRF="$(adm_csrf)"
+    eval "M2_SECRET_$name='$secret'"
+    m2_code "$name"
+    adm_code "$ADM_DIR/m2-enrol-$name" -X POST "$ADM/enrol" --data-urlencode "token=$token" --data-urlencode "password=$AD_PASSWORD" --data-urlencode "confirm=$AD_PASSWORD" --data-urlencode "code=$M2_CODE" --data-urlencode "_csrf=$AD_CSRF"
+    adm_is "admin A2: a $role is invited and enrolled" 302 "/admin/login"
+    eval "M2_ID_$name='$(sql "SELECT id FROM admin_accounts WHERE email='$email'")'"
+  }
+  # m2_sign_in <name> <jar>: both factors.
+  m2_sign_in() {
+    local email; email="$(eval "printf '%s' \"\$M2_EMAIL_$1\"")"
+    adm_code "$2" "$ADM/login"; AD_CSRF="$(adm_csrf)"
+    adm_code "$2" -X POST "$ADM/login" --data-urlencode "email=$email" --data-urlencode "password=$AD_PASSWORD" --data-urlencode "_csrf=$AD_CSRF"
+    adm_code "$2" "$ADM/login/totp"; AD_CSRF="$(adm_csrf)"
+    m2_code "$1"
+    adm_code "$2" -X POST "$ADM/login/totp" --data-urlencode "code=$M2_CODE" --data-urlencode "_csrf=$AD_CSRF"
+  }
+  # m2_flash <jar> <path>: the page a decision redirected to, in ADM_BODY.
+  m2_follow() { adm_code "$1" "$BASE$(adm_location | sed -E 's#^https?://[^/]+##')"; }
+
+  m2_admin mod MODERATOR
+  M2_MOD="$M2_ID_mod"
+  M2_J="$ADM_DIR/m2-mod"; M2_STALE="$ADM_DIR/m2-stale"
+  m2_sign_in mod "$M2_STALE"
+  adm_is "admin A2: the moderator signs in (a session kept for the step-up check at the end)" 302 "/admin"
+  M2_STALE_AT="$(date +%s)"
+  m2_sign_in mod "$M2_J"
+  adm_is "admin A2: the moderator signs in" 302 "/admin"
+
+  M2_LISTED="$(sql "SELECT count(*) FROM entry_report_log WHERE action = 'LISTED'")"
+  adm_code "$M2_J" "$ADM"
+  adm_is "admin A2: the home page shows the moderator the open counts" 200
+  if [[ "$ADM_BODY" == *'id="open-reports"'* && "$ADM_BODY" == *'id="open-quarantine"'* ]]; then pass "admin A2: …both queues' counts are on it"; else fail "admin A2: the home page's counts" "${ADM_BODY:0:200}"; fi
+  db_is "admin A2: …and reading them leaves entry_report_log's LISTED count unchanged" "$(sql "SELECT count(*) FROM entry_report_log WHERE action = 'LISTED'")" "$M2_LISTED"
+
+  adm_code "$M2_J" "$ADM/reports"
+  adm_is "admin A2: the report queue is 200" 200
+  if [[ "$ADM_BODY" == *"$M2_R1"* ]]; then pass "admin A2: …and the API's report is in it"; else fail "admin A2: the report is in /admin/reports" "${ADM_BODY:0:200}"; fi
+  if [[ "$ADM_BODY" == *"$M2_DETAIL"* ]]; then fail "admin A2: …the queue never shows the detail" "it does"; else pass "admin A2: …the queue never shows the detail"; fi
+  adm_code "$M2_J" "$ADM/reports/$M2_R1"
+  adm_is "admin A2: the report's page is 200" 200
+  if [[ "$ADM_BODY" == *"$M2_DETAIL"* ]]; then pass "admin A2: …and shows the reporter's detail"; else fail "admin A2: the report page shows the detail" "${ADM_BODY:0:200}"; fi
+  if [[ "$ADM_BODY" == *"a2 words"* ]]; then fail "admin A2: …and never the entry's words" "the words are on the page"; else pass "admin A2: …and never the entry's words"; fi
+  M2_CSRF="$(adm_csrf)"
+  adm_code "$M2_J" "$ADM/media/$M2_P1/review?via=REPORT&report=$M2_R1"
+  adm_is "admin A2: the reported photo's review copy is 200" 200
+  header_of() { printf '%s\n' "$ADM_HEADERS" | grep -i "^$1:" | head -1 | cut -d' ' -f2- || true; }
+  is "admin A2: …image/webp, the display variant's own type" "$(header_of Content-Type)" "image/webp"
+  is "admin A2: …with Cache-Control: no-store" "$(header_of Cache-Control)" "no-store"
+  is "admin A2: …nosniff" "$(header_of X-Content-Type-Options)" "nosniff"
+  db_is "admin A2: …and the look is audited MEDIA_VIEWED, via the report" "$(sql "SELECT count(*) FROM audit_log WHERE actor_id = '$M2_MOD' AND action = 'MEDIA_VIEWED' AND outcome = 'SUCCEEDED' AND target_id = '$M2_P1' AND metadata->>'via' = 'REPORT'")" "1"
+
+  adm_code "$M2_J" -X POST "$ADM/reports/$M2_R1/dismiss" --data-urlencode "expectedReason=VIOLENCE_OR_SELF_HARM" --data-urlencode "note=smoke: a black square"
+  adm_is "admin A2: a dismiss POST with no CSRF token is refused" 403
+  db_is "admin A2: …and the report is still OPEN" "$(sql "SELECT status FROM entry_reports WHERE id = '$M2_R1'")" "OPEN"
+  adm_code "$M2_J" -X POST "$ADM/reports/$M2_R1/dismiss" --data-urlencode "expectedReason=VIOLENCE_OR_SELF_HARM" --data-urlencode "note=smoke: a black square" --data-urlencode "_csrf=$M2_CSRF"
+  adm_is "admin A2: dismiss, with no code, works" 302 "/admin/reports/$M2_R1"
+  m2_follow "$M2_J"
+  if [[ "$ADM_BODY" == *"Dismissed."* ]]; then pass "admin A2: …the page says Dismissed."; else fail "admin A2: the dismiss result" "${ADM_BODY:0:200}"; fi
+  db_is "admin A2: …the report is DISMISSED and its detail emptied" "$(sql "SELECT status || '|' || (detail IS NULL) FROM entry_reports WHERE id = '$M2_R1'")" "DISMISSED|true"
+  adm_code "$M2_J" -X POST "$ADM/reports/$M2_R1/dismiss" --data-urlencode "expectedReason=VIOLENCE_OR_SELF_HARM" --data-urlencode "note=smoke: again" --data-urlencode "_csrf=$M2_CSRF"
+  m2_follow "$M2_J"
+  if [[ "$ADM_BODY" == *"Already decided by someone else."* ]]; then pass "admin A2: a second dismiss says Already decided"; else fail "admin A2: a second dismiss" "${ADM_BODY:0:200}"; fi
+  # Each page shown after a decision is another READ, so the actions are counted once each.
+  db_is "admin A2: entry_report_log names admin:<id> for the reads and the dismissal" \
+    "$(sql "SELECT string_agg(DISTINCT action, ',' ORDER BY action) FROM entry_report_log WHERE report_id = '$M2_R1' AND actor = 'admin:$M2_MOD'")" "DISMISSED,READ"
+  db_is "admin A2: audit_log has the dismissal and the refused second one, the note as justification" \
+    "$(sql "SELECT string_agg(outcome || ':' || coalesce(metadata->>'result', '') || ':' || justification, ',' ORDER BY occurred_at) FROM audit_log WHERE actor_id = '$M2_MOD' AND action = 'REPORT_DISMISSED' AND target_id = '$M2_R1'")" \
+    "SUCCEEDED:DISMISSED:smoke:ablacksquare,REFUSED:NOT_OPEN:smoke:again"
+
+  expect "admin A2: a priority report on the same photo is 201" 201 '"reason":"MINOR_SEXUAL_CONTENT"' -- -X POST "$API/entries/$M2_ENTRY/report" -H "Authorization: Bearer $M2_B" -H "Idempotency-Key: $(new_key)" -d '{"reason":"MINOR_SEXUAL_CONTENT"}'
+  M2_R2="$(printf '%s' "$LAST_BODY" | jget id)"
+  adm_code "$M2_J" "$ADM/media/$M2_P1/review?via=REPORT&report=$M2_R2"
+  adm_is "admin A2: the priority report's photo answers the 404 page" 404
+  if printf '%s\n' "$ADM_HEADERS" | grep -qi '^content-type: image'; then fail "admin A2: …and no image" "an image was served"; else pass "admin A2: …and no image"; fi
+  db_is "admin A2: …and writes MEDIA_VIEWED/REFUSED, priority_report" "$(sql "SELECT count(*) FROM audit_log WHERE actor_id = '$M2_MOD' AND action = 'MEDIA_VIEWED' AND outcome = 'REFUSED' AND target_id = '$M2_P1' AND metadata->>'reason' = 'priority_report'")" "1"
+
+  m2_admin sup SUPPORT
+  m2_sign_in sup "$ADM_DIR/m2-sup"
+  adm_is "admin A2: a SUPPORT account signs in" 302 "/admin"
+  for path in reports "reports/$M2_R2" quarantine "quarantine/$M2_Q1" "media/$M2_Q1/review?via=QUARANTINE"; do
+    adm_code "$ADM_DIR/m2-sup" "$ADM/$path"
+    adm_is "admin A2: a SUPPORT session gets 403 on /admin/${path%%\?*}" 403
+  done
+  adm_code "$ADM_DIR/m2-sup" "$ADM"; AD_CSRF="$(adm_csrf)"
+  adm_code "$ADM_DIR/m2-sup" -X POST "$ADM/reports/$M2_R2/dismiss" --data-urlencode "expectedReason=MINOR_SEXUAL_CONTENT" --data-urlencode "note=smoke: support" --data-urlencode "_csrf=$AD_CSRF"
+  adm_is "admin A2: …and 403 on a decision, with a CSRF token" 403
+  db_is "admin A2: …which decided nothing" "$(sql "SELECT status FROM entry_reports WHERE id = '$M2_R2'")" "OPEN"
+
+  adm_code "$M2_J" "$ADM/quarantine"
+  adm_is "admin A2: the quarantine queue is 200" 200
+  if [[ "$ADM_BODY" == *"$M2_Q1"* && "$ADM_BODY" == *"$M2_Q2"* ]]; then pass "admin A2: …with the held-back photos in it"; else fail "admin A2: the quarantine queue lists the photos" "${ADM_BODY:0:200}"; fi
+  adm_code "$M2_J" "$ADM/quarantine/$M2_Q1"
+  adm_is "admin A2: a held photo's page is 200" 200
+  if [[ "$ADM_BODY" == *"Block as evidence"* ]]; then pass "admin A2: …and offers Block as evidence"; else fail "admin A2: the block form" "${ADM_BODY:0:200}"; fi
+  M2_CSRF="$(adm_csrf)"
+  m2_code mod
+  adm_code "$M2_J" -X POST "$ADM/quarantine/$M2_Q1/block" --data-urlencode "note=smoke: blocked as evidence" --data-urlencode "code=$M2_CODE" --data-urlencode "_csrf=$M2_CSRF"
+  adm_is "admin A2: the held photo is blocked as evidence from the quarantine page, with a code" 302 "/admin/quarantine"
+  m2_follow "$M2_J"
+  if [[ "$ADM_BODY" == *"Blocked as evidence."* ]]; then pass "admin A2: …the page says so"; else fail "admin A2: the block result" "${ADM_BODY:0:200}"; fi
+  db_is "admin A2: …BLOCKED and held as evidence" "$(sql "SELECT status || '|' || moderation_verdict || '|' || evidence_held FROM media_assets WHERE id = '$M2_Q1'")" "QUARANTINED|BLOCKED|true"
+  db_is "admin A2: …the code is an ADMIN_STEP_UP row, and media_moderation_log names admin:<id>" \
+    "$(sql "SELECT (SELECT count(*) FROM audit_log WHERE actor_id = '$M2_MOD' AND action = 'ADMIN_STEP_UP' AND outcome = 'SUCCEEDED') || '|' || (SELECT count(*) FROM media_moderation_log WHERE media_id = '$M2_Q1' AND actor = 'admin:$M2_MOD')")" "1|1"
+  adm_code "$M2_J" -X POST "$ADM/quarantine/$M2_Q1/delete" --data-urlencode "note=smoke: trying to delete evidence" --data-urlencode "_csrf=$M2_CSRF"
+  adm_is "admin A2: …its delete, the step-up still fresh, answers (back to the queue)" 302 "/admin/quarantine"
+  m2_follow "$M2_J"
+  if [[ "$ADM_BODY" == *"deleted only on the server"* ]]; then pass "admin A2: …and is refused: evidence is deleted only on the server"; else fail "admin A2: the delete of evidence is refused" "${ADM_BODY:0:200}"; fi
+  db_is "admin A2: …the evidence is still BLOCKED and held" "$(sql "SELECT status || '|' || moderation_verdict || '|' || evidence_held FROM media_assets WHERE id = '$M2_Q1'")" "QUARANTINED|BLOCKED|true"
+
+  adm_code "$M2_J" "$ADM/quarantine/$M2_Q2"; M2_CSRF="$(adm_csrf)"
+  adm_code "$M2_J" -X POST "$ADM/quarantine/$M2_Q2/delete" --data-urlencode "note=smoke: real violence" --data-urlencode "_csrf=$M2_CSRF"
+  m2_follow "$M2_J"
+  if [[ "$ADM_BODY" == *"Deleted."* ]]; then pass "admin A2: a moderation-quarantined photo is removed from the console"; else fail "admin A2: the console removal" "${ADM_BODY:0:200}"; fi
+  db_is "admin A2: …DELETED" "$(sql "SELECT status FROM media_assets WHERE id = '$M2_Q2'")" "DELETED"
+  adm_code "$M2_J" "$ADM/quarantine/$M2_Q3?view=1"
+  adm_is "admin A2: another member's held photo is shown on its page" 200
+  adm_code "$M2_J" "$ADM/media/$M2_Q3/review?via=QUARANTINE"
+  adm_is "admin A2: …its review copy is 200" 200
+  is "admin A2: …image/webp" "$(header_of Content-Type)" "image/webp"
+
+  # The member's export (spec §9.3): the removal is listed for its author; a view lists nothing.
+  m2_export() { # <access>: the READY archive's adminAccess as "<logKept> <actions> <justifications>"
+    local id body dir
+    id="$(curl -s -X POST "$API/me/export" -H "Authorization: Bearer $1" | jget id)"
+    for _ in $(seq 1 60); do
+      body="$(curl -s "$API/me/export/$id" -H "Authorization: Bearer $1")"; [[ "$body" == *'"status":"READY"'* ]] && break; sleep 1
+    done
+    dir="$(mktemp -d)"
+    curl -s -o "$dir/a.zip" "$(url_of "$body")" && unzip -qo "$dir/a.zip" -d "$dir/x" 2>/dev/null
+    python3 -c "
+import json, sys
+a = json.load(open(sys.argv[1]))['adminAccess']
+print(a['logKept'], ','.join(x['action'] for x in a['accesses']) or '-', all(x.get('justification') is None for x in a['accesses']))" "$dir/x/moyi-export.json" 2>&1
+    rm -rf "$dir"
+  }
+  is "admin A2: the author's export lists the console removal as MEDIA_REMOVED, and nothing else, with no note" "$(m2_export "$M2_A")" "True MEDIA_REMOVED True"
+  is "admin A2: the export of the member whose photo was only viewed lists nothing" "$(m2_export "$M2_C")" "True - True"
+
+  # The step-up (spec §10.2): five minutes after sign-in, an uphold without a code asks for one.
+  M2_WAIT=$(( M2_STALE_AT + 305 - $(date +%s) ))
+  if [ "$M2_WAIT" -gt 0 ]; then echo "  …waiting ${M2_WAIT}s for the first session's second factor to be five minutes old"; sleep "$M2_WAIT"; fi
+  adm_code "$M2_STALE" "$ADM/reports/$M2_R2"
+  adm_is "admin A2: the priority report's page is 200" 200
+  if [[ "$ADM_BODY" == *"Block as evidence, then runbook §2"* ]]; then pass "admin A2: …its only uphold is the block"; else fail "admin A2: the priority report's uphold" "${ADM_BODY:0:200}"; fi
+  M2_CSRF="$(adm_csrf)"
+  adm_code "$M2_STALE" -X POST "$ADM/reports/$M2_R2/uphold" --data-urlencode "expectedReason=MINOR_SEXUAL_CONTENT" --data-urlencode "takedown=BLOCK" --data-urlencode "note=smoke: FAKE-SMOKE-A2" --data-urlencode "_csrf=$M2_CSRF"
+  adm_is "admin A2: an uphold without a recent code is the form again" 200
+  if [[ "$ADM_BODY" == *"Enter a code from your authenticator app"* ]]; then pass "admin A2: …asking for a code"; else fail "admin A2: the uphold asks for a code" "${ADM_BODY:0:300}"; fi
+  db_is "admin A2: …and decided nothing" "$(sql "SELECT status FROM entry_reports WHERE id = '$M2_R2'")" "OPEN"
+  M2_CSRF="$(adm_csrf)"; m2_code mod
+  adm_code "$M2_STALE" -X POST "$ADM/reports/$M2_R2/uphold" --data-urlencode "expectedReason=MINOR_SEXUAL_CONTENT" --data-urlencode "takedown=BLOCK" --data-urlencode "note=smoke: FAKE-SMOKE-A2" --data-urlencode "code=$M2_CODE" --data-urlencode "_csrf=$M2_CSRF"
+  adm_is "admin A2: …with the code, it decides" 302 "/admin/reports/$M2_R2"
+  db_is "admin A2: …UPHELD, and the photo BLOCKED as evidence" "$(sql "SELECT r.status || '|' || a.moderation_verdict || '|' || a.evidence_held FROM entry_reports r, media_assets a WHERE r.id = '$M2_R2' AND a.id = '$M2_P1'")" "UPHELD|BLOCKED|true"
+  db_is "admin A2: …one REPORT_UPHELD row, and no MEDIA_* row for the uphold" \
+    "$(sql "SELECT (SELECT count(*) FROM audit_log WHERE action = 'REPORT_UPHELD' AND target_id = '$M2_R2') || '|' || (SELECT count(*) FROM audit_log WHERE action IN ('MEDIA_BLOCKED', 'MEDIA_DELETED') AND target_id = '$M2_P1')")" "1|0"
+
+  db_is "admin A2: no audit row holds the reporter's detail or an email" \
+    "$(sql "SELECT count(*) FROM audit_log WHERE actor_id IN ('$M2_MOD', '$M2_ID_sup') AND (coalesce(metadata::text, '') || coalesce(justification, '')) ~* '$M2_DETAIL|@example.com'")" "0"
+  if grep -q "$M2_DETAIL" "$MOYI_LOG"; then fail "admin A2: the reporter's detail is in no log line" "it is in $MOYI_LOG"; else pass "admin A2: the reporter's detail is in no log line"; fi
+  # Not left for the next run's media check: the evidence goes as runbook §2 step 4 says, on the server.
+  for id in "$M2_P1" "$M2_Q1" "$M2_Q3"; do quarantine delete "$id" "smoke: reported, ref FAKE-SMOKE-A2" >/dev/null 2>&1 || true; done
+  for n in mod sup; do sql "SELECT admin_disable('$(eval "printf '%s' \"\$M2_EMAIL_$n\"")')" >/dev/null || true; done
+  rm -rf "$M2_DIR"
 fi
 rm -rf "$ADM_DIR"
 

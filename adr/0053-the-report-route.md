@@ -298,10 +298,14 @@ error code. No event: nothing outside the report's transaction needs to know. De
   8a); (b) the reporter's detail is deleted when the report is decided, and survives in the 30-day
   backups and briefly as a dead tuple (decision 7); (c) a report's reason, its entry and who made it
   are kept as the record of what was decided.
-- **The Phase 5 console** reads `entry_reports` and `entry_report_log` and calls the same functions.
+- ~~**The Phase 5 console** reads `entry_reports` and `entry_report_log` and calls the same functions.~~
+  *Done by A2 (ADR-0063, 2026-11-12): `gratitude.api.ReportModeration` calls the same functions,
+  unchanged, as `admin:<accountId>`, each decision carrying the reason its page showed (`STALE`
+  otherwise).*
 
 ## Revisit when
 
 The owner answers questions 1 or 2. Moderation is switched on in production (decision 5's cost
-changes: a `NOT_SHARED` is then no longer only a report). The console replaces the script. An
-account-level action exists for an operator to take on an upheld member report.
+changes: a `NOT_SHARED` is then no longer only a report). The console replaces the script (it now
+calls the same functions, ADR-0063; the script stays while the console is off). An account-level
+action exists for an operator to take on an upheld member report.
