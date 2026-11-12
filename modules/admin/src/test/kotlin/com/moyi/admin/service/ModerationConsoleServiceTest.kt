@@ -4,6 +4,7 @@ import com.moyi.admin.domain.AdminRole
 import com.moyi.admin.domain.AuditAction
 import com.moyi.admin.domain.AuditOutcome
 import com.moyi.admin.domain.Disclosure
+import com.moyi.admin.domain.LookupPurpose
 import com.moyi.admin.infra.AdminTestApplication
 import com.moyi.admin.infra.FakeMediaStore
 import com.moyi.common.testing.IntegrationTest
@@ -75,6 +76,7 @@ import javax.sql.DataSource
     ],
 )
 @Import(AdminConsoleServiceTest.TimeConfiguration::class, ModerationConsoleServiceTest.Recording::class)
+@Suppress("LargeClass") // Every promise of one service, over one rig; split, each half would need the other's rig.
 internal class ModerationConsoleServiceTest(
     @Autowired private val console: ModerationConsole,
     @Autowired private val clock: MutableClock,
@@ -199,7 +201,7 @@ internal class ModerationConsoleServiceTest(
     }
 
     @Test
-    fun `uphold by delete writes the report's row and one report-driven MEDIA_DELETED row per asset`() {
+    fun `an uphold by delete writes one REPORT_UPHELD row, its metadata field by field`() {
         val (entry, photo) = entryWithPhoto()
         val report = report(entry, "VIOLENCE_OR_SELF_HARM", detail = DETAIL)
 
@@ -207,40 +209,58 @@ internal class ModerationConsoleServiceTest(
             acting(AdminRole.MODERATOR) { console.uphold(report, "VIOLENCE_OR_SELF_HARM", Takedown.DELETE, NOTE, fresh(), admin, null) }
 
         result shouldBe UpholdResult.Done(listOf(photo to TakedownOutcome.DELETED))
-        val rows = audited()
-        rows shouldHaveSize 2
-        val upheld = rows.single { it.action == "REPORT_UPHELD" }
-        upheld.matches(AuditAction.REPORT_UPHELD, AuditOutcome.SUCCEEDED, "REPORT", report, setOf("result", "takedown", "media"))
-        upheld.metadataText shouldBe
-            """{"media": [{"id": "$photo", "outcome": "DELETED"}], "result": "UPHELD", "takedown": "DELETE"}"""
-        val taken = rows.single { it.action == "MEDIA_DELETED" }
-        taken.matches(AuditAction.MEDIA_DELETED, AuditOutcome.SUCCEEDED, "MEDIA", photo, setOf("result", "reportId", "reportDriven"))
-        taken.metadata["reportDriven"] shouldBe "true"
+        val row = audited().single()
+        row.matches(AuditAction.REPORT_UPHELD, AuditOutcome.SUCCEEDED, "REPORT", report, setOf("result", "takedown", "media"))
+        row.metadata["result"] shouldBe "UPHELD"
+        row.metadata["takedown"] shouldBe "DELETE"
+        upheldMedia(report) shouldContainExactly listOf("id,outcome|$photo|DELETED")
         reportActors(report) shouldContainExactly listOf("UPHELD|admin:$admin")
     }
 
     @Test
-    fun `an uphold's takedown rows are report-driven and never disclosed, whatever the asset was`() {
-        // A moderation quarantine with no report-driven reason of its own: the port would say
-        // reportDriven false for it in the quarantine queue. Taken down by a report, it is true.
+    fun `an uphold by block writes one REPORT_UPHELD row, its metadata field by field`() {
+        val (entry, photo) = entryWithPhoto()
+        val report = report(entry, "MINOR_SEXUAL_CONTENT")
+
+        val result =
+            acting(AdminRole.MODERATOR) { console.uphold(report, "MINOR_SEXUAL_CONTENT", Takedown.BLOCK, NOTE, fresh(), admin, null) }
+
+        result shouldBe UpholdResult.Done(listOf(photo to TakedownOutcome.BLOCKED))
+        val row = audited().single()
+        row.matches(AuditAction.REPORT_UPHELD, AuditOutcome.SUCCEEDED, "REPORT", report, setOf("result", "takedown", "media"))
+        row.metadata["result"] shouldBe "UPHELD"
+        row.metadata["takedown"] shouldBe "BLOCK"
+        upheldMedia(report) shouldContainExactly listOf("id,outcome|$photo|BLOCKED")
+        reportActors(report) shouldContainExactly listOf("UPHELD|admin:$admin")
+    }
+
+    @Test
+    fun `an uphold by delete or by block writes no MEDIA row, one REPORT_UPHELD row, and the export shows none of it`() {
+        // A moderation quarantine with no report-driven reason of its own, taken down by a report;
+        // and a reported photo blocked as evidence.
         val entry = UUID.randomUUID()
         val photo = quarantined(attachedTo = entry)
         val report = report(entry, "HARASSMENT")
-        val blockedEntry = entryWithPhoto().first
-        val blockReport = report(blockedEntry, "MINOR_SEXUAL_CONTENT")
+        val blockReport = report(entryWithPhoto().first, "MINOR_SEXUAL_CONTENT")
 
         acting(AdminRole.MODERATOR) {
             console.uphold(report, "HARASSMENT", Takedown.DELETE, NOTE, fresh(), admin, null)
             console.uphold(blockReport, "MINOR_SEXUAL_CONTENT", Takedown.BLOCK, NOTE, fresh(), admin, null)
         }
 
-        val media = audited().filter { it.action.startsWith("MEDIA_") }
-        media.map { "${it.action}|${it.outcome}" } shouldContainExactly listOf("MEDIA_DELETED|SUCCEEDED", "MEDIA_BLOCKED|SUCCEEDED")
-        media.forEach { row ->
-            // Read as the export reads it: the row alone.
-            val reportDriven = row.metadata["reportDriven"]?.toBooleanStrictOrNull()
-            Disclosure.shows(AuditAction.valueOf(row.action), AuditOutcome.valueOf(row.outcome), null, reportDriven).shouldBeNull()
-            reportDriven shouldBe true
+        val rows = audited()
+        rows.filter { it.action.startsWith("MEDIA_") }.shouldBeEmpty()
+        rows.map { "${it.action}|${it.outcome}|${it.targetId}" } shouldContainExactly
+            listOf("REPORT_UPHELD|SUCCEEDED|$report", "REPORT_UPHELD|SUCCEEDED|$blockReport")
+        rows.forEach { row ->
+            // Read as the export reads it: the row's own fields, from the database, and nothing else.
+            Disclosure
+                .shows(
+                    AuditAction.valueOf(row.action),
+                    AuditOutcome.valueOf(row.outcome),
+                    row.metadata["purpose"]?.let(LookupPurpose::valueOf),
+                    row.metadata["reportDriven"]?.toBooleanStrictOrNull(),
+                ).shouldBeNull()
         }
         assetState(photo) shouldBe "DELETED|QUARANTINED|false"
     }
@@ -413,6 +433,7 @@ internal class ModerationConsoleServiceTest(
 
         val copy = acting(AdminRole.MODERATOR) { console.openForReview(photo, admin, null) }.shouldNotBeNull()
 
+        FakeMediaStore.closed.get() shouldBe 0 // A committed look hands the copy, open, to the caller.
         copy.use { it.content.readAllBytes() shouldBe FakeMediaStore.BYTES }
         copy.contentType shouldBe "image/webp"
         val row = audited().single()
@@ -478,6 +499,61 @@ internal class ModerationConsoleServiceTest(
         row.metadata["reason"] shouldBe "unavailable"
     }
 
+    @Test
+    fun `a look whose MEDIA_VIEWED row fails throws, and the copy it opened is closed`() {
+        val photo = quarantined()
+        jdbc.execute(
+            "CREATE OR REPLACE FUNCTION moderation_console_test_view_fail() RETURNS trigger LANGUAGE plpgsql AS " +
+                "\$\$ BEGIN IF NEW.action = 'MEDIA_VIEWED' THEN RAISE EXCEPTION 'audit refused (test)'; END IF; " +
+                "RETURN NEW; END \$\$",
+        )
+        jdbc.execute(
+            "CREATE TRIGGER moderation_console_test_view_fail BEFORE INSERT ON audit_log " +
+                "FOR EACH ROW EXECUTE FUNCTION moderation_console_test_view_fail()",
+        )
+        // Inside a caller's transaction, so that the close is seen as the exception arrives, before
+        // any rollback could close it: the look itself closes what it opened.
+        val closedWhenThrown =
+            try {
+                acting(AdminRole.MODERATOR) {
+                    transactions.execute { status ->
+                        shouldThrow<RuntimeException> { console.openForReview(photo, admin, null) }
+                        status.setRollbackOnly()
+                        FakeMediaStore.closed.get()
+                    }
+                }
+            } finally {
+                jdbc.execute("DROP TRIGGER moderation_console_test_view_fail ON audit_log")
+                jdbc.execute("DROP FUNCTION moderation_console_test_view_fail()")
+            }
+
+        closedWhenThrown shouldBe 1
+        FakeMediaStore.opened shouldHaveSize 1
+        FakeMediaStore.closed.get() shouldBe 1
+        audited().shouldBeEmpty()
+    }
+
+    @Test
+    fun `a copy handed to a transaction that then rolls back is closed when it rolls back`() {
+        val photo = quarantined()
+        var closedBeforeRollback = -1
+
+        val copy =
+            acting(AdminRole.MODERATOR) {
+                transactions.execute { status ->
+                    console.openForReview(photo, admin, null).also {
+                        closedBeforeRollback = FakeMediaStore.closed.get()
+                        status.setRollbackOnly()
+                    }
+                }
+            }
+
+        copy.shouldNotBeNull()
+        closedBeforeRollback shouldBe 0
+        FakeMediaStore.closed.get() shouldBe 1
+        audited().shouldBeEmpty()
+    }
+
     // --- reads -------------------------------------------------------------------------------------------------------
 
     @Test
@@ -522,6 +598,23 @@ internal class ModerationConsoleServiceTest(
                 "REPORT_READ|SUCCEEDED|REPORT",
             )
         audited().forEach { it.metadataText shouldNotContain DETAIL }
+    }
+
+    @Test
+    fun `the quarantine page refuses a READY photo that was never held, NOT_FOUND as for an unknown id`() {
+        val photo = entryWithPhoto().second
+        val unknown = UUID.randomUUID()
+
+        acting(AdminRole.MODERATOR) {
+            console.quarantined(photo, admin, null).shouldBeNull()
+            console.quarantined(unknown, admin, null).shouldBeNull()
+        }
+
+        val (ready, missing) = audited()
+        ready.matches(AuditAction.QUARANTINE_QUEUE_VIEWED, AuditOutcome.REFUSED, "MEDIA", photo, setOf("result"), justification = null)
+        missing.matches(AuditAction.QUARANTINE_QUEUE_VIEWED, AuditOutcome.REFUSED, "MEDIA", unknown, setOf("result"), justification = null)
+        ready.metadata shouldBe missing.metadata
+        ready.metadata["result"] shouldBe "NOT_FOUND"
     }
 
     // --- dismiss against view: no deadlock (spec §12) ----------------------------------------------------------------
@@ -715,6 +808,19 @@ internal class ModerationConsoleServiceTest(
                 "SELECT action || '|' || actor FROM media_moderation_log WHERE media_id = ? ORDER BY at, id",
                 String::class.java,
                 media,
+            ).filterNotNull()
+
+    /** The `media` array of [report]'s `REPORT_UPHELD` row, one `keys|id|outcome` per element, in its order. */
+    private fun upheldMedia(report: UUID): List<String> =
+        jdbc
+            .queryForList(
+                "SELECT (SELECT string_agg(k, ',' ORDER BY k) FROM jsonb_object_keys(m.e) k) || '|' || (m.e ->> 'id') || '|' || " +
+                    "(m.e ->> 'outcome') FROM audit_log a CROSS JOIN LATERAL jsonb_array_elements(a.metadata -> 'media') " +
+                    "WITH ORDINALITY AS m(e, n) WHERE a.actor_id = ? AND a.action = 'REPORT_UPHELD' AND a.target_id = ? " +
+                    "ORDER BY a.id, m.n",
+                String::class.java,
+                admin,
+                report.toString(),
             ).filterNotNull()
 
     /** This test's admin's audit rows, in the order written. */

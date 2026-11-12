@@ -11,7 +11,6 @@ import com.moyi.gratitude.api.ReportLogLine
 import com.moyi.gratitude.api.ReportModeration
 import com.moyi.gratitude.api.ReportRow
 import com.moyi.gratitude.api.Takedown
-import com.moyi.gratitude.api.TakedownOutcome
 import com.moyi.gratitude.api.UpholdResult
 import com.moyi.media.api.BlockOutcome
 import com.moyi.media.api.DeleteOutcome
@@ -28,6 +27,8 @@ import org.slf4j.LoggerFactory
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -166,9 +167,10 @@ internal class ModerationConsole(
     }
 
     /**
-     * `entry_report_uphold` by [takedown], behind the step-up. One `REPORT_UPHELD` row, and one
-     * `MEDIA_*` row per asset taken down, each with `reportDriven: true` **unconditionally**: a
-     * report drove it by definition, and the export's disclosure must never show it (spec §9.3).
+     * `entry_report_uphold` by [takedown], behind the step-up. **One** `REPORT_UPHELD` row (spec
+     * §9.2), whose `media` lists each asset taken down and its outcome. No `MEDIA_*` row: a report
+     * drove the takedown, and the export's disclosure must never show it (spec §9.3), which a
+     * `REPORT_UPHELD` row never is.
      */
     @Suppress("LongParameterList") // The decision's four inputs, the step-up proof, and who asked from where.
     @PreAuthorize("hasRole('MODERATOR')")
@@ -203,7 +205,6 @@ internal class ModerationConsole(
                 "media" to media.map { (id, outcome) -> mapOf("id" to id.toString(), "outcome" to outcome.name) },
             ),
         )
-        media.forEach { (mediaId, outcome) -> takenDown(reportId, takedown, mediaId, outcome, checked, adminId, from) }
         return result
     }
 
@@ -220,8 +221,9 @@ internal class ModerationConsole(
 
     /**
      * One held-back asset (spec §5.2). It has no log of its own in `media_moderation_log`, so the
-     * audit row is the record of the look: `QUARANTINE_QUEUE_VIEWED` aimed at the asset. Null for
-     * an unknown id.
+     * audit row is the record of the look: `QUARANTINE_QUEUE_VIEWED` aimed at the asset. Null, and
+     * refused `NOT_FOUND`, for an unknown id and for an asset that is not held back: neither
+     * `QUARANTINED`, nor held as evidence, nor held by a report. The page shows nothing else.
      */
     @PreAuthorize("hasRole('MODERATOR')")
     @Transactional
@@ -230,7 +232,7 @@ internal class ModerationConsole(
         adminId: UUID,
         from: ClientAddress?,
     ): QuarantinePage? {
-        val asset = media.asset(mediaId)
+        val asset = media.asset(mediaId)?.takeIf { it.status == QUARANTINED || it.evidenceHeld || it.heldByReport }
         audit.record(
             action = AuditAction.QUARANTINE_QUEUE_VIEWED,
             outcome = if (asset != null) AuditOutcome.SUCCEEDED else AuditOutcome.REFUSED,
@@ -303,7 +305,9 @@ internal class ModerationConsole(
      *
      * The `MEDIA_VIEWED` row is written (and flushed) before the copy is returned, and the
      * transaction commits as this returns, before the caller streams a byte. The caller closes
-     * the copy.
+     * the copy. A look that is not recorded hands back no bytes: the copy is closed here when the
+     * row's write fails, and when the transaction does not commit after it (a failed commit, or
+     * an outer transaction that rolls back).
      */
     @PreAuthorize("hasRole('MODERATOR')")
     @Transactional
@@ -320,6 +324,7 @@ internal class ModerationConsole(
                 ReasonsReview.REVIEWABLE -> media.reviewCopy(mediaId, holding.toSet()).let(::asLook)
             }
         val copy = (look as? Look.Served)?.copy
+        copy?.let(::closeUnlessCommitted)
         var recorded = false
         try {
             recordLook(mediaId, holding, look, adminId, from)
@@ -369,36 +374,25 @@ internal class ModerationConsole(
         )
     }
 
-    private fun stepUp(secondFactorAt: Instant?) {
-        if (!StepUp.isFresh(secondFactorAt, clock.instant())) throw StepUpRequired()
+    /**
+     * Closes [copy] when the transaction ends without committing. Any status but `COMMITTED`: a
+     * commit that fails in the driver ends `STATUS_UNKNOWN`, not `STATUS_ROLLED_BACK`, and its
+     * row is no more recorded than a rolled-back one.
+     */
+    private fun closeUnlessCommitted(copy: ReviewCopy) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(
+                object : TransactionSynchronization {
+                    override fun afterCompletion(status: Int) {
+                        if (status != TransactionSynchronization.STATUS_COMMITTED) copy.close()
+                    }
+                },
+            )
+        }
     }
 
-    /** One takedown of an uphold, as its own `MEDIA_*` row. `reportDriven` is `true`, never computed. */
-    @Suppress("LongParameterList") // The report, the act, the asset and its answer, and the decision's note and author.
-    private fun takenDown(
-        reportId: UUID,
-        takedown: Takedown,
-        mediaId: UUID,
-        outcome: TakedownOutcome,
-        note: ModerationNote,
-        adminId: UUID,
-        from: ClientAddress?,
-    ) {
-        val (action, succeeded) =
-            when (takedown) {
-                Takedown.DELETE -> AuditAction.MEDIA_DELETED to (outcome == TakedownOutcome.DELETED)
-                Takedown.BLOCK -> AuditAction.MEDIA_BLOCKED to (outcome == TakedownOutcome.BLOCKED)
-            }
-        audit.record(
-            action = action,
-            outcome = if (succeeded) AuditOutcome.SUCCEEDED else AuditOutcome.REFUSED,
-            actorId = adminId,
-            targetType = MEDIA,
-            targetId = mediaId.toString(),
-            justification = note.text,
-            metadata = mapOf(RESULT to outcome.name, "reportId" to reportId.toString(), REPORT_DRIVEN to true),
-            clientAddress = from,
-        )
+    private fun stepUp(secondFactorAt: Instant?) {
+        if (!StepUp.isFresh(secondFactorAt, clock.instant())) throw StepUpRequired()
     }
 
     @Suppress("LongParameterList") // The act, its asset and answer, and the decision's note and author.
@@ -482,6 +476,7 @@ internal class ModerationConsole(
         const val RESULT = "result"
         const val REPORT_DRIVEN = "reportDriven"
         const val NOT_FOUND = "NOT_FOUND"
+        const val QUARANTINED = "QUARANTINED"
         const val UPHELD = "UPHELD"
         const val PRIORITY_REPORT = "priority_report"
         const val CONSENT_REPORT = "consent_report"
