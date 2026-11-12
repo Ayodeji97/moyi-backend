@@ -50,3 +50,23 @@ dependencies {
     // V60, writes A1's rows, and then migrates on, the only way to run V61 against rows that exist.
     testImplementation("org.flywaydb:flyway-core")
 }
+
+// The console's HTTP layer (its controllers, forms and pages) is tested from `app`, where the
+// whole chain runs (A1 spec §12, A2 spec §12): MockMvc through the real security chain, the real
+// ports and a real Postgres. JaCoCo checks each module against its own tests only, so that
+// coverage was invisible here, and A2's controllers put the module under the 80% floor (0.65) although
+// they are exercised there (0.96 counted together). The floor is unchanged; this module's report and check also read
+// `app`'s execution data, which covers only classes on this module's class directories.
+// Restated tests in this module would test the same thing twice to move a number (the
+// convention's own warning), and a lower floor or an exclusion would hide real gaps.
+val appTestExecution = project(":app").layout.buildDirectory.file("jacoco/test.exec")
+
+tasks.named<JacocoReport>("jacocoTestReport") {
+    dependsOn(":app:test")
+    executionData(appTestExecution)
+}
+
+tasks.named<JacocoCoverageVerification>("jacocoTestCoverageVerification") {
+    dependsOn(":app:test")
+    executionData(appTestExecution)
+}
