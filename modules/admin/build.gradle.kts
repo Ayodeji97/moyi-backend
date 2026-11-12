@@ -36,4 +36,7 @@ dependencies {
     testRuntimeOnly("org.springframework.boot:spring-boot-starter-flyway")
     testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
     testRuntimeOnly("org.postgresql:postgresql")
+    // Flyway's own API, at compile time, for one test: V61MigrationTest stops the schema at
+    // V60, writes A1's rows, and then migrates on, the only way to run V61 against rows that exist.
+    testImplementation("org.flywaydb:flyway-core")
 }
