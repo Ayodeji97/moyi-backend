@@ -172,17 +172,39 @@ class UserLookupTest(
         val email: String,
     )
 
+    /**
+     * A lookup as the form sends it (A2 spec §9.3): a POST with the session's CSRF token and a
+     * disclosed purpose, which takes no note. The token is the session's, read off the first page
+     * that session is shown a form on: the home page with both factors, the code page with only the
+     * password, so that what the test sees is the role and factor checks, never a missing token.
+     */
     private fun lookup(
         session: MockHttpSession,
         q: String,
-    ): MockHttpServletResponse =
-        mockMvc
-            .get("/admin/users") {
+    ): MockHttpServletResponse {
+        val token =
+            listOf("/admin", "/admin/login/totp").firstNotNullOfOrNull { path ->
+                val page =
+                    mockMvc
+                        .get(path) {
+                            with { it.apply { remoteAddr = AdminConsoleDriver.ALLOWED } }
+                            this.session = session
+                        }.andReturn()
+                        .response
+                runCatching { AdminConsoleDriver.csrfFrom(page) }.getOrNull()
+            }
+        checkNotNull(token) { "no page gave this session a CSRF token" }
+        return mockMvc
+            .post("/admin/users") {
                 with { it.apply { remoteAddr = AdminConsoleDriver.ALLOWED } }
                 this.session = session
+                contentType = MediaType.APPLICATION_FORM_URLENCODED
+                param("_csrf", token)
                 param("q", q)
+                param("purpose", "MEMBER_REQUEST")
             }.andReturn()
             .response
+    }
 
     private fun actorOf(session: MockHttpSession): UUID =
         (session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY) as SecurityContextImpl)

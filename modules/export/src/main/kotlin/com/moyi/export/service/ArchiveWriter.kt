@@ -168,7 +168,9 @@ internal class ArchiveWriter(
             AdminAccessJson(logKept = false, statement = NO_ADMIN_LOG, accesses = emptyList())
         } else {
             val accesses = log.accessesTo(userId).map { AdminAccessEntryJson(it.at, it.action, it.justification) }
-            AdminAccessJson(logKept = true, statement = if (accesses.isEmpty()) NO_ACCESS else ACCESS, accesses = accesses)
+            // One sentence for everyone, whether or not anything was withheld (A2 spec §9.3): a
+            // statement that changed with what was withheld would itself say that something was.
+            AdminAccessJson(logKept = true, statement = ACCESS, accesses = accesses)
         }
     }
 
@@ -220,7 +222,8 @@ internal class ArchiveWriter(
         |  reaction on that entry, which you both see;
         |- supportMessages: the messages you sent to Moyi's support, each with the error reference the app sent with it, if
         |  any; a closed one no longer holds its words or its reference;
-        |- adminAccess: any access by a Moyi administrator to your account or what you wrote.
+        |- adminAccess: access by a Moyi administrator to your account or what you wrote, except access the law or a
+        |  safety review requires Moyi not to disclose.
         |
         |The media folder holds each photo and voice note the archive names, in the best copy Moyi keeps: photos as WebP, with
         |no location or camera data (Moyi never keeps the file as it was uploaded), and voice notes as Ogg Opus.
@@ -237,7 +240,8 @@ internal class ArchiveWriter(
         const val NO_ADMIN_LOG =
             "No administrator access to your account or to what you wrote is recorded. Moyi has no administrator " +
                 "console yet; once it has, every access it allows is recorded and listed here."
-        const val NO_ACCESS = "No administrator access to your account or to what you wrote is recorded."
-        const val ACCESS = "Every recorded administrator access to your account or to what you wrote, oldest first."
+        const val ACCESS =
+            "Administrator access to your account or to what you wrote is recorded. This lists it, oldest first, " +
+                "except access the law or a safety review requires us not to disclose."
     }
 }

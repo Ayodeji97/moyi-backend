@@ -8,7 +8,8 @@ package com.moyi.admin.domain
  * asked for, or one made to investigate a fault, is listed. One made for a report or a
  * moderation case (`SAFETY`) or for a law-enforcement request (`LEGAL`) is withheld, because
  * listing it could tip off the person it is about; such a lookup needs a typed note of 1–400
- * characters, written to the row's `justification`, so a withheld lookup always says why.
+ * characters, written to the row's `justification`, so a withheld lookup always says why
+ * ([noteRequired]). The note's own rule is `ModerationNote`'s, the one place it is written.
  */
 internal enum class LookupPurpose(
     val disclosed: Boolean,
@@ -17,4 +18,13 @@ internal enum class LookupPurpose(
     OPERATIONS(true),
     SAFETY(false),
     LEGAL(false),
+    ;
+
+    /** Owner ruling 6: a lookup the member's export will not list must say why. The disclosed ones take no note. */
+    val noteRequired: Boolean get() = !disclosed
+
+    companion object {
+        /** The purpose named exactly [name], or null: a form's value, or an audit row's `metadata.purpose`. */
+        fun named(name: String?): LookupPurpose? = entries.firstOrNull { it.name == name }
+    }
 }

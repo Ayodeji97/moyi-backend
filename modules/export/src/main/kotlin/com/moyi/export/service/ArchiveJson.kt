@@ -136,7 +136,10 @@ internal class SupportMessageJson(
 }
 
 internal class AdminAccessJson(
-    /** Whether an administrator-access log is kept to be read. False until the admin console keeps one (ADR-0059 decision 8). */
+    /**
+     * Whether an administrator-access log is kept to be read: true wherever the admin module is on the classpath, console on
+     * or off (A2 spec §9.3); false only with no `AdminAccessLog` bean (ADR-0059 decision 8).
+     */
     val logKept: Boolean,
     val statement: String,
     val accesses: List<AdminAccessEntryJson>,

@@ -3894,7 +3894,7 @@ a = json.load(open(sys.argv[1]))
 entries = [e for b in a['bonds'] for d in b['days'] for e in d['entries']]
 mine = [e['text'] for e in entries if e['author'] == 'ME']
 theirs = [(e['id'], e['status'], e['text']) for e in entries if e['author'] == 'PARTNER']
-print(mine == [sys.argv[2]], theirs == [(sys.argv[3], 'DELETED', None)], a['bonds'][0]['bond']['status'], a['adminAccess']['logKept'])" "$EX_DIR/x/moyi-export.json" "$EX_WORDS" "$EX_B_ENTRY" 2>&1)" "True True ARCHIVED False"
+print(mine == [sys.argv[2]], theirs == [(sys.argv[3], 'DELETED', None)], a['bonds'][0]['bond']['status'], a['adminAccess']['logKept'])" "$EX_DIR/x/moyi-export.json" "$EX_WORDS" "$EX_B_ENTRY" 2>&1)" "True True ARCHIVED True"
 if grep -q "$EX_PARTNER_WORDS" "$EX_DIR/x/moyi-export.json"; then fail "…and not a word the partner withdrew" "found in the archive"; else pass "…and not a word the partner withdrew"; fi
 rm -rf "$EX_DIR"
 if grep -q "X-Amz-Signature" "$MOYI_LOG"; then fail "no signed URL reaches a log, the email's included" "one is in $MOYI_LOG"; else pass "no signed URL reaches a log, the email's included"; fi
@@ -4070,13 +4070,21 @@ else
   adm_is "admin: the same code a second time is refused (replay)" 401
 
   adm_code "$ADM_DIR/one" "$ADM/users?q=$EMAIL"
+  adm_is "admin: both factors reach the lookup form (a GET looks nothing up)" 200
+  # A2 §9.3: a lookup is a POST that says why (the note a SAFETY or LEGAL lookup needs never goes in a URL).
+  AD_CSRF="$(adm_csrf)"
+  adm_code "$ADM_DIR/one" -X POST "$ADM/users" --data-urlencode "q=$EMAIL" --data-urlencode "purpose=OPERATIONS" --data-urlencode "_csrf=$AD_CSRF"
   adm_is "admin: both factors reach the user lookup" 200
   if [[ "$ADM_BODY" == *"$EMAIL"* ]]; then pass "admin: …and it shows the user by their exact email"; else fail "admin: the lookup shows the user" "${ADM_BODY:0:200}"; fi
   for h in "Content-Security-Policy: default-src 'none'" "Cache-Control: no-store" "Referrer-Policy: no-referrer"; do
     if printf '%s\n' "$ADM_HEADERS" | grep -qi "^$h"; then pass "admin: …with the header $h"; else fail "admin: the lookup page's headers" "missing: $h"; fi
   done
-  adm_code "$ADM_DIR/one" "$ADM/users?q=00000000-0000-7000-8000-000000000000"
+  AD_CSRF="$(adm_csrf)"
+  adm_code "$ADM_DIR/one" -X POST "$ADM/users" --data-urlencode "q=00000000-0000-7000-8000-000000000000" --data-urlencode "purpose=OPERATIONS" --data-urlencode "_csrf=$AD_CSRF"
   adm_is "admin: a lookup that finds nothing is a page, not an error" 200
+  AD_CSRF="$(adm_csrf)"
+  adm_code "$ADM_DIR/one" -X POST "$ADM/users" --data-urlencode "q=$EMAIL" --data-urlencode "purpose=SAFETY" --data-urlencode "_csrf=$AD_CSRF"
+  adm_is "admin: a SAFETY lookup with no note is refused, and the form is shown again" 400
   adm_code "$ADM_DIR/one" -X POST "$ADM/logout"
   adm_is "admin: sign-out with no CSRF token is refused" 403
   adm_code "$ADM_DIR/one" "$ADM"; AD_CSRF="$(adm_csrf)" # the sign-out button is on the home page

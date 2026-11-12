@@ -18,6 +18,10 @@ dependencies {
     implementation(projects.modules.gratitude)
     implementation(projects.modules.media)
 
+    // `export.api.AdminAccessLog`, which `AdminAccessDisclosure` implements (A2 spec §9.3,
+    // ADR-0059 decision 8). export depends on no part of admin, so there is no cycle.
+    implementation(projects.modules.export)
+
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")

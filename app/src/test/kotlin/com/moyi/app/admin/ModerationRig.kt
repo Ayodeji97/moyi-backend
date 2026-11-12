@@ -131,9 +131,9 @@ internal class ModerationRig(
         reason: String? = null,
         contentType: String = "image/jpeg",
         owner: UUID = UUID.randomUUID(),
+        id: UUID = UUID.randomUUID(),
+        random: UUID = UUID.randomUUID(),
     ): UUID {
-        val id = UUID.randomUUID()
-        val random = UUID.randomUUID()
         val ready = status == "READY"
         val now = Timestamp.from(clock.instant())
         jdbc.update(
@@ -168,13 +168,13 @@ internal class ModerationRig(
         return id
     }
 
-    /** A report of [entry], filed as the route files one: the row, then `media_report_hold`. */
+    /** A report of [entry], filed as the route files one: the row, then `media_report_hold`. [id] for a twin seeded the same. */
     fun report(
         entry: UUID,
         reason: String,
         detail: String? = null,
+        id: UUID = UUID.randomUUID(),
     ): UUID {
-        val id = UUID.randomUUID()
         jdbc.update(
             "INSERT INTO entry_reports (id, target, entry_id, bond_id, reporter_member_id, reason, detail, status, created_at) " +
                 "VALUES (?, 'ENTRY', ?, ?, ?, ?, ?, 'OPEN', ?)",
