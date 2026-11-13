@@ -180,7 +180,7 @@ internal class UserPersistenceTest(
         transactions.executeWithoutResult {
             val entity = users.findById(original.id.value).orElseThrow()
             entity.isNew() shouldBe false
-            original.copy(displayName = "Ada Lovelace", updatedAt = NOW).applyTo(entity)
+            entity.displayName = "Ada Lovelace"
         }
 
         users.count() shouldBe 1

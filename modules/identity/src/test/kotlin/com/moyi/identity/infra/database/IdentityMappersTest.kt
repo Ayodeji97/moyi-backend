@@ -54,42 +54,9 @@ internal class IdentityMappersTest {
     }
 
     @Test
-    fun `applyTo carries changes onto an existing row`() {
-        val entity = user().toEntity()
-        val changed =
-            user().copy(
-                displayName = "Ada Lovelace",
-                locale = "fr",
-                status = UserStatus.SUSPENDED,
-                emailVerifiedAt = NOW,
-                updatedAt = NOW.plusSeconds(5),
-            )
-
-        changed.applyTo(entity)
-
-        entity.toDomain() shouldBe changed
-    }
-
-    @Test
-    fun `applyTo leaves createdAt alone`() {
-        // `created_at` is `updatable = false` in the schema, so copying a
-        // changed value here would produce an entity that disagrees with the
-        // row it represents — and Hibernate would never write the difference.
-        val entity = user().toEntity()
-
-        user().copy(createdAt = NOW.plusSeconds(3600)).applyTo(entity)
-
-        entity.toDomain().createdAt shouldBe NOW
-    }
-
-    @Test
-    fun `applyTo refuses to write one user onto another user's row`() {
+    fun `applyTo refuses to write one user's credentials onto another user's row`() {
         // Without this, a mixed-up id in a service method updates the wrong
         // person's account and every column except the id looks correct.
-        val entity = user().toEntity()
-        val someoneElse = user().copy(id = UserId(UUID.fromString("00000000-0000-7000-8000-000000000002")))
-
-        shouldThrow<IllegalArgumentException> { someoneElse.applyTo(entity) }
         shouldThrow<IllegalArgumentException> {
             credentials()
                 .copy(userId = UserId(UUID.fromString("00000000-0000-7000-8000-000000000002")))
