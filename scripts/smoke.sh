@@ -336,6 +336,7 @@
 # The late-entries probe "the job has run since" (the ShedLock floor named under #126, and failed in
 # four recorded runs) now waits up to 60 s for the close job's next run, not 30: the lock's 30 s floor
 # plus the five-second cron put that run up to 35 s away, and the 30 one-second polls ran out first.
+# The section's first wait, for the older day to close, races the same floor and waits 60 s too.
 # Since semantic search S1 (FR-204, ADR-0054) it runs with the embedding provider `none`, as the
 # local profile and production name it: search 200 by words alone; "Remember when" 200 from the
 # words' ranking alone (and a plain question whose words are not all in one entry answers no day),
@@ -2904,9 +2905,10 @@ if [ "$LE_MADE" = "2/1/1" ]; then
   LE_TOO_OLD="$(utc "now() - interval '13 hours'")"
   LE_YDAY_SETTLES="$(utc "('$LE_TODAY'::date::timestamp AT TIME ZONE '$LE_ZONE') + interval '12 hours'")"
   LE_TODAY_SETTLES="$(utc "(('$LE_TODAY'::date + 1)::timestamp AT TIME ZONE '$LE_ZONE') + interval '12 hours'")"
-  # The job runs every five seconds: wait for it to write the day past its grace, which is
+  # The job ticks every five seconds but runs at most every 30 (its ShedLock floor), so the first
+  # run to see this bond can be 35 s away: wait for it to write the day past its grace, which is
   # also the run that would have written yesterday closed if the grace were not kept.
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 60); do
     [ "$(sql "SELECT count(*) FROM bond_days WHERE bond_id = '$LE_BOND' AND date = '$LE_OLDER' AND closed_at IS NOT NULL")" = 1 ] && break
     sleep 1
   done
