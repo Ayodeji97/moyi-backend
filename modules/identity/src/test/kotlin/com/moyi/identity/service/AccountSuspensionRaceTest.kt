@@ -6,7 +6,9 @@ import com.moyi.identity.api.AccountDeletions
 import com.moyi.identity.api.AccountSuspension
 import com.moyi.identity.api.SuspensionOutcome
 import com.moyi.identity.api.SuspensionResult
+import com.moyi.identity.domain.Password
 import com.moyi.identity.domain.UserId
+import com.moyi.identity.domain.VerificationSecret
 import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.security.TestBreachCorpus
 import com.moyi.identity.infra.sessionsLockWaitersOf
@@ -29,8 +31,10 @@ import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.post
 import org.springframework.transaction.support.TransactionTemplate
+import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
@@ -54,6 +58,7 @@ internal class AccountSuspensionRaceTest(
     @Autowired private val suspension: AccountSuspension,
     @Autowired private val deletion: AccountDeletion,
     @Autowired private val deletions: AccountDeletions,
+    @Autowired private val resets: ResetPassword,
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val clock: MutableClock,
     @Autowired private val emails: RecordingEmailSender,
@@ -218,6 +223,28 @@ internal class AccountSuspensionRaceTest(
         openSpans(ada) shouldBe 0
     }
 
+    @Test
+    fun `a password reset in flight when a suspension commits leaves the suspension whole`() {
+        val ada = signUp()
+        val secret = resetSecretFor(ada)
+
+        val suspended = holding { suspension.suspend(ada) }
+        // The reset spends its link and reaches the sessions lock while the suspension holds it.
+        // Read before the suspension's commit and saved after it, the account would be written
+        // back ACTIVE, and the reset's earlier instant over the suspension's bump.
+        val reset = pool.submit { resets.reset(VerificationSecret(secret), Password.of(NEW_PASSWORD)) }
+        awaitAdvisoryWaiter(ada)
+        release.countDown()
+
+        suspended.get(WAIT.seconds, TimeUnit.SECONDS).outcome shouldBe SuspensionOutcome.SUSPENDED
+        reset.get(WAIT.seconds, TimeUnit.SECONDS)
+        status(ada) shouldBe "SUSPENDED"
+        openSpans(ada) shouldBe 1
+        val suspendedAt =
+            jdbc.queryForObject("SELECT suspended_at FROM account_suspensions WHERE user_id = ?", Timestamp::class.java, ada)!!
+        tokensInvalidBefore(ada) shouldBe suspendedAt.toInstant().truncatedTo(ChronoUnit.SECONDS).plusSeconds(1)
+    }
+
     // --- helpers ---
 
     /** Runs [act] in a transaction that stays open, holding what [act] locked, until [release]. */
@@ -247,6 +274,31 @@ internal class AccountSuspensionRaceTest(
             Int::class.java,
             "$statement%",
         )!! > 0
+
+    private fun tokensInvalidBefore(userId: UUID): Instant? =
+        jdbc.queryForObject("SELECT tokens_invalid_before FROM users WHERE id = ?", Timestamp::class.java, userId)?.toInstant()
+
+    /** A live reset link for the account, asked for over HTTP and read from its email. */
+    private fun resetSecretFor(userId: UUID): String {
+        val email = jdbc.queryForObject("SELECT email FROM users WHERE id = ?", String::class.java, userId)!!
+        emails.sent.clear()
+        mockMvc
+            .post("/api/v1/auth/forgot-password") {
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"email":"$email"}"""
+            }.andReturn()
+            .response.status shouldBe 202
+        var secret: String? = null
+        await().atMost(WAIT).until {
+            secret =
+                emails.sent
+                    .toList()
+                    .filter { it.to == email }
+                    .firstNotNullOfOrNull { Regex("""token=([A-Za-z0-9_-]+)""").find(it.text)?.groupValues?.get(1) }
+            secret != null
+        }
+        return secret!!
+    }
 
     private fun status(userId: UUID): String? = jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String::class.java, userId)
 
@@ -295,6 +347,7 @@ internal class AccountSuspensionRaceTest(
 
     private companion object {
         const val PASSWORD = "correct horse battery"
+        const val NEW_PASSWORD = "a different good password"
         const val LIMIT = 100
         val WAIT: Duration = Duration.ofSeconds(10)
 

@@ -69,6 +69,31 @@ internal interface UserRepository : JpaRepository<UserEntity, UUID> {
         id: UUID,
         now: Instant,
     ): Int
+
+    /**
+     * Every access token issued before [now] stops working (logout-all, a password reset): one
+     * statement that moves `tokens_invalid_before` forward and touches nothing else on the row.
+     *
+     * `GREATEST`, never a plain assignment: a suspension sets the mark to the second after its
+     * act (admin console A3), and a reset or logout-all whose instant was read before that act
+     * but which writes after it must not pull the mark back and revive a token the suspension
+     * killed. A statement, not a load-and-save, so no status read earlier is written back either.
+     * `GREATEST` ignores the `NULL` of an account that has never had its tokens revoked.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        nativeQuery = true,
+        value = """
+        UPDATE users
+           SET tokens_invalid_before = GREATEST(tokens_invalid_before, :now),
+               updated_at = :now
+         WHERE id = :id
+        """,
+    )
+    fun revokeAccessTokensBefore(
+        id: UUID,
+        now: Instant,
+    ): Int
 }
 
 /**

@@ -60,13 +60,6 @@ internal data class User(
     val canAuthenticate: Boolean
         get() = status == UserStatus.ACTIVE || status == UserStatus.PENDING_VERIFICATION
 
-    /** Invalidates every access token issued before [now]. */
-    fun revokeAllSessions(now: Instant): User =
-        copy(
-            tokensInvalidBefore = now,
-            updatedAt = now,
-        )
-
     companion object {
         /**
          * Chosen here rather than found in a document — doc 03 FR-006 requires a display

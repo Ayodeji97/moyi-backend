@@ -135,6 +135,10 @@ internal class ApplyPasswordReset(
     ): Boolean {
         // The single race winner. A second presentation finds the row consumed.
         if (!tokens.consume(token.id, now)) return false
+        // The sessions lock before anything of the account is read or written: the order sign-in,
+        // logout-all and suspension take (spec A3 §8), so what is read below is read after any of
+        // them that held it has committed.
+        refreshTokens.lockSessionsOf(token.userId)
         val user = accounts.findById(token.userId) ?: throw PasswordResetTokenInvalidException()
         val credentials = accounts.findCredentials(user.id) ?: throw PasswordResetTokenInvalidException()
 
@@ -146,7 +150,6 @@ internal class ApplyPasswordReset(
                 lockedUntil = null,
             ),
         )
-        refreshTokens.lockSessionsOf(user.id)
         refreshTokens.revokeAllForUser(user.id, now)
         accounts.revokeAllSessions(user.id, now)
         // Every device was signed out, so none is told anything more (ADR-0044).
