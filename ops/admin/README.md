@@ -204,10 +204,10 @@ console is the only way: there is no SQL function and no `moyi` command (ADR-006
 
 **What the member meets:** every session ends at once (refresh tokens revoked, push tokens forgotten,
 access tokens refused from the next whole second); signing in answers exactly what a wrong password
-answers; a reset asked for now sends nothing; a verification link records itself and leaves the
-account suspended. **They are told nothing**: no email, no screen. One gap: a reset link sent
-*before* the suspension still changes the password for the rest of its hour (the account stays
-suspended; owed in ADR-0066).
+answers; a reset asked for now sends nothing, and a reset link or code sent *before* the suspension
+is refused as a spent one is; asking for a new verification link sends nothing; a verification link
+already sent records itself and leaves the account suspended. **They are told nothing**: no email,
+no screen.
 
 **What the partner meets:** each bond the member is in (and has not left) shows `paused: true`, and
 today gives no prompt. A new entry, an edit and a reaction are `409 BOND_PAUSED` ("This bond is
