@@ -333,6 +333,9 @@
 # 0 failed, 0 skipped, 73 "admin A2" checks among them. A run before it on the same stack failed one
 # probe (late entries: "the job has run since", the ShedLock floor named under #126) and then stopped
 # in the A2 section on `tr` meeting the review copy's bytes, fixed by LC_ALL=C.
+# The late-entries probe "the job has run since" (the ShedLock floor named under #126, and failed in
+# four recorded runs) now waits up to 60 s for the close job's next run, not 30: the lock's 30 s floor
+# plus the five-second cron put that run up to 35 s away, and the 30 one-second polls ran out first.
 # Since semantic search S1 (FR-204, ADR-0054) it runs with the embedding provider `none`, as the
 # local profile and production name it: search 200 by words alone; "Remember when" 200 from the
 # words' ranking alone (and a plain question whose words are not all in one entry answers no day),
@@ -2920,10 +2923,13 @@ if [ "$LE_MADE" = "2/1/1" ]; then
     -X POST "$API/bonds/$LE_BOND/entries" -H "Authorization: Bearer $LE_B" -H "Idempotency-Key: $(new_key)" \
     -d "{\"text\":\"written yesterday afternoon\",\"intendedAt\":\"$LE_TOO_OLD\"}"
   expect "late entries: today says when it settles" 200 "\"bondDay\":{\"date\":\"$LE_TODAY\",\"status\":\"PARTIAL\",\"settlesAt\":\"$LE_TODAY_SETTLES\"}" -- "$API/bonds/$LE_BOND/today" -H "Authorization: Bearer $LE_A"
-  # Two more runs of the job (ten seconds), then yesterday: still open, with the late entry on it.
+  # One more run of the job, then yesterday: still open, with the late entry on it. ShedLock holds
+  # close-days for at least 30 s (CloseJob's lockAtLeastFor), so the next run takes the lock on the
+  # first five-second tick after that: up to 35 s after the run we start from. Waiting only 30 polls
+  # failed here whenever the tick fell just past the budget; 60 leaves room for a slow host.
   # As epoch seconds: `sql` strips whitespace, which a timestamp's own space would not survive.
   LE_RUNS_FROM="$(sql "SELECT extract(epoch FROM locked_at)::bigint FROM shedlock WHERE name = 'close-days'")"
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 60); do
     [ "$(sql "SELECT count(*) FROM shedlock WHERE name = 'close-days' AND extract(epoch FROM locked_at) > $LE_RUNS_FROM + 4")" = 1 ] && break
     sleep 1
   done
