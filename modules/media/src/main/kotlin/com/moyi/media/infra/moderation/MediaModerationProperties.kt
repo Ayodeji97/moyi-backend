@@ -11,14 +11,16 @@ import java.time.Duration
  * `MOYI_MEDIA_MODERATION_…`. The posture is the storage's and email's
  * (ADR-0017 decision 3, ADR-0047): **photos default to the real moderator,
  * Rekognition, which refuses to start without its credentials**, and
- * production's `config/deploy.yml` names `none` until the owner supplies
- * them. `none` fails closed: nothing gets a verdict, so nothing reaches a
- * partner. It never passes anything.
+ * production's `config/deploy.yml` gives the media worker, which moderates,
+ * its key, and names `none` for the API, which moderates nothing. `none` fails closed: nothing gets a verdict, so nothing
+ * reaches a partner. It never passes anything.
  *
  * The known-image list and voice moderation default to `none` because no
  * vendor is wired for either yet (ADR-0051 decisions 3 and 5): each needs a
  * decision of the owner's first. `stand-in` (all three) decides by colour, for
- * the `local` profile and the smoke run only.
+ * the `local` profile and the smoke run only. `allow` (voice notes only)
+ * passes every voice note unchecked: the owner's ruling of 2026-11-13
+ * (ADR-0065), which production names.
  */
 @Validated
 @ConfigurationProperties(prefix = "moyi.media.moderation")
@@ -66,6 +68,9 @@ internal data class MediaModerationProperties(
 
         /** Passes every voice note: `local` and the smoke run only. */
         STAND_IN,
+
+        /** Passes every voice note unchecked: the owner's ruling of 2026-11-13 (ADR-0065), in production. */
+        ALLOW,
     }
 
     /**

@@ -183,6 +183,17 @@ servers:
         JAVA_TOOL_OPTIONS: >-
           -XX:+ExitOnOutOfMemoryError -XX:+UseSerialGC -Xmx192m -Xss512k
           -XX:MaxMetaspaceSize=160m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=16m
+        # Photos are moderated here, by Rekognition in eu-central-1 (ADR-0051,
+        # ADR-0065). The worker's network must reach it first: AWS's ranges in
+        # /etc/moyi-media-worker/egress.env (ops/media-worker/README.md, "When
+        # Rekognition is switched on"). Photos sent while this was `none` are
+        # moderated on the first deploy (the consumer starts from the beginning).
+        MOYI_MEDIA_MODERATION_IMAGE_PROVIDER: rekognition
+      # An IAM user's key with rekognition:DetectModerationLabels and nothing
+      # else (ADR-0051). Only this role holds it: the API never moderates.
+      secret:
+        - MOYI_MEDIA_MODERATION_REKOGNITION_ACCESS_KEY_ID
+        - MOYI_MEDIA_MODERATION_REKOGNITION_SECRET_ACCESS_KEY
 
 ssh:
   user: root
@@ -317,26 +328,22 @@ env:
     # Quoted: YAML 1.1, which Kamal reads, takes a bare off for the boolean false.
     # Spring Boot would read "false" as OFF anyway (seen), but the file says what it means.
     MOYI_MEDIA_PROCESSING_PROVIDER: "off"
-    # No photo is moderated until the owner has made the AWS account, the IAM
-    # user with rekognition:DetectModerationLabels alone, and its key
-    # (ADR-0051). `none` fails closed: no photo gets a verdict, so no partner
-    # is ever shown one; it passes nothing. With storage on, that is the
-    # product as it stands: an author sees their own photos and voice notes,
-    # and their partner sees none of them, until the owner decides moderation.
-    # Never `stand-in`, which decides by colour for local runs. To moderate: remove this line and add
-    # MOYI_MEDIA_MODERATION_REKOGNITION_ACCESS_KEY_ID and
-    # _SECRET_ACCESS_KEY as secrets; without them the default provider,
-    # Rekognition, refuses to start. (The API processes nothing, so
-    # moderates nothing either way: the line keeps it starting. The media
-    # worker is where moderation runs; ops/media-worker/README.md has the
-    # network limit Rekognition's addresses must be added to.)
+    # Moderation (ADR-0051, ADR-0065, the owner's ruling of 2026-11-13).
+    # Photos: Rekognition, in the media worker only, which overrides this
+    # line and alone holds the AWS key (servers.media-worker below). The API
+    # processes nothing, so it moderates nothing; `none` keeps it starting
+    # without the key. Never `stand-in`, which decides by colour for local
+    # runs.
     MOYI_MEDIA_MODERATION_IMAGE_PROVIDER: none
-    # No known-CSAM hash list is consulted and no voice note is moderated:
-    # neither has a vendor yet (ADR-0051 decisions 3 and 5, the owner's to
-    # choose). `none` is their default; said here so the file says what runs.
-    # A voice note with no verdict is never played to a partner.
+    # No known-CSAM hash list is consulted: no vendor yet (ADR-0051
+    # decision 3, the owner's to choose). `none` is its default; said here so
+    # the file says what runs.
     MOYI_MEDIA_MODERATION_KNOWNIMAGES_PROVIDER: none
-    MOYI_MEDIA_MODERATION_VOICE_PROVIDER: none
+    # Voice notes pass UNCHECKED (ADR-0065): no vendor moderates audio
+    # (ADR-0051 decision 5). `allow` writes `allow` in the record, so these
+    # verdicts can always be told from a moderator's. The consumer starts
+    # from the beginning, so voice notes sent while this said `none` pass too.
+    MOYI_MEDIA_MODERATION_VOICE_PROVIDER: allow
     # Argon2id's iterations, tuned on this server to doc 09's ~150 ms per
     # hash (Argon2Properties; NFR-046's t=2 stays the floor the tests hold).
     # Measured 2026-10-24 on moyi-prod-1, in the production image, with
