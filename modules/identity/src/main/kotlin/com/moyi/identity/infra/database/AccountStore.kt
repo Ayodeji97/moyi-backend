@@ -79,13 +79,15 @@ internal class AccountStore(
         users.save(entity)
     }
 
-    /** See [UserRepository.markEmailVerified]: the whole of the rule, and why it is one statement. */
+    /**
+     * See [UserRepository.markEmailVerified]: the whole of the rule, and why it is one statement.
+     * @return `true` when the address was newly verified; `false` when it already was (or there is
+     *   no such user), which is legitimate: the row is then left exactly as it was
+     */
     fun markEmailVerified(
         userId: UserId,
         now: Instant,
-    ) {
-        users.markEmailVerified(userId.value, now)
-    }
+    ): Boolean = users.markEmailVerified(userId.value, now) == 1
 
     fun revokeAllSessions(
         userId: UserId,

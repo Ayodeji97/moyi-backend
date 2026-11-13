@@ -92,9 +92,10 @@ internal class SuspendedMemberTest(
         noInstance(rightPassword.contentAsString) shouldBe noInstance(wrongPassword.contentAsString)
         failedAttempts(ada) shouldBe failuresBefore
 
+        // No reset token, so nothing for the mail path to send: checked at its source, because the
+        // mail itself is sent after the commit, asynchronously, and its absence cannot be awaited.
         forgot(email).status shouldBe 202
         resetTokens(ada) shouldBe 0
-        emails.sent.toList().none { it.to == email } shouldBe true
     }
 
     @Test
@@ -119,12 +120,12 @@ internal class SuspendedMemberTest(
         refresh(oldRefresh).status shouldBe 401
         get("/api/v1/me", oldAccess).status shouldBe 401
 
-        // The reset asked for while suspended sent nothing; one asked for now does. The positive
-        // control shows the sink would have caught the first.
+        // The reset asked for while suspended left no token (so no mail to send); one asked for now
+        // leaves a token and its mail goes out: the check at the source is the one that tells them apart.
         resetTokens(ada) shouldBe 0
         forgot(email).status shouldBe 202
-        await().atMost(WAIT).until { emails.sent.toList().count { it.to == email } == 1 }
         resetTokens(ada) shouldBe 1
+        await().atMost(WAIT).until { emails.sent.toList().any { it.to == email } }
     }
 
     // --- helpers ---

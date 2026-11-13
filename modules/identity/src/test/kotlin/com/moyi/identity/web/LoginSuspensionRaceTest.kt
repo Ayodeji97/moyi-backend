@@ -14,12 +14,14 @@ import com.moyi.identity.domain.PasswordHasher
 import com.moyi.identity.domain.TokenGenerator
 import com.moyi.identity.domain.UserId
 import com.moyi.identity.domain.VerificationSecret
+import com.moyi.identity.infra.Gate
 import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.database.DeviceStore
 import com.moyi.identity.infra.database.RefreshTokenStore
 import com.moyi.identity.infra.security.Argon2Properties
 import com.moyi.identity.infra.security.Argon2idPasswordHasher
 import com.moyi.identity.infra.security.TestBreachCorpus
+import com.moyi.identity.infra.sessionsLockWaitersOf
 import com.moyi.identity.service.IssueSessionTokens
 import com.moyi.identity.service.ResetPassword
 import io.kotest.matchers.shouldBe
@@ -47,11 +49,9 @@ import org.springframework.transaction.support.TransactionTemplate
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 import javax.sql.DataSource
 
 /**
@@ -161,19 +161,8 @@ internal class LoginSuspensionRaceTest(
 
     // --- helpers ---
 
-    /**
-     * Somebody is waiting for this user's sessions advisory lock, `(1, hashtext(id))` as
-     * `RefreshTokenRepository.lockSessions` takes it: `classid` 1, `objid` the hash as an oid.
-     */
     private fun awaitSessionsLockWaiter(userId: UUID) {
-        await().atMost(WAIT).until {
-            jdbc.queryForObject(
-                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid = 1 " +
-                    "AND objsubid = 2 AND objid::bigint = (hashtext(CAST(? AS text))::bigint & 4294967295)",
-                Int::class.java,
-                userId,
-            )!! > 0
-        }
+        await().atMost(WAIT).until { jdbc.sessionsLockWaitersOf(userId) > 0 }
     }
 
     private fun refreshTokens(userId: UUID): Int =
@@ -269,41 +258,6 @@ internal class LoginSuspensionRaceTest(
         @JvmStatic
         @DynamicPropertySource
         fun breachCorpus(registry: DynamicPropertyRegistry) = TestBreachCorpus.register(registry)
-    }
-}
-
-/**
- * A one-shot stop a test arms inside the code under test: the next call through it waits until
- * released, after saying it has arrived. Unarmed, it lets every call through. Both waits have a
- * deadline that fails, so a stop nobody releases cannot hang the build.
- */
-internal class Gate {
-    private val armed = AtomicReference<Stop?>(null)
-
-    fun arm(): Stop = Stop().also { armed.set(it) }
-
-    fun disarm() {
-        armed.getAndSet(null)?.release()
-    }
-
-    /** Called by the wrapped bean: blocks only the first call after [arm]. */
-    fun pass() {
-        val stop = armed.getAndSet(null) ?: return
-        stop.reached.countDown()
-        check(stop.released.await(DEADLINE.seconds, TimeUnit.SECONDS)) { "the gate was never released" }
-    }
-
-    class Stop {
-        internal val reached = CountDownLatch(1)
-        internal val released = CountDownLatch(1)
-
-        fun awaitReached() = check(reached.await(DEADLINE.seconds, TimeUnit.SECONDS)) { "nothing reached the gate" }
-
-        fun release() = released.countDown()
-    }
-
-    private companion object {
-        val DEADLINE: Duration = Duration.ofSeconds(10)
     }
 }
 

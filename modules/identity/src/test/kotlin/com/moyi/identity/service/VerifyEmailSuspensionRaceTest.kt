@@ -8,10 +8,10 @@ import com.moyi.identity.domain.CodeHash
 import com.moyi.identity.domain.VerificationCode
 import com.moyi.identity.domain.VerificationCodeHasher
 import com.moyi.identity.domain.VerificationPurpose
+import com.moyi.identity.infra.Gate
 import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.security.HmacVerificationCodeHasher
 import com.moyi.identity.infra.security.TestBreachCorpus
-import com.moyi.identity.web.Gate
 import com.moyi.identity.web.LoginEndpointTest
 import com.moyi.identity.web.RecordingEmailSender
 import com.moyi.identity.web.SessionsEndpointTest

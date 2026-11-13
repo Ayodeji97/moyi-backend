@@ -103,7 +103,7 @@ internal class VerifyEmail(
     ) {
         // A targeted statement, never a save of [user]: that was read before any lock on its row,
         // and a suspension may have committed since (see `AccountStore.markEmailVerified`).
-        accounts.markEmailVerified(user.id, now)
+        val newly = accounts.markEmailVerified(user.id, now)
 
         // Any other *live* link still in this person's inbox is now moot.
         // Deleted rather than left to expire, so a stale one presented later
@@ -114,7 +114,12 @@ internal class VerifyEmail(
 
         // A user id, not an address (doc 11 NFR-044). The id is what a trace
         // needs and is meaningless outside this database.
-        log.info("Email verified for user {}; {} other live token(s) retired", user.id.value, retired)
+        log.info(
+            "Email verified for user {}{}; {} other live token(s) retired",
+            user.id.value,
+            if (newly) "" else " (already verified, row unchanged)",
+            retired,
+        )
     }
 
     /** The read half: which of the two failures this is, if it is one. The write half is `consume`. */

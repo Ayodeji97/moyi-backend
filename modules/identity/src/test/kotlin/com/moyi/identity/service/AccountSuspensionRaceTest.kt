@@ -9,6 +9,7 @@ import com.moyi.identity.api.SuspensionResult
 import com.moyi.identity.domain.UserId
 import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.security.TestBreachCorpus
+import com.moyi.identity.infra.sessionsLockWaitersOf
 import com.moyi.identity.web.LoginEndpointTest
 import com.moyi.identity.web.RecordingEmailSender
 import com.moyi.identity.web.SessionsEndpointTest
@@ -235,21 +236,9 @@ internal class AccountSuspensionRaceTest(
         return future
     }
 
-    /**
-     * Somebody is waiting for this user's sessions advisory lock: the second party has reached the
-     * first lock. Scoped to the lock's key, `(1, hashtext(id))` as `RefreshTokenRepository.lockSessions`
-     * takes it (`classid` 1, `objid` the hash as an oid), so a waiter on another user's lock, or
-     * anything else in the database, does not count.
-     */
+    /** Somebody is waiting for this user's sessions advisory lock: the second party has reached the first lock. */
     private fun awaitAdvisoryWaiter(userId: UUID) {
-        await().atMost(WAIT).until {
-            jdbc.queryForObject(
-                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid = 1 " +
-                    "AND objsubid = 2 AND objid::bigint = (hashtext(CAST(? AS text))::bigint & 4294967295)",
-                Int::class.java,
-                userId,
-            )!! > 0
-        }
+        await().atMost(WAIT).until { jdbc.sessionsLockWaitersOf(userId) > 0 }
     }
 
     private fun blockedOn(statement: String): Boolean =
