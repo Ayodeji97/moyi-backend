@@ -54,6 +54,7 @@ decided, including what changed while it was built.
    suspension's commit would leave a live refresh family after the revocation. The re-read refuses
    with the same `InvalidCredentialsException` when the account can no longer authenticate or its
    password hash is no longer the one just verified (which closes the same race against a reset).
+   **A refresh mints inside its transaction too** (final review, below), for the same reason.
 
 ### The paused bond
 
@@ -145,6 +146,22 @@ reach back over a window that has ended.
   `tokens_invalid_before`; `ApplyPasswordReset` takes the sessions lock before its read and keeps
   `tokens_invalid_before` with `GREATEST`. Each has a race test.
 - **The overlap window includes the late-entry grace** (decision 16's amendment).
+- **Fixed after the final review (2026-11-13):**
+  - **A refresh mints its access token under the sessions lock** (`RotateRefreshToken`), as decision 7
+    does for sign-in. Minted after the commit, a suspension waiting on the lock could run in between and
+    stamp a `tokens_invalid_before` at or before the new token's `iat`, leaving the suspended member a
+    valid access token for its lifetime. Race test in `LoginSuspensionRaceTest`. The same move closes the
+    same race against a reset and logout-all.
+  - **A reset link or code issued before a suspension is refused once it commits.** `ApplyPasswordReset`
+    re-reads the account under the sessions lock and refuses one that can no longer sign in, with exactly
+    the answer a spent link (`410`) or code (`422`) gets; the row is spent and the password unchanged.
+    Outstanding reset rows are not deleted at suspension: the refusal is the guard, and it also covers a
+    link asked for in the instant before the suspension commits.
+  - **Resending verification to a suspended account sends nothing**, answered and logged as for an
+    address that needs no mail.
+  - **V65 refuses to apply over a `users` row already `SUSPENDED`** (a `DO … RAISE` guard). Such a row
+    would have no span, and lifting it would fail for good. A guard rather than a backfill: production has
+    none, and a backfill would have to invent a `suspended_at`.
 - **Known limit, accepted:** a legacy C1 joining day (a row written before the bond became two)
   whose reveal fell due inside a span that was lifted before the day was first read can be revealed
   by that first read. `ReconcileJoiningDay` withholds while the bond is paused, but cannot see a
@@ -153,7 +170,8 @@ reach back over a window that has ended.
 - **A reveal triggered by the partner's own second entry after a lift is allowed** (decision 17).
 - **The suspension form's code-field hint is the implementer's wording, awaiting the owner's
   approval:** "Each suspension, and each lift, needs a new code." The justification field is labelled
-  "Justification" (`DecisionForm.Wording.SUSPENSION`).
+  "Justification" (`DecisionForm.Wording.SUSPENSION`), and a refused one says "Write a justification of
+  1 to 400 characters saying why." (A2's "Write a note…" is unchanged.)
 
 ## Consequences
 
@@ -164,8 +182,7 @@ Neither member is told why, and an invite prober learns nothing.
 
 **Negative:** a mistaken suspension costs a couple the exchange of any reveal that fell due inside it
 (decision 17). A partner who never opens the app is not told their bond is paused. The suspended
-member cannot tell a suspension from a forgotten password (decision 12). A reset link issued before
-the suspension still works (Owed).
+member cannot tell a suspension from a forgotten password (decision 12).
 
 **Neutral:** production is unchanged until the console is switched on (`ops/admin/README.md`). The
 contract gains `BOND_PAUSED` (a new response enum value: breaking under oasdiff, so the pull request
@@ -196,9 +213,11 @@ carries `breaking-api-change`) and two required booleans.
   (`account_suspensions`).
 - **moyi-app:** the paused state's screen and copy, `BOND_PAUSED` on a queued draft (keep the draft
   and say why nothing sent), and `paused` in the generated client.
-- **A suspension does not yet invalidate outstanding password-reset links.** One issued before the
-  suspension still replaces a suspended account's password for the rest of its hour (the account
-  stays suspended, and a reset never writes the status). The suspension should revoke them.
+- **A lock-order inversion between erasure and reset/verify, not A3's.** Erasure takes the sessions
+  lock, then `users`, then deletes `verification_tokens`; a reset or verification takes its token row
+  (the consume) first, then the sessions lock or `users`. A3 did not create the cycle (it moved reset's
+  sessions lock earlier, after the consume). Postgres's deadlock detector breaks it, failing one side
+  with a retryable error. Owed: one order for all three, or an issue.
 - **The release review** of withheld audit rows (A2, A5, and now A3).
 
 ## Revisit when

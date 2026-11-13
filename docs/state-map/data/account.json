@@ -375,7 +375,7 @@
     "rule": "FR-002, ADR-0018 §6",
     "evidence": "test",
     "evidenceRef": "EmailVerificationEndpointTest#resending for an unknown or already-verified address is 202 with no email",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResendVerification.kt#if (user == null || user.isEmailVerified) {"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResendVerification.kt#if (user == null || user.isEmailVerified || !user.canAuthenticate) {"
   },
   {
     "id": "account-pending-resend",
@@ -411,7 +411,7 @@
     "rule": "FR-002, ADR-0018 §6",
     "evidence": "test",
     "evidenceRef": "EmailVerificationEndpointTest#resending for an unknown or already-verified address is 202 with no email",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResendVerification.kt#if (user == null || user.isEmailVerified) {"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResendVerification.kt#if (user == null || user.isEmailVerified || !user.canAuthenticate) {"
   },
   {
     "id": "account-signed-in-resend-unverified",
@@ -447,7 +447,7 @@
     "rule": "FR-002, ADR-0018 §6",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResendVerification.kt#if (user == null || user.isEmailVerified) {"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResendVerification.kt#if (user == null || user.isEmailVerified || !user.canAuthenticate) {"
   },
   {
     "id": "account-anonymous-login",
@@ -4157,7 +4157,7 @@
     "to": "SUSPENDED",
     "status": null,
     "code": null,
-    "reason": "Every session ends at once: each refresh family is revoked, every push token is forgotten, and tokens_invalid_before moves to the next whole second, so an access token already issued is 401 on its next request. A sign-in whose password check straddles the act is re-checked under the sessions lock and is undone or refused (ruling 7). One request already authenticated completes. Nobody tells the member: no email, no push, and every way back in answers what a wrong password answers.",
+    "reason": "Every session ends at once: each refresh family is revoked, every push token is forgotten, and tokens_invalid_before moves to the next whole second, so an access token already issued is 401 on its next request. A sign-in whose password check straddles the act is re-checked under the sessions lock and is undone or refused (ruling 7); a sign-in or a refresh mints its access token under that lock, so the act stamps after it and the token dies with the rest. One request already authenticated completes. Nobody tells the member: no email, no push, and every way back in answers what a wrong password answers.",
     "rule": "FR-113, doc 04 §8.1, ADR-0066 rulings 6, 7, 12",
     "evidence": "test",
     "evidenceRef": "SuspendedMemberTest#a suspended member is locked out, and the sign-in refusal is a wrong password's",
@@ -4355,11 +4355,11 @@
     "to": "SUSPENDED",
     "status": 202,
     "code": null,
-    "reason": "202, as for any address. For an account suspended before it verified, a new link is made and emailed: resend looks at verification, not at status, and verifying while suspended records the address and leaves the account SUSPENDED (below). A verified suspended account gets nothing.",
-    "rule": "ADR-0018, ADR-0066 ruling 5",
-    "evidence": "never-run",
-    "evidenceRef": "",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResendVerification.kt#if (user == null || user.isEmailVerified) {"
+    "reason": "202 with an empty body, as for any address, and no mail: a suspended account gets no new link, verified or not, answered and logged exactly as an address that needs none (an unknown or verified one).",
+    "rule": "ADR-0018, ADR-0066 (the controller's rulings)",
+    "evidence": "test",
+    "evidenceRef": "SuspendedMemberTest#resending verification to a suspended account that never verified sends nothing, as for an unknown address",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResendVerification.kt#if (user == null || user.isEmailVerified || !user.canAuthenticate) {"
   },
   {
     "id": "account-suspended-verify",
@@ -4421,17 +4421,17 @@
     "from": "SUSPENDED",
     "action": "POST /api/v1/auth/reset-password",
     "actor": "you",
-    "when": "a reset link issued before the suspension is still live (see the password reset)",
+    "when": "a reset link or code issued before the suspension is presented, even one still within its hour",
     "guards": [],
-    "outcome": "ok",
+    "outcome": "refused",
     "to": "SUSPENDED",
-    "status": 200,
-    "code": null,
-    "reason": "No new reset link can be asked for while suspended (forgot-password checks canAuthenticate and sends nothing), but one issued before the suspension stays live for the rest of its hour and still replaces the password. The account stays SUSPENDED, and a reset never writes the status or moves tokens_invalid_before back. That the suspension leaves the link live is owed (ADR-0066, Owed): it should revoke it.",
-    "rule": "ADR-0066 ruling 7, Owed",
-    "evidence": "never-run",
-    "evidenceRef": "",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#val user = accounts.findById(token.userId) ?: throw PasswordResetTokenInvalidException()"
+    "status": 410,
+    "code": "PASSWORD_RESET_TOKEN_EXPIRED",
+    "reason": "No new reset can be asked for while suspended (forgot-password checks canAuthenticate and sends nothing), and one issued before the suspension is refused once presented: the reset re-reads the account under the sessions lock and refuses one that can no longer sign in, with exactly the answer a spent credential gets (a link 410 PASSWORD_RESET_TOKEN_EXPIRED, a code 422 PASSWORD_RESET_TOKEN_INVALID), the same bytes. The row is spent and the password unchanged; nothing tells the suspension.",
+    "rule": "ADR-0066 (the controller's rulings), ruling 12",
+    "evidence": "test",
+    "evidenceRef": "SuspendedMemberTest#a reset link or code sent before the suspension is refused after it, exactly as a spent one is",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#if (user.canAuthenticate) replacePassword(user, newPasswordHash, now)"
   },
   {
     "id": "session-valid-suspended",
@@ -4481,10 +4481,10 @@
     "to": "REQUESTED",
     "status": null,
     "code": null,
-    "reason": "The link stays live for the rest of its hour: the suspension does not revoke reset links, so it can still replace a suspended account's password (the account stays SUSPENDED). Owed: the suspension should revoke them (ADR-0066).",
-    "rule": "ADR-0066 Owed",
-    "evidence": "never-run",
-    "evidenceRef": "",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#val user = accounts.findById(token.userId) ?: throw PasswordResetTokenInvalidException()"
+    "reason": "The link (and the code beside it) is left in place but is dead to a suspended account: presented after the suspension commits, even while its new password was being hashed, it is refused exactly as a spent link is, and the password is unchanged. A link never presented while suspended works after a lift, within its hour, as for any account that can sign in.",
+    "rule": "ADR-0066 (the controller's rulings)",
+    "evidence": "test",
+    "evidenceRef": "LoginSuspensionRaceTest#a reset link sent before a suspension is refused after it commits, as a spent link is",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#if (user.canAuthenticate) replacePassword(user, newPasswordHash, now)"
   }
 ]
