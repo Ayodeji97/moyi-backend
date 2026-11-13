@@ -2,7 +2,7 @@ package com.moyi.admin.domain
 
 /**
  * What an audit row says was done. A closed set, and this is the one place it
- * is written: the `CHECK` on `audit_log.action` (V60, widened by V61) repeats it
+ * is written: the `CHECK` on `audit_log.action` (V60, widened by V61 and V64) repeats it
  * for the database, and `AuditActionCheckTest` holds the SQL to this list, so
  * adding a value here without a migration fails a test and not a production insert.
  *
