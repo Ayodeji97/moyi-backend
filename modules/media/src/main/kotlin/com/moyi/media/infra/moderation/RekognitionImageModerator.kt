@@ -143,7 +143,7 @@ internal class RekognitionImageModerator(
         /**
          * The client, or a failed start: the default provider is the real one,
          * and it refuses to start without its credentials (ADR-0017 decision 3,
-         * #96's lesson). Production names `none` until the owner supplies them.
+         * #96's lesson). Production gives the media worker its key (ADR-0065).
          */
         fun create(properties: MediaModerationProperties.Rekognition): RekognitionImageModerator {
             val keyId = properties.accessKeyId

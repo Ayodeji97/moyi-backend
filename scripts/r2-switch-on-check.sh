@@ -25,8 +25,9 @@
 #
 # It never prints a URL, a signature or an object key: only HTTP statuses,
 # the assets' ids, and what was seen. Whatever it made it deletes, on the way
-# out too, and it signs out. Moderation is `none` in production, so nothing
-# it uploads is ever shown to anybody but the test account.
+# out too, and it signs out. It attaches nothing to an entry, so whatever
+# moderation decides (ADR-0065), nothing it uploads is ever shown to anybody
+# but the test account.
 #
 #   MOYI_CHECK_API=https://api.getmoyi.app/api/v1   where the API is (required)
 #   MOYI_CHECK_EMAIL=...                            a verified test account (required)

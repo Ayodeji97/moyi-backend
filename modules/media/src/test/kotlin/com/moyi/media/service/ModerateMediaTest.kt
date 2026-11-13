@@ -2,6 +2,7 @@ package com.moyi.media.service
 
 import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.events.ReceivedEvent
+import com.moyi.common.events.StartFrom
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.MutableClock
 import com.moyi.media.api.ImageViewStatus
@@ -13,6 +14,8 @@ import com.moyi.media.domain.ImageFormat
 import com.moyi.media.domain.ModerationCategory
 import com.moyi.media.infra.MediaIntegrationTest
 import com.moyi.media.infra.MediaTestApplication
+import com.moyi.media.infra.moderation.AllowImageModeration
+import com.moyi.media.infra.moderation.AllowVoiceModeration
 import com.moyi.media.infra.moderation.Moderated
 import com.moyi.media.infra.moderation.ModeratorUnavailableException
 import com.moyi.media.infra.moderation.NoImageModeration
@@ -433,6 +436,25 @@ internal class ModerateMediaTest(
         ModerateVoices(moderation, voiceProcessor, NoVoiceModeration()).eventTypes.shouldBeEmpty()
         ModerateImages(moderation, imageProcessor, moderator, knownImages).eventTypes shouldBe setOf("MediaReady")
         ModerateVoices(moderation, voiceProcessor, voiceModerator).eventTypes shouldBe setOf("MediaReady")
+    }
+
+    /**
+     * ADR-0065: voice `allow` moderates here, so the voice consumer subscribes
+     * from the beginning, and every voice note sent while `none` ran is handed
+     * to it and passed once production names `allow`.
+     */
+    @Test
+    fun `with voice allow, the voice consumer subscribes from the beginning`() {
+        val voices = ModerateVoices(moderation, voiceProcessor, AllowVoiceModeration())
+        voices.eventTypes shouldBe setOf("MediaReady")
+        voices.startFrom shouldBe StartFrom.BEGINNING
+        ModerateImages(moderation, imageProcessor, moderator, knownImages).startFrom shouldBe StartFrom.BEGINNING
+    }
+
+    /** ADR-0065, amended: photo `allow` moderates here, so the image consumer subscribes too. */
+    @Test
+    fun `with photo allow, the image consumer subscribes`() {
+        ModerateImages(moderation, imageProcessor, AllowImageModeration(), NoKnownImageList()).eventTypes shouldBe setOf("MediaReady")
     }
 
     private fun readyPhoto(bytes: ByteArray): UUID {

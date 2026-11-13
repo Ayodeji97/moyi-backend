@@ -84,8 +84,9 @@ both roles running, a healthy worker, and its limiter's restart count stable.
 Complete media runbook steps 5–7, including the photo and voice R2 check with
 a dedicated test account. Install/enable the media check after V39 exists;
 require its first run to succeed and its heartbeat to arrive. Leave AI's
-provider as `none` and moderation as `none` until their separate prerequisites
-are met. Partner media remains hidden while moderation is off.
+provider as `none` until its prerequisites are met. Photos and voice notes pass
+unchecked for now; photos go to Rekognition once the AWS account is upgraded
+(ADR-0065, amended).
 
 ## If something fails
 

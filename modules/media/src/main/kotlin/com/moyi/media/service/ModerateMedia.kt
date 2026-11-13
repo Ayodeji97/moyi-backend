@@ -258,8 +258,9 @@ internal class ModerateImages(
  * that switching voice moderation on later hands it every voice note made
  * before ([StartFrom.BEGINNING]) without photos being moderated twice.
  *
- * No vendor is wired (ADR-0051 decision 5): production names `none`, under
- * which this subscribes to nothing and a partner hears no voice note.
+ * No vendor is wired (ADR-0051 decision 5). Under `none` this subscribes to
+ * nothing and a partner hears no voice note; production names `allow`
+ * (ADR-0065), under which every voice note passes unchecked.
  */
 @Component
 internal class ModerateVoices(
