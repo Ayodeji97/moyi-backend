@@ -20,7 +20,8 @@ here), doc 04 §8.3a, ADR-0020 (no "your account is suspended" screen).
 
 FR-113 is a MUST and the console cannot suspend; today the only way to stop a member is to erase
 them. The schema has carried `users.status = 'SUSPENDED'` since V2, `User.canAuthenticate` already
-refuses it and `User.verifyEmail` already declines to lift it; nothing sets it, and doc 04 §8.1's
+refuses it and verifying an email already declines to lift it (now `AccountStore.markEmailVerified`, one
+conditional statement); nothing sets it, and doc 04 §8.1's
 pause (sub-state, read-only partner, `SUSPENDED` days, "told it is paused, nothing about why",
 resume on lift) has no code.
 
@@ -74,7 +75,7 @@ rulings or from doc 04's wording.
    `GONE` so the enum is total. An account with a **pending deletion request** (V52, status still
    `ACTIVE`) can be suspended, and the page says when the deletion will run. *Cost:* none known.
 5. ✱ **Lifting returns the status the account earned, not a stored one:** `ACTIVE` if
-   `email_verified_at` is set, else `PENDING_VERIFICATION`. `verifyEmail` already records a
+   `email_verified_at` is set, else `PENDING_VERIFICATION`. `AccountStore.markEmailVerified` already records a
    verification on a suspended account without changing its status, so this is exact and no
    "prior status" column exists to drift. *Cost:* none; if a third pre-suspension status is ever
    added, this rule must name it.

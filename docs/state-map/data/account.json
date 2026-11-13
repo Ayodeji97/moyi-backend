@@ -159,7 +159,7 @@
     "rule": "FR-002, ADR-0018 §3",
     "evidence": "test",
     "evidenceRef": "EmailVerificationEndpointTest#registering sends one verification email, after the commit, with a link that verifies the account",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerifyEmail.kt#accounts.update(user.verifyEmail(now))"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerifyEmail.kt#accounts.markEmailVerified(user.id, now)"
   },
   {
     "id": "account-pending-verify-expired",
@@ -303,7 +303,7 @@
     "rule": "FR-002, ADR-0018 §3",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerifyEmail.kt#accounts.update(user.verifyEmail(now))"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/VerifyEmail.kt#accounts.markEmailVerified(user.id, now)"
   },
   {
     "id": "account-signed-in-verify-spent",
