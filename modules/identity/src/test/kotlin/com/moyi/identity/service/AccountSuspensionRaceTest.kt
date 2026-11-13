@@ -36,6 +36,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import javax.sql.DataSource
 
 /**
@@ -86,7 +87,7 @@ internal class AccountSuspensionRaceTest(
 
         val first = holding { suspension.suspend(ada) }
         val second = pool.submit<SuspensionResult> { transactions.execute { suspension.suspend(ada) } }
-        awaitAdvisoryWaiter()
+        awaitAdvisoryWaiter(ada)
         release.countDown()
 
         first.get(WAIT.seconds, TimeUnit.SECONDS).outcome shouldBe SuspensionOutcome.SUSPENDED
@@ -101,13 +102,32 @@ internal class AccountSuspensionRaceTest(
         val first = holding { suspension.suspend(ada) }
         // Read before the suspension's commit, an active account would answer NOT_SUSPENDED.
         val second = pool.submit<SuspensionResult> { transactions.execute { suspension.lift(ada) } }
-        awaitAdvisoryWaiter()
+        awaitAdvisoryWaiter(ada)
         release.countDown()
 
         first.get(WAIT.seconds, TimeUnit.SECONDS).outcome shouldBe SuspensionOutcome.SUSPENDED
         second.get(WAIT.seconds, TimeUnit.SECONDS).outcome shouldBe SuspensionOutcome.LIFTED
         status(ada) shouldBe "ACTIVE"
         openSpans(ada) shouldBe 0
+    }
+
+    @Test
+    fun `a suspension that waits on a lift sees it, and suspends again`() {
+        val ada = signUp()
+        transactions.execute { suspension.suspend(ada) }!!.outcome shouldBe SuspensionOutcome.SUSPENDED
+        clock.advance(Duration.ofSeconds(1))
+
+        val first = holding { suspension.lift(ada) }
+        // Read before the lift's commit, a suspended account would answer ALREADY_SUSPENDED.
+        val second = pool.submit<SuspensionResult> { transactions.execute { suspension.suspend(ada) } }
+        awaitAdvisoryWaiter(ada)
+        release.countDown()
+
+        first.get(WAIT.seconds, TimeUnit.SECONDS).outcome shouldBe SuspensionOutcome.LIFTED
+        second.get(WAIT.seconds, TimeUnit.SECONDS).outcome shouldBe SuspensionOutcome.SUSPENDED
+        status(ada) shouldBe "SUSPENDED"
+        openSpans(ada) shouldBe 1
+        closedSpans(ada) shouldBe 1
     }
 
     @Test
@@ -131,7 +151,7 @@ internal class AccountSuspensionRaceTest(
         await().atMost(WAIT).until { blockedOn("UPDATE deletion_requests") }
 
         val suspended = pool.submit<SuspensionResult> { transactions.execute { suspension.suspend(ada) } }
-        awaitAdvisoryWaiter()
+        awaitAdvisoryWaiter(ada)
         status(ada) shouldBe "ACTIVE"
         release.countDown()
 
@@ -150,7 +170,7 @@ internal class AccountSuspensionRaceTest(
 
         val suspended = holding { suspension.suspend(ada) }
         val run = pool.submit<Int> { deletions.executeDue(LIMIT) }
-        awaitAdvisoryWaiter()
+        awaitAdvisoryWaiter(ada)
         release.countDown()
 
         suspended.get(WAIT.seconds, TimeUnit.SECONDS).outcome shouldBe SuspensionOutcome.SUSPENDED
@@ -167,11 +187,13 @@ internal class AccountSuspensionRaceTest(
         // request and cancel do. Here it changes the status, so a suspension that read the row
         // before the lock (and then waited only on its own UPDATE) would write over it.
         val written = CountDownLatch(1)
+        val writerPid = AtomicInteger()
         val writer =
             pool.submit {
                 transactions.executeWithoutResult {
                     jdbc.queryForList("SELECT id FROM users WHERE id = ? FOR UPDATE", UUID::class.java, ada)
                     jdbc.update("UPDATE users SET status = 'PENDING_DELETION' WHERE id = ?", ada)
+                    writerPid.set(jdbc.queryForObject("SELECT pg_backend_pid()", Int::class.java)!!)
                     written.countDown()
                     release.await()
                 }
@@ -179,8 +201,13 @@ internal class AccountSuspensionRaceTest(
         written.await(WAIT.seconds, TimeUnit.SECONDS) shouldBe true
 
         val suspended = pool.submit<SuspensionResult> { transactions.execute { suspension.suspend(ada) } }
+        // Waiting on the writer's transaction, and on nothing else: blocked by the writer's backend.
         await().atMost(WAIT).until {
-            jdbc.queryForObject("SELECT count(*) FROM pg_locks WHERE locktype = 'transactionid' AND NOT granted", Int::class.java)!! > 0
+            jdbc.queryForObject(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'transactionid' AND NOT granted AND ? = ANY (pg_blocking_pids(pid))",
+                Int::class.java,
+                writerPid.get(),
+            )!! > 0
         }
         release.countDown()
 
@@ -208,10 +235,20 @@ internal class AccountSuspensionRaceTest(
         return future
     }
 
-    /** Somebody is waiting for the sessions advisory lock: the second party has reached the first lock. */
-    private fun awaitAdvisoryWaiter() {
+    /**
+     * Somebody is waiting for this user's sessions advisory lock: the second party has reached the
+     * first lock. Scoped to the lock's key, `(1, hashtext(id))` as `RefreshTokenRepository.lockSessions`
+     * takes it (`classid` 1, `objid` the hash as an oid), so a waiter on another user's lock, or
+     * anything else in the database, does not count.
+     */
+    private fun awaitAdvisoryWaiter(userId: UUID) {
         await().atMost(WAIT).until {
-            jdbc.queryForObject("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted", Int::class.java)!! > 0
+            jdbc.queryForObject(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid = 1 " +
+                    "AND objsubid = 2 AND objid::bigint = (hashtext(CAST(? AS text))::bigint & 4294967295)",
+                Int::class.java,
+                userId,
+            )!! > 0
         }
     }
 
@@ -223,6 +260,13 @@ internal class AccountSuspensionRaceTest(
         )!! > 0
 
     private fun status(userId: UUID): String? = jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String::class.java, userId)
+
+    private fun closedSpans(userId: UUID): Int =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM account_suspensions WHERE user_id = ? AND lifted_at IS NOT NULL",
+            Int::class.java,
+            userId,
+        )!!
 
     private fun openSpans(userId: UUID): Int =
         jdbc.queryForObject(
