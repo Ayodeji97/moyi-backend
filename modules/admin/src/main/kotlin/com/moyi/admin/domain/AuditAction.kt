@@ -12,6 +12,8 @@ package com.moyi.admin.domain
  * The A2 actions (spec §9.1): the moderation console's queue views, reads and
  * decisions, the review copy of a held-back asset (`MEDIA_VIEWED`), and
  * `ADMIN_STEP_UP`, the second factor proven again before an irreversible act.
+ *
+ * A5 (V64): `ENTRY_TEXT_READ`, an administrator's read of one reported entry's words.
  */
 internal enum class AuditAction {
     ADMIN_INVITED,
@@ -31,4 +33,5 @@ internal enum class AuditAction {
     MEDIA_BLOCKED,
     MEDIA_DELETED,
     ADMIN_STEP_UP,
+    ENTRY_TEXT_READ,
 }

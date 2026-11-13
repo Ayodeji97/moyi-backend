@@ -202,6 +202,24 @@ class AdminAccessDisclosureTest(
         adminAccess(bea)["accesses"].toList().map { it["action"].asString() } shouldContainExactly listOf("MEDIA_REMOVED")
     }
 
+    @Test
+    fun `an ENTRY_TEXT_READ row lists nothing, and an export built after it has the bytes of one built before`() {
+        val ada = member()
+        val session = rig.session()
+        // Something listed, so the comparison is of a list and not of two empty ones.
+        lookup(session, ada, "MEMBER_REQUEST").status shouldBe 200
+        val before = ExportArchives.build(jobs, jdbc, clock, ada)
+
+        seed("ENTRY_TEXT_READ", "ENTRY", UUID.randomUUID(), """{"reportDriven": false}""")
+        seed("ENTRY_TEXT_READ", "ENTRY", ada, """{"result": "SHOWN"}""")
+        val after = ExportArchives.build(jobs, jdbc, clock, ada)
+
+        jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action = 'ENTRY_TEXT_READ'", Int::class.java) shouldBe 2
+        json.readTree(after)["adminAccess"]["accesses"].toList().map { it["action"].asString() } shouldContainExactly
+            listOf("ACCOUNT_LOOKED_UP")
+        ExportArchives.adminAccessBytes(after) shouldBe ExportArchives.adminAccessBytes(before)
+    }
+
     // ---- helpers ----
 
     private fun member(): UUID = ExportArchives.register(mockMvc, jdbc)
