@@ -167,7 +167,10 @@ the text read is the text reported, unless its author erased it (`ERASED`).
   `FOR SHARE` sibling; §4's rule is a function in
   `gratitude.domain` (one place).
 - **`admin.service`**: `ContentAccess.readReportedEntry(…)`, `@PreAuthorize("hasRole('ADMIN')")`,
-  `@Transactional`; it validates, steps up, calls the port, writes the audit row, returns.
+  `@Transactional`; it validates, takes the step-up the controller already proved (it never
+  steps up itself, so the proof's own transaction is not joined to the read's), calls the port,
+  writes the audit row, returns. The caller of `AdminSignIn.stepUp` is the controller, before
+  this method is entered (§5 step 3; A2's `ReportsController` → `decideGated` pattern).
 - **`admin.web`**: one POST on `ReportsController` (method-level `ADMIN` over the class's
   `MODERATOR`), and the GET's model gains `canReadWords` and `whyNot`.
 - **`ArchitectureTest`**: `ReportedEntryText` joins `MODERATED_APIS`; a new rule that no class in
