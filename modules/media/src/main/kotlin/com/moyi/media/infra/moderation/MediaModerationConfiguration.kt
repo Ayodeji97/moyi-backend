@@ -33,6 +33,11 @@ internal class MediaModerationConfiguration {
                 log.warn("Photo moderation: STAND-IN, deciding by colour. Never in production (ADR-0051).")
                 StandInImageModerator()
             }
+
+            MediaModerationProperties.ImageProvider.ALLOW -> {
+                log.warn("Photo moderation: ALLOW. Every photo passes unchecked (ADR-0065); switch on Rekognition before launch.")
+                AllowImageModeration()
+            }
         }
 
     @Bean
@@ -60,6 +65,11 @@ internal class MediaModerationConfiguration {
             MediaModerationProperties.VoiceProvider.STAND_IN -> {
                 log.warn("Voice moderation: STAND-IN, passing every voice note. Never in production (ADR-0051).")
                 StandInVoiceModerator()
+            }
+
+            MediaModerationProperties.VoiceProvider.ALLOW -> {
+                log.warn("Voice moderation: ALLOW. Every voice note passes unchecked (ADR-0065).")
+                AllowVoiceModeration()
             }
         }
 }

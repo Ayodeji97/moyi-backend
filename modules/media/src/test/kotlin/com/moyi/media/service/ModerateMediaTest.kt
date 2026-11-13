@@ -2,6 +2,7 @@ package com.moyi.media.service
 
 import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.events.ReceivedEvent
+import com.moyi.common.events.StartFrom
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.MutableClock
 import com.moyi.media.api.ImageViewStatus
@@ -15,6 +16,8 @@ import com.moyi.media.infra.MediaIntegrationTest
 import com.moyi.media.infra.MediaTestApplication
 import com.moyi.media.infra.moderation.Moderated
 import com.moyi.media.infra.moderation.ModeratorUnavailableException
+import com.moyi.media.infra.moderation.AllowImageModeration
+import com.moyi.media.infra.moderation.AllowVoiceModeration
 import com.moyi.media.infra.moderation.NoImageModeration
 import com.moyi.media.infra.moderation.NoKnownImageList
 import com.moyi.media.infra.moderation.NoVoiceModeration
@@ -433,6 +436,21 @@ internal class ModerateMediaTest(
         ModerateVoices(moderation, voiceProcessor, NoVoiceModeration()).eventTypes.shouldBeEmpty()
         ModerateImages(moderation, imageProcessor, moderator, knownImages).eventTypes shouldBe setOf("MediaReady")
         ModerateVoices(moderation, voiceProcessor, voiceModerator).eventTypes shouldBe setOf("MediaReady")
+    }
+
+    /**
+     * ADR-0065: `allow` moderates here, so both consumers subscribe from the
+     * beginning, and every photo and voice note sent while `none` ran is handed
+     * to them and passed once production names `allow`.
+     */
+    @Test
+    fun `with allow, both consumers subscribe from the beginning`() {
+        val images = ModerateImages(moderation, imageProcessor, AllowImageModeration(), NoKnownImageList())
+        val voices = ModerateVoices(moderation, voiceProcessor, AllowVoiceModeration())
+        images.eventTypes shouldBe setOf("MediaReady")
+        voices.eventTypes shouldBe setOf("MediaReady")
+        images.startFrom shouldBe StartFrom.BEGINNING
+        voices.startFrom shouldBe StartFrom.BEGINNING
     }
 
     private fun readyPhoto(bytes: ByteArray): UUID {

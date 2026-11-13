@@ -142,3 +142,29 @@ internal class NoVoiceModeration : VoiceModerator {
         durationMs: Int,
     ): Moderated = error("No voice note is moderated in this process (moyi.media.moderation.voice.provider: none).")
 }
+
+/**
+ * Every photo passes, unchecked (`provider: allow`): the owner's ruling of
+ * 2026-11-13 (ADR-0065), for cost, while only testers use the app. It
+ * moderates here, so `media.moderate-image` subscribes and is handed every
+ * photo made before (`StartFrom.BEGINNING`), and each gets a `PASSED` verdict
+ * whose record names `allow`, so a photo passed this way can always be told
+ * from one a moderator looked at. Owed: Rekognition before the app is public.
+ */
+internal class AllowImageModeration : ImageModerator {
+    override val moderatesHere: Boolean = true
+    override val name: String = "allow"
+
+    override fun moderate(jpeg: ByteArray): Moderated = Moderated.Found(emptyList())
+}
+
+/** Every voice note passes, unchecked (`provider: allow`, ADR-0065), as [AllowImageModeration] for photos. */
+internal class AllowVoiceModeration : VoiceModerator {
+    override val moderatesHere: Boolean = true
+    override val name: String = "allow"
+
+    override fun moderate(
+        ogg: ByteArray,
+        durationMs: Int,
+    ): Moderated = Moderated.Found(emptyList())
+}

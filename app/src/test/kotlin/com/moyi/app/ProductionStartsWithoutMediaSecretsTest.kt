@@ -206,12 +206,13 @@ internal class ProductionStartsWithoutMediaSecretsTest {
     /**
      * ADR-0051: photo moderation defaults to Rekognition, which refuses to
      * start without its key pair, so the file names `none` (which moderates
-     * nothing and shows no partner any photo) or gives Rekognition both halves
-     * of its key, as secrets. The jar was started with this environment and no
+     * nothing and shows no partner any photo), `allow` (which passes every
+     * photo unchecked: the owner's ruling of 2026-11-13, ADR-0065), or gives
+     * Rekognition both halves of its key, as secrets. The jar was started with this environment and no
      * AWS credentials when this landed (the pull request records the run).
      */
     @Test
-    fun `deploy-yml names photo moderation none, or gives Rekognition both halves of its key, in every role`() {
+    fun `deploy-yml names photo moderation none or allow, or gives Rekognition both halves of its key, in every role`() {
         roles.forEach { (role, env) ->
             val provider =
                 env.clear["MOYI_MEDIA_MODERATION_IMAGE_PROVIDER"]
@@ -226,7 +227,7 @@ internal class ProductionStartsWithoutMediaSecretsTest {
             val found = provider ?: "<default Rekognition>"
 
             withClue("config/deploy.yml would start a $role whose photo moderation refuses to start (provider: $found)") {
-                (provider == "none" || ((provider == null || provider == "rekognition") && rekognitionComplete)) shouldBe true
+                (provider == "none" || provider == "allow" || ((provider == null || provider == "rekognition") && rekognitionComplete)) shouldBe true
             }
         }
     }
@@ -253,7 +254,8 @@ internal class ProductionStartsWithoutMediaSecretsTest {
      * ADR-0051: the stand-ins decide by colour (a photo that is not red passes)
      * and pass every voice note. A partner is shown what passes, so a stand-in
      * in production would show partners unmoderated media. None of the three
-     * may name it, in any role; `none`, which fails closed, is what stands in there.
+     * may name it, in any role. `allow` passes everything too, but says so by name
+     * and is the owner's ruling (ADR-0065); a stand-in would pass by accident.
      */
     @Test
     fun `deploy-yml never names a moderation stand-in`() {
