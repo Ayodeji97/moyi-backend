@@ -7,6 +7,7 @@ import com.moyi.identity.api.AccountSuspension
 import com.moyi.identity.api.SuspensionOutcome
 import com.moyi.identity.api.SuspensionResult
 import com.moyi.identity.domain.Password
+import com.moyi.identity.domain.PasswordResetTokenExpiredException
 import com.moyi.identity.domain.UserId
 import com.moyi.identity.domain.VerificationSecret
 import com.moyi.identity.infra.IdentityTestApplication
@@ -15,7 +16,9 @@ import com.moyi.identity.infra.sessionsLockWaitersOf
 import com.moyi.identity.web.LoginEndpointTest
 import com.moyi.identity.web.RecordingEmailSender
 import com.moyi.identity.web.SessionsEndpointTest
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -37,6 +40,7 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
@@ -228,16 +232,22 @@ internal class AccountSuspensionRaceTest(
         val ada = signUp()
         val secret = resetSecretFor(ada)
 
+        val hashBefore = passwordHash(ada)
         val suspended = holding { suspension.suspend(ada) }
         // The reset spends its link and reaches the sessions lock while the suspension holds it.
         // Read before the suspension's commit and saved after it, the account would be written
-        // back ACTIVE, and the reset's earlier instant over the suspension's bump.
+        // back ACTIVE, and the reset's earlier instant over the suspension's bump. Read under the
+        // lock, it sees the suspension and refuses, as for a spent link (final review: a link sent
+        // before a suspension does not work on a suspended account).
         val reset = pool.submit { resets.reset(VerificationSecret(secret), Password.of(NEW_PASSWORD)) }
         awaitAdvisoryWaiter(ada)
         release.countDown()
 
         suspended.get(WAIT.seconds, TimeUnit.SECONDS).outcome shouldBe SuspensionOutcome.SUSPENDED
-        reset.get(WAIT.seconds, TimeUnit.SECONDS)
+        shouldThrow<ExecutionException> { reset.get(WAIT.seconds, TimeUnit.SECONDS) }
+            .cause
+            .shouldBeInstanceOf<PasswordResetTokenExpiredException>()
+        passwordHash(ada) shouldBe hashBefore
         status(ada) shouldBe "SUSPENDED"
         openSpans(ada) shouldBe 1
         val suspendedAt =
@@ -246,6 +256,9 @@ internal class AccountSuspensionRaceTest(
     }
 
     // --- helpers ---
+
+    private fun passwordHash(userId: UUID): String =
+        jdbc.queryForObject("SELECT password_hash FROM credentials WHERE user_id = ?", String::class.java, userId)!!
 
     /** Runs [act] in a transaction that stays open, holding what [act] locked, until [release]. */
     private fun holding(act: () -> SuspensionResult): Future<SuspensionResult> {

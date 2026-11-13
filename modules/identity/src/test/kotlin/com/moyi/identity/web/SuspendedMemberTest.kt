@@ -6,6 +6,7 @@ import com.moyi.identity.api.AccountSuspension
 import com.moyi.identity.api.SuspensionOutcome
 import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.security.TestBreachCorpus
+import com.moyi.notification.api.EmailMessage
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
@@ -128,79 +129,84 @@ internal class SuspendedMemberTest(
         await().atMost(WAIT).until { emails.sent.toList().any { it.to == email } }
     }
 
-    // --- helpers ---
+    @Test
+    fun `a reset link or code sent before the suspension is refused after it, exactly as a spent one is`() {
+        val (ada, email) = signUp()
+        // Two emails, one after the other: the first's link stays live, the second's code is the
+        // live one (a new email retires the last one's code).
+        forgot(email).status shouldBe 202
+        val first = awaitResetEmails(email, 1).single()
+        forgot(email).status shouldBe 202
+        val second = awaitResetEmails(email, 2).single { it != first }
+        val hashBefore = passwordHash(ada)
 
-    /** As the smoke's `no_instance`: the bodies compared apart from the path that was typed. */
-    private fun noInstance(body: String): String = body.replace(Regex(""""instance":"[^"]*""""), "\"instance\":\"-\"")
+        transactions.execute { suspension.suspend(ada) }.outcome shouldBe SuspensionOutcome.SUSPENDED
+        clock.advance(Duration.ofSeconds(1))
 
-    private fun failedAttempts(userId: UUID): Int =
-        jdbc.queryForObject("SELECT failed_attempts FROM credentials WHERE user_id = ?", Int::class.java, userId)!!
+        // Each refused while suspended, then presented again: the second answer is a spent
+        // credential's, and the first must be the same bytes, so nothing tells a suspension.
+        val byLink = resetByLink(secretIn(first))
+        val linkSpent = resetByLink(secretIn(first))
+        byLink.status shouldBe 410
+        byLink.status shouldBe linkSpent.status
+        noInstance(byLink.contentAsString) shouldBe noInstance(linkSpent.contentAsString)
 
-    private fun resetTokens(userId: UUID): Int =
-        jdbc.queryForObject(
-            "SELECT count(*) FROM verification_tokens WHERE user_id = ? AND purpose = 'PASSWORD_RESET'",
-            Int::class.java,
-            userId,
-        )!!
+        val byCode = resetByCode(email, codeIn(second))
+        val codeSpent = resetByCode(email, codeIn(second))
+        byCode.status shouldBe 422
+        byCode.status shouldBe codeSpent.status
+        noInstance(byCode.contentAsString) shouldBe noInstance(codeSpent.contentAsString)
 
-    private fun liveRefreshTokens(userId: UUID): Int =
-        jdbc.queryForObject("SELECT count(*) FROM refresh_tokens WHERE user_id = ? AND revoked_at IS NULL", Int::class.java, userId)!!
-
-    private fun signUp(): Pair<UUID, String> {
-        val email = "u-${UUID.randomUUID()}@example.com"
-        mockMvc
-            .post("/api/v1/auth/register") {
-                contentType = MediaType.APPLICATION_JSON
-                content =
-                    """{"email":"$email","password":"$PASSWORD","displayName":"Ada","locale":"en",""" +
-                    """"acceptedTermsVersion":"2026-09-01","over18":true}"""
-            }.andReturn()
-            .response.status shouldBe 201
-        jdbc.update("UPDATE users SET email_verified_at = now(), status = 'ACTIVE' WHERE email = ?", email)
-        // Registration's own email, settled, so any later one is a reset's.
-        await().atMost(WAIT).until { emails.sent.toList().any { it.to == email } }
-        emails.sent.clear()
-        return jdbc.queryForObject("SELECT id FROM users WHERE email = ?", UUID::class.java, email)!! to email
+        passwordHash(ada) shouldBe hashBefore
+        status(ada) shouldBe "SUSPENDED"
+        transactions.execute { suspension.lift(ada) }.outcome shouldBe SuspensionOutcome.LIFTED
+        clock.advance(Duration.ofSeconds(1))
+        login(email, PASSWORD).status shouldBe 200
     }
 
-    private fun login(
+    // --- helpers ---
+
+    private fun status(userId: UUID): String = jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String::class.java, userId)!!
+
+    private fun passwordHash(userId: UUID): String =
+        jdbc.queryForObject("SELECT password_hash FROM credentials WHERE user_id = ?", String::class.java, userId)!!
+
+    private fun awaitResetEmails(
         email: String,
-        password: String,
+        count: Int,
+    ): List<EmailMessage> {
+        await().atMost(WAIT).until { emails.sent.toList().count { it.to == email } >= count }
+        return emails.sent.toList().filter { it.to == email }
+    }
+
+    private fun secretIn(email: EmailMessage): String =
+        Regex("""token=([A-Za-z0-9_-]+)""").find(email.text)?.groupValues?.get(1) ?: error("no link in the email body")
+
+    private fun codeIn(email: EmailMessage): String =
+        Regex("""(?m)^(\d{6})$""").find(email.text)?.groupValues?.get(1) ?: error("no code in the email body")
+
+    private fun resetByLink(secret: String): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/auth/reset-password") {
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"token":"$secret","password":"$NEW_PASSWORD"}"""
+            }.andReturn()
+            .response
+
+    private fun resetByCode(
+        email: String,
+        code: String,
     ): MockHttpServletResponse =
         mockMvc
-            .post("/api/v1/auth/login") {
+            .post("/api/v1/auth/reset-password") {
                 contentType = MediaType.APPLICATION_JSON
-                content = """{"email":"$email","password":"$password"}"""
+                content = """{"email":"$email","code":"$code","password":"$NEW_PASSWORD"}"""
             }.andReturn()
             .response
-
-    private fun refresh(token: String): MockHttpServletResponse =
-        mockMvc
-            .post("/api/v1/auth/refresh") {
-                contentType = MediaType.APPLICATION_JSON
-                content = """{"refreshToken":"$token"}"""
-            }.andReturn()
-            .response
-
-    private fun forgot(email: String): MockHttpServletResponse =
-        mockMvc
-            .post("/api/v1/auth/forgot-password") {
-                contentType = MediaType.APPLICATION_JSON
-                content = """{"email":"$email"}"""
-            }.andReturn()
-            .response
-
-    private fun get(
-        path: String,
-        access: String,
-    ): MockHttpServletResponse = mockMvc.get(path) { header(HttpHeaders.AUTHORIZATION, "Bearer $access") }.andReturn().response
-
-    private fun refreshToken(body: String): String = Regex("\"refreshToken\":\"([^\"]+)\"").find(body)!!.groupValues[1]
-
-    private fun accessToken(body: String): String = Regex("\"accessToken\":\"([^\"]+)\"").find(body)!!.groupValues[1]
 
     private companion object {
         const val PASSWORD = "correct horse battery"
+        const val NEW_PASSWORD = "a different good password"
         val WAIT: Duration = Duration.ofSeconds(10)
 
         @JvmStatic

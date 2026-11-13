@@ -8,6 +8,7 @@ import com.moyi.identity.domain.PasswordResetCodeRejectedException
 import com.moyi.identity.domain.PasswordResetTokenExpiredException
 import com.moyi.identity.domain.PasswordResetTokenInvalidException
 import com.moyi.identity.domain.SecurityNotice
+import com.moyi.identity.domain.User
 import com.moyi.identity.domain.VerificationCode
 import com.moyi.identity.domain.VerificationPurpose
 import com.moyi.identity.domain.VerificationSecret
@@ -125,7 +126,8 @@ internal class ApplyPasswordReset(
 ) {
     /**
      * @return `false` when [token] was spent first, by a concurrent presentation of its link
-     *   or its code; nothing has changed, and the caller answers with its own path's refusal
+     *   or its code, or its account can no longer sign in (suspended); the password is unchanged,
+     *   and the caller answers with its own path's refusal
      */
     @Transactional
     fun apply(
@@ -140,6 +142,21 @@ internal class ApplyPasswordReset(
         // them that held it has committed.
         refreshTokens.lockSessionsOf(token.userId)
         val user = accounts.findById(token.userId) ?: throw PasswordResetTokenInvalidException()
+        // A link or code issued before a suspension (admin console A3): re-read under the lock, so
+        // a suspension that committed after the link was sent is seen here. The refusal is the
+        // caller's own for a spent link or code, the same answer after the same work (the hash is
+        // computed before this either way), and the row stays consumed, so nothing tells a
+        // suspended account from a link that was used or ran out.
+        if (user.canAuthenticate) replacePassword(user, newPasswordHash, now)
+        return user.canAuthenticate
+    }
+
+    /** The reset itself, for an account that may still sign in: the hash, every session, the notice. */
+    private fun replacePassword(
+        user: User,
+        newPasswordHash: PasswordHash,
+        now: Instant,
+    ) {
         val credentials = accounts.findCredentials(user.id) ?: throw PasswordResetTokenInvalidException()
 
         accounts.updateCredentials(
@@ -159,6 +176,5 @@ internal class ApplyPasswordReset(
         events.publishEvent(SecurityNotice.PasswordChanged(user.id, user.email, user.displayName, changedAt = now))
         // A code from a later reset email is moot now that the password has changed (#135).
         tokens.retireCodes(user.id, VerificationPurpose.PASSWORD_RESET)
-        return true
     }
 }

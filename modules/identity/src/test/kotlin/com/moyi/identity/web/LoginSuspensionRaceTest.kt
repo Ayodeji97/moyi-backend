@@ -89,6 +89,7 @@ internal class LoginSuspensionRaceTest(
     @AfterEach
     fun clear() {
         hasher.gate.disarm()
+        hasher.hashGate.disarm()
         issuer.gate.disarm()
         pool.shutdownNow()
         pool.awaitTermination(WAIT.seconds, TimeUnit.SECONDS)
@@ -191,7 +192,49 @@ internal class LoginSuspensionRaceTest(
         signIn.get(WAIT.seconds, TimeUnit.SECONDS).status shouldBe 401
     }
 
+    /**
+     * A reset link sent before a suspension: the link is judged live and the new password hashed,
+     * and the suspension commits before the reset's transaction opens. Refused under the sessions
+     * lock, with exactly the answer a spent link gets, and the password is unchanged.
+     */
+    @Test
+    fun `a reset link sent before a suspension is refused after it commits, as a spent link is`() {
+        val (ada, email) = signUp()
+        forgot(email).status shouldBe 202
+        val secret = awaitResetSecret(email)
+        val hashBefore = passwordHash(ada)
+        val stopped = hasher.hashGate.arm()
+
+        val reset = pool.submit<MockHttpServletResponse> { resetByLink(secret) }
+        stopped.awaitReached()
+        transactions.execute { suspension.suspend(ada) }.outcome shouldBe SuspensionOutcome.SUSPENDED
+        stopped.release()
+
+        val refused = reset.get(WAIT.seconds, TimeUnit.SECONDS)
+        // The same link again is a spent one: the refusal must be that answer, byte for byte.
+        val spent = resetByLink(secret)
+        refused.status shouldBe 410
+        refused.status shouldBe spent.status
+        noInstance(refused.contentAsString) shouldBe noInstance(spent.contentAsString)
+        passwordHash(ada) shouldBe hashBefore
+        jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String::class.java, ada) shouldBe "SUSPENDED"
+    }
+
     // --- helpers ---
+
+    /** As the smoke's `no_instance`: the bodies compared apart from the path that was typed. */
+    private fun noInstance(body: String): String = body.replace(Regex(""""instance":"[^"]*""""), "\"instance\":\"-\"")
+
+    private fun passwordHash(userId: UUID): String =
+        jdbc.queryForObject("SELECT password_hash FROM credentials WHERE user_id = ?", String::class.java, userId)!!
+
+    private fun resetByLink(secret: String): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/auth/reset-password") {
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"token":"$secret","password":"$NEW_PASSWORD"}"""
+            }.andReturn()
+            .response
 
     private fun awaitSessionsLockWaiter(userId: UUID) {
         await().atMost(WAIT).until { jdbc.sessionsLockWaitersOf(userId) > 0 }
@@ -293,16 +336,22 @@ internal class LoginSuspensionRaceTest(
     }
 }
 
-/** The real Argon2id hasher, with a [Gate] in front of `matches`: the sign-in's password check. */
+/**
+ * The real Argon2id hasher, with a [Gate] after `matches` (the sign-in's password check) and
+ * another after `hash` (a reset's new password, hashed outside any transaction).
+ */
 internal class GatedPasswordHasher(
     private val delegate: PasswordHasher,
 ) : PasswordHasher by delegate {
     val gate = Gate()
+    val hashGate = Gate()
 
     override fun matches(
         raw: String,
         hash: PasswordHash,
     ): Boolean = delegate.matches(raw, hash).also { gate.pass() }
+
+    override fun hash(password: Password): PasswordHash = delegate.hash(password).also { hashGate.pass() }
 }
 
 /**
