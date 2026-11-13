@@ -147,6 +147,24 @@ internal class ReportedEntryTextRaceTest(
     }
 
     /**
+     * (3b) The other order (ADR-0064 decision 9: "an erasure waits for a read"): the read holds the
+     * report and the entry `FOR SHARE`; the author's own `DELETE /entries/{id}` is observed waiting
+     * on the entry's row lock; the read commits with the words; the delete then completes.
+     */
+    @Test
+    fun `a read holding the entry makes the author's erasure wait, and the erasure completes after it`() {
+        val (entry, report) = reported("HARASSMENT")
+        val read = held { port.read(report, "HARASSMENT", ACTOR) }
+
+        val erasure = CompletableFuture.runAsync({ rig.delete(bea, entry) }, threads)
+        awaitLockWait(ENTRY_ERASURE)
+        read.commit().shouldBeInstanceOf<ReportedEntryRead.Shown>().entryId shouldBe entry
+
+        erasure.get(DEADLINE_SECONDS, TimeUnit.SECONDS)
+        jdbc.queryForObject("SELECT status FROM entries WHERE id = ?", String::class.java, entry) shouldBe "DELETED"
+    }
+
+    /**
      * (4a) The reporter's account erasure (`EraseDeletedAccount`: the bond's lock, then
      * `UPDATE entry_reports SET detail = NULL`) against a read already holding the report: the
      * erasure waits on the report, the read never waits on the bond. Both complete.
@@ -314,6 +332,9 @@ internal class ReportedEntryTextRaceTest(
         const val DISMISS = "%entry\\_report\\_dismiss%"
         const val REPORT_SHARE = "%FROM entry\\_reports WHERE id = %FOR SHARE%"
         const val ENTRY_SHARE = "%FROM entries e JOIN bond\\_days d%FOR SHARE OF e%"
+
+        /** The author's erasure taking the entry's row lock (`EntryRepository.lockRow`, via `EraseEntry`). */
+        const val ENTRY_ERASURE = "%FROM entries WHERE id = %FOR UPDATE%"
         const val DETAIL_ERASURE = "%UPDATE entry\\_reports SET detail = NULL%"
 
         /** Every wait in this class: long enough for a loaded CI runner, short enough to fail fast. */

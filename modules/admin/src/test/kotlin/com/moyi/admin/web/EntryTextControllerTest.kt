@@ -208,6 +208,32 @@ internal class EntryTextControllerTest(
         rows(admin.id).shouldBeEmpty()
     }
 
+    /**
+     * A well-formed id no report has: the code is proved and spent first (step 3), the read answers
+     * NOT_OPEN with no entry and is audited REFUSED on the REPORT target, and the page is the 404 page,
+     * not the report's "already decided" (there is no report to show).
+     */
+    @Test
+    fun `an unknown report is the 404 page after the code is spent, its refusal audited on the report`() {
+        val admin = enrolled("ADMIN")
+        val unknown = UUID.randomUUID()
+        val code = nextCode(admin)
+
+        val posted = read(admin, unknown, "HARASSMENT", code)
+
+        posted.response.status shouldBe 404
+        posted.response.page() shouldNotContain ReportsController.ALREADY_DECIDED
+        neverKept(posted)
+        rows(admin.id) shouldContainExactly listOf("ADMIN_STEP_UP|SUCCEEDED", "ENTRY_TEXT_READ|REFUSED")
+        jdbc.queryForObject(
+            "SELECT target_type || '|' || target_id || '|' || (metadata ->> 'result') FROM audit_log " +
+                "WHERE actor_id = ? AND action = 'ENTRY_TEXT_READ'",
+            String::class.java,
+            admin.id,
+        ) shouldBe "REPORT|$unknown|NOT_OPEN"
+        read(admin, unknown, "HARASSMENT", code).response.status shouldBe 401
+    }
+
     // --- the code and the justification ------------------------------------------------------------------------------
 
     @Test
