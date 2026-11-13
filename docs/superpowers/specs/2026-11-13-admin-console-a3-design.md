@@ -288,7 +288,8 @@ order.
 | Race | What decides it | Result in each order |
 |---|---|---|
 | Suspension vs the member's sign-in | sessions lock + ruling 7's re-read | login first: its family is revoked and its token's `iat` precedes the bump; suspension first: `401` |
-| vs the member's refresh | sessions lock; `issueNext` re-reads | rotated then revoked; or refused |
+| vs the member's refresh | sessions lock; `issueNext` re-reads; the access token is minted inside that transaction (final review I1, as ruling 7) | refresh first: rotated then revoked, and its access token's `iat` precedes the bump; suspension first: refused |
+| vs a reset link or code sent before it | sessions lock; `ApplyPasswordReset` re-reads the status under it | reset first: the password changes, then the suspension; suspension first: refused exactly as a spent link or code, the password unchanged |
 | vs a request already authenticated | none | it completes (one request's length); the next is `401` |
 | vs the partner's submit/edit/react | none (spans read under the partner's bond lock, statement-level) | read before the commit: the write lands and is ordered before the suspension (a second entry may reveal instantly, as it would a second earlier); after: `409 BOND_PAUSED` |
 | vs the close job | spans read under the bond lock; §4's stability | a day closes ≥ 12 h after its end, from settled spans; the same answer either way |
