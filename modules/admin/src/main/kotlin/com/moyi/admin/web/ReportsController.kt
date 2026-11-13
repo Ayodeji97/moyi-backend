@@ -121,7 +121,7 @@ internal class ReportsController(
             ModerationNote.require(justification)
             when (val fresh = secondFactor.proveNow(adminId, code, from)) {
                 SecondFactor.Fresh.Missing -> {
-                    form.again(DecisionForm.CODE_NEEDED, HttpStatus.OK)
+                    form.again(CODE_NEEDED_TO_READ, HttpStatus.OK)
                 }
 
                 SecondFactor.Fresh.Refused -> {
@@ -134,7 +134,7 @@ internal class ReportsController(
                 }
             }
         } catch (_: InvalidModerationNote) {
-            form.again(DecisionForm.NOTE_REFUSED, HttpStatus.UNPROCESSABLE_CONTENT)
+            form.again(WHY_REFUSED, HttpStatus.UNPROCESSABLE_CONTENT)
         }
     }
 
@@ -382,6 +382,8 @@ internal class ReportsController(
             }
 
         const val ENTRY_TEXT_VIEW = "admin/entry-text"
+        const val CODE_NEEDED_TO_READ = "Enter a code from your authenticator app. Every read needs a new one."
+        const val WHY_REFUSED = "Write why you need to read them: 1 to ${ModerationNote.MAX_CODE_POINTS} characters."
         const val ERASED = "Its author erased this entry. There are no words to read."
         const val REFERRER_POLICY = "Referrer-Policy"
         const val EXPECTED_REASON = "expectedReason"

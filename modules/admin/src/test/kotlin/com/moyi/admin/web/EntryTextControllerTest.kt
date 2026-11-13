@@ -220,7 +220,7 @@ internal class EntryTextControllerTest(
 
         posted.response.status shouldBe 200
         posted.modelAndView!!.viewName shouldBe "admin/read-words"
-        posted.response.page() shouldContain DecisionForm.CODE_NEEDED
+        posted.response.page() shouldContain ReportsController.CODE_NEEDED_TO_READ
         posted.response.page() shouldContain """name="code""""
         posted.response.page() shouldNotContain marker
         neverKept(posted)
@@ -258,7 +258,7 @@ internal class EntryTextControllerTest(
             withClue(bad.take(8)) {
                 posted.response.status shouldBe 422
                 posted.modelAndView!!.viewName shouldBe "admin/read-words"
-                posted.response.page() shouldContain DecisionForm.NOTE_REFUSED
+                posted.response.page() shouldContain ReportsController.WHY_REFUSED
                 neverKept(posted)
             }
         }
