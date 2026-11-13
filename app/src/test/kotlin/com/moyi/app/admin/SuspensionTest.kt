@@ -2,6 +2,7 @@ package com.moyi.app.admin
 
 import com.moyi.app.admin.AdminConsoleDriver.Companion.code
 import com.moyi.app.admin.ModerationRig.Companion.result
+import com.moyi.bond.api.ReminderRoster
 import com.moyi.common.testing.MutableClock
 import com.moyi.export.api.DataExportJobs
 import com.moyi.gratitude.api.DailyReminders
@@ -69,6 +70,7 @@ class SuspensionTest(
     @Autowired private val clock: MutableClock,
     @Autowired private val jobs: DataExportJobs,
     @Autowired private val reminders: DailyReminders,
+    @Autowired private val roster: ReminderRoster,
     @Autowired dataSource: DataSource,
 ) : AdminEnabledTest() {
     private val jdbc = JdbcTemplate(dataSource)
@@ -136,6 +138,12 @@ class SuspensionTest(
         api("GET", "/bonds/$bond/days", bea.access).status shouldBe 200
         api("POST", "/me/export", bea.access).status shouldBe 202
         api("GET", "/me/export", bea.access).status shouldBe 200
+        // And the export asked for while paused is built, whole: her account, the paused bond, the admin section.
+        val partnerExport = json.readTree(ExportArchives.buildRequested(jobs, jdbc, bea.id))
+        partnerExport["account"]["id"].asString() shouldBe bea.id.toString()
+        partnerExport["bonds"].toList().map { it["bond"]["id"].asString() } shouldContainExactly listOf(bond)
+        partnerExport["bonds"][0]["days"].isArray shouldBe true
+        partnerExport["adminAccess"].isObject shouldBe true
 
         // No reminder for either member of the paused bond at their reminder time; the control couple's comes.
         reminders.remindDue(window.first, window.second)
@@ -198,6 +206,8 @@ class SuspensionTest(
         acts(admin) shouldContainExactly listOf("ADMIN_STEP_UP")
         clock.advance(Duration.ofSeconds(2))
         api("GET", "/me", ada.access).status shouldBe 200
+        // The rolled-back revocation left her sessions as they were: the refresh token still rotates.
+        refresh(ada.refresh).status shouldBe 200
     }
 
     // --- races -------------------------------------------------------------------------------------------------------
@@ -415,13 +425,21 @@ class SuspensionTest(
     private fun comparable(body: String): String = withoutTraceId(body).replace(Regex(""""instance":"[^"]*""""), "\"instance\":\"-\"")
 
     /**
-     * Sets every member's reminder, in each of [bonds], to the first whole minute at least a minute
-     * from now, in `Africa/Abidjan` (UTC all year, a region zone as the API requires), and answers
-     * the window a sweep finds it in.
+     * Sets every member's reminder, in each of [bonds], to a whole minute at least a minute from
+     * now at which **nobody else's** reminder falls, in `Africa/Abidjan` (UTC all year, a region
+     * zone as the API requires), and answers the one-minute window `(at - 1 min, at]` a sweep finds
+     * it in. The database is shared by every test class, and `remindDue` sweeps the whole roster:
+     * a minute no other member is due in means the sweep reminds this test's members and no one
+     * else's, and the roster is asked to prove it before anything is sent.
      */
     private fun reminderWindow(bonds: List<Pair<String, List<Member>>>): Pair<Instant, Instant> {
         val now = clock.instant()
-        val at = now.plus(Duration.ofMinutes(2)).truncatedTo(ChronoUnit.MINUTES)
+        val first = now.plus(Duration.ofMinutes(2)).truncatedTo(ChronoUnit.MINUTES)
+        val at =
+            generateSequence(first) { it.plus(Duration.ofMinutes(1)) }
+                .take(MINUTES_IN_A_DAY)
+                .firstOrNull { roster.remindersDueBetween(it.minus(Duration.ofMinutes(1)), it).isEmpty() }
+                ?: error("every minute of the day has somebody's reminder in it")
         val time = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneOffset.UTC).format(at)
         bonds.forEach { (bond, members) ->
             members.forEach { member ->
@@ -433,7 +451,10 @@ class SuspensionTest(
                 ).status shouldBe 200
             }
         }
-        return now to now.plus(Duration.ofMinutes(3))
+        val window = at.minus(Duration.ofMinutes(1)) to at
+        roster.remindersDueBetween(window.first, window.second).map { it.userId } shouldContainExactlyInAnyOrder
+            bonds.flatMap { (_, members) -> members.map { it.id } }
+        return window
     }
 
     private fun remindedAmong(users: List<UUID>): List<UUID> =
@@ -541,6 +562,7 @@ class SuspensionTest(
         const val ADMIN_PASSWORD = "nineteen silver kettles hum"
         const val STEP_SECONDS = 30L
         const val DEADLINE_SECONDS = 10L
+        const val MINUTES_IN_A_DAY = 1440
         const val SUSPENDED = "Suspended. They are signed out everywhere and cannot sign in. Their bonds are paused."
         const val LIFTED = "Suspension lifted. They can sign in again; their bonds take entries again now."
         val NOTE = "a report names this account ${UUID.randomUUID()}"
