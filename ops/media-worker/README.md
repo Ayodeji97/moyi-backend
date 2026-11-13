@@ -317,6 +317,19 @@ The worker must also reach `rekognition.eu-central-1.amazonaws.com`: put AWS's
 containers). Without it every moderation call is refused, retried as an
 outage, and `media-check.sh` alarms on unmoderated assets after 30 minutes.
 
+Done on 2026-11-13 (ADR-0065), from a Mac, with the `AMAZON` service's
+`eu-central-1` IPv4 ranges (381 that day; the limit is IPv4 only):
+
+```
+curl -s https://ip-ranges.amazonaws.com/ip-ranges.json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(" ".join(sorted({p["ip_prefix"] for p in d["prefixes"] if p["region"]=="eu-central-1" and p["service"]=="AMAZON"})))' > /tmp/aws-ranges.txt
+ssh moyi "umask 077; mkdir -p /etc/moyi-media-worker; printf 'EXTRA_HTTPS_CIDRS=\"%s\"\n' \"\$(cat)\" > /etc/moyi-media-worker/egress.env" < /tmp/aws-ranges.txt
+ssh moyi 'systemctl restart moyi-media-worker-egress && moyi-media-worker-egress check && echo LIMITED-OK'
+```
+
+AWS changes these ranges from time to time. If photos stay "processing" and
+the worker logs Rekognition connection failures, or `media-check.sh` alarms on
+unmoderated assets, run the three lines again.
+
 ## Memory
 
 Measured 2026-10-29 on the image built from this repository (linux/arm64,
