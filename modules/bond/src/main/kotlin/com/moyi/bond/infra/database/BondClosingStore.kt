@@ -6,12 +6,13 @@ import org.springframework.stereotype.Component
 import java.util.UUID
 
 /**
- * The two reads the close job makes of `bond`'s tables (`BondAccess.closingViewOf`,
- * `BondAccess.bondsToSweep`), kept apart from [BondStore] on purpose: neither
- * carries a membership predicate, because the closer is the system settling
- * its own days and has no caller whose membership could be asked about. Every
- * read in [BondStore] but one is scoped to a member; a store of its own makes
- * a request-handling path that reaches for these stand out by its import.
+ * The reads the system's jobs make of `bond`'s tables: the close job's
+ * (`BondAccess.closingViewOf`, `BondAccess.bondsToSweep`) and the reminder
+ * roster's ([findAll], admin console A3). Kept apart from [BondStore] on purpose:
+ * none carries a membership predicate, because a job is the system settling its
+ * own work and has no caller whose membership could be asked about. Every read
+ * in [BondStore] but one is scoped to a member; a store of its own makes a
+ * request-handling path that reaches for these stand out by its import.
  */
 @Component
 internal class BondClosingStore(
@@ -21,6 +22,17 @@ internal class BondClosingStore(
     fun find(bondId: BondId): Bond? {
         val rows = members.findAllByBondId(bondId.value)
         return bonds.findById(bondId.value)?.toDomain(rows)
+    }
+
+    /**
+     * The bonds named by [bondIds], with their member rows: for the reminder roster, which holds
+     * the ids from its own read and asks only these whether they are paused. Three queries however
+     * many come back; an id naming no bond is skipped.
+     */
+    fun findAll(bondIds: Collection<UUID>): List<Bond> {
+        if (bondIds.isEmpty()) return emptyList()
+        val rows = members.findAllByBondIdIn(bondIds).groupBy { it.bondId }
+        return bonds.findAllByIdIn(bondIds).map { it.toDomain(rows[it.getId()].orEmpty()) }
     }
 
     /** Bonds with a second member row, live or left, after [after] in id order. */

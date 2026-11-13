@@ -5,6 +5,7 @@ import com.moyi.bond.api.ReminderRoster
 import com.moyi.bond.domain.BondId
 import com.moyi.bond.domain.ReminderTime
 import com.moyi.bond.infra.database.AnchorIntervalStore
+import com.moyi.bond.infra.database.BondClosingStore
 import com.moyi.bond.infra.database.MemberNotifications
 import com.moyi.bond.infra.database.ReminderCandidate
 import com.moyi.identity.api.AccountStanding
@@ -26,6 +27,8 @@ internal class ReminderRosterAdapter(
     private val members: MemberNotifications,
     private val anchorIntervals: AnchorIntervalStore,
     private val standing: AccountStanding,
+    private val pause: BondPause,
+    private val bonds: BondClosingStore,
 ) : ReminderRoster {
     @Transactional(readOnly = true)
     override fun remindersDueBetween(
@@ -34,16 +37,21 @@ internal class ReminderRosterAdapter(
     ): List<DueReminder> = dueBetween(unpaused(members.reminderCandidates()), ReminderCandidate::reminderTimeLocal, after, upTo)
 
     /**
-     * Of [candidates], those in a bond that is not paused (A3). The candidates are every active
-     * member of every open bond, so a bond is paused when any candidate's user is suspended, and
-     * a paused bond's members get no reminder: they cannot write. **Only the reminder asks this.**
-     * [dueBetween] is shared with the on-this-day push, which the pause does not stop.
+     * Of [candidates], those in a bond that is not paused (A3): a paused bond's members get no
+     * reminder, because they cannot write. **Only the reminder asks this.** [dueBetween] is
+     * shared with the on-this-day push, which the pause does not stop.
+     *
+     * Whether a bond is paused is [BondPause]'s answer, the one rule ([com.moyi.bond.domain.Bond.isPausedFor]),
+     * never restated here. This only narrows which bonds are asked: a bond none of whose
+     * candidates is suspended cannot be paused, so on a run with no suspended member (the usual
+     * one) no bond is loaded, and otherwise only the few bonds a suspended member is in.
      */
     private fun unpaused(candidates: List<ReminderCandidate>): List<ReminderCandidate> {
         val suspended = standing.suspendedAmong(candidates.map { it.userId }.distinct())
         if (suspended.isEmpty()) return candidates
-        val pausedBonds = candidates.filter { it.userId in suspended }.map { it.bondId }.toSet()
-        return candidates.filter { it.bondId !in pausedBonds }
+        val asked = candidates.filter { it.userId in suspended }.map { it.bondId }.distinct()
+        val paused = pause.pausedAmong(bonds.findAll(asked)).filterValues { it }.keys
+        return candidates.filter { it.bondId !in paused }
     }
 
     /**
