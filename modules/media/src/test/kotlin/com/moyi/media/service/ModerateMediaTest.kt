@@ -14,6 +14,7 @@ import com.moyi.media.domain.ImageFormat
 import com.moyi.media.domain.ModerationCategory
 import com.moyi.media.infra.MediaIntegrationTest
 import com.moyi.media.infra.MediaTestApplication
+import com.moyi.media.infra.moderation.AllowImageModeration
 import com.moyi.media.infra.moderation.AllowVoiceModeration
 import com.moyi.media.infra.moderation.Moderated
 import com.moyi.media.infra.moderation.ModeratorUnavailableException
@@ -448,6 +449,12 @@ internal class ModerateMediaTest(
         voices.eventTypes shouldBe setOf("MediaReady")
         voices.startFrom shouldBe StartFrom.BEGINNING
         ModerateImages(moderation, imageProcessor, moderator, knownImages).startFrom shouldBe StartFrom.BEGINNING
+    }
+
+    /** ADR-0065, amended: photo `allow` moderates here, so the image consumer subscribes too. */
+    @Test
+    fun `with photo allow, the image consumer subscribes`() {
+        ModerateImages(moderation, imageProcessor, AllowImageModeration(), NoKnownImageList()).eventTypes shouldBe setOf("MediaReady")
     }
 
     private fun readyPhoto(bytes: ByteArray): UUID {

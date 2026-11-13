@@ -1,6 +1,6 @@
 # ADR-0065 — Photos moderated by Rekognition in the media worker; voice notes pass unchecked
 
-**Status:** Accepted · **Date:** 2026-11-13 · **Deciders:** Daniel · **Amends:** ADR-0051
+**Status:** Accepted, amended the same day (below) · **Date:** 2026-11-13 · **Deciders:** Daniel · **Amends:** ADR-0051
 (production's providers: photos switched on, voice `allow`), ADR-0049 decision 7 (a voice note
 reaches a partner once it has a `PASSED` verdict: it still does, and the verdict is `allow`'s)
 
@@ -68,3 +68,27 @@ chose to pass both unchecked, for cost, and on hearing the figure chose Rekognit
   moderate.
 - `ProductionStartsWithoutMediaSecretsTest` holds the split: the worker's secrets are the
   database's, the bucket's and Rekognition's; the API's never include Rekognition's.
+
+## Amended 2026-11-13: photos pass unchecked until the AWS account is upgraded
+
+Deployed as `a08c1dd`, every call to Rekognition was refused: `AccessDeniedException`, from a
+service control policy AWS applies to accounts on its new **free plan**. That plan assigns the
+account one region (here Stockholm, `eu-north-1`) and denies the rest; `eu-central-1` needs the
+paid plan. Rekognition has no Stockholm endpoint (`rekognition.eu-north-1.amazonaws.com` does
+not resolve; AWS's endpoint list has none), so no free-plan region can serve decision 1.
+
+The owner chose, for now, not to upgrade: **photos pass unchecked too**, through a photo
+`allow` provider (`MediaModerationProperties.ImageProvider.ALLOW`), the same in kind as the
+voice one: it records `allow` as the moderator, so these verdicts stay distinguishable. The
+media worker names it; everything else of decision 1 stays in place (the worker's key from the
+vault, AWS's `eu-central-1` ranges in its egress limit), so switching on is one line:
+`MOYI_MEDIA_MODERATION_IMAGE_PROVIDER: rekognition` in the worker's env, then a deploy.
+
+- The upgrade screen says it costs nothing, keeps the account's credits ($120 on 2026-11-13),
+  and caps spend at a monthly limit (the owner chose $20). Owed: upgrade, then switch on, before
+  the app is public. Photos passed by `allow` keep their verdict.
+- The photos that waited while Rekognition refused them are passed on this deploy: their
+  deliveries are still being retried, and the next attempt meets `allow`.
+- Nothing stops an image a moderator would hold back, including child sexual abuse material,
+  from reaching a partner until it is reported. Accepted by the owner for two known testers;
+  not for the public.

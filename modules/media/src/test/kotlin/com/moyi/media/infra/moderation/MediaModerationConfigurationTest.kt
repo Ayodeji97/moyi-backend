@@ -82,6 +82,20 @@ internal class MediaModerationConfigurationTest {
             }
     }
 
+    /** ADR-0065, amended: photo `allow` moderates here and passes even what a stand-in would hold back. */
+    @Test
+    fun `photo allow, asked for by name, starts with no credentials and passes every photo`() {
+        runner
+            .withPropertyValues("moyi.media.moderation.image.provider=allow")
+            .run { context ->
+                val image = context.getBean(ImageModerator::class.java)
+                image.shouldBeInstanceOf<AllowImageModeration>()
+                image.moderatesHere shouldBe true
+                image.name shouldBe "allow"
+                image.moderate(solid(Color(220, 20, 20))) shouldBe Moderated.Found(emptyList())
+            }
+    }
+
     @Test
     fun `the stand-ins decide by colour, and find nothing in anything else`() {
         runner

@@ -183,12 +183,13 @@ servers:
         JAVA_TOOL_OPTIONS: >-
           -XX:+ExitOnOutOfMemoryError -XX:+UseSerialGC -Xmx192m -Xss512k
           -XX:MaxMetaspaceSize=160m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=16m
-        # Photos are moderated here, by Rekognition in eu-central-1 (ADR-0051,
-        # ADR-0065). The worker's network must reach it first: AWS's ranges in
-        # /etc/moyi-media-worker/egress.env (ops/media-worker/README.md, "When
-        # Rekognition is switched on"). Photos sent while this was `none` are
-        # moderated on the first deploy (the consumer starts from the beginning).
-        MOYI_MEDIA_MODERATION_IMAGE_PROVIDER: rekognition
+        # Photos pass UNCHECKED for now (ADR-0065, amended 2026-11-13): the AWS
+        # account is on its free plan, which reaches only Stockholm, where
+        # Rekognition does not run. Everything else for Rekognition is in place
+        # (the key below, from the vault; AWS's eu-central-1 ranges in
+        # /etc/moyi-media-worker/egress.env). Once the account is upgraded, set
+        # this to `rekognition` and deploy: photos already passed stay passed.
+        MOYI_MEDIA_MODERATION_IMAGE_PROVIDER: allow
       # An IAM user's key with rekognition:DetectModerationLabels and nothing
       # else (ADR-0051). Only this role holds it: the API never moderates.
       secret:

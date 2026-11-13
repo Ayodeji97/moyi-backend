@@ -144,6 +144,21 @@ internal class NoVoiceModeration : VoiceModerator {
 }
 
 /**
+ * Every photo passes, unchecked (`provider: allow`): the owner's ruling of
+ * 2026-11-13 (ADR-0065, amended), for cost, while the AWS account is on its
+ * free plan. It moderates here, so `media.moderate-image` subscribes and is
+ * handed every photo made before (`StartFrom.BEGINNING`); each gets a `PASSED`
+ * verdict whose record names `allow`, so a photo passed this way can always be
+ * told from one Rekognition looked at.
+ */
+internal class AllowImageModeration : ImageModerator {
+    override val moderatesHere: Boolean = true
+    override val name: String = "allow"
+
+    override fun moderate(jpeg: ByteArray): Moderated = Moderated.Found(emptyList())
+}
+
+/**
  * Every voice note passes, unchecked (`provider: allow`): the owner's ruling of
  * 2026-11-13 (ADR-0065). No vendor moderates audio (ADR-0051 decision 5). It
  * moderates here, so `media.moderate-voice` subscribes and is handed every voice

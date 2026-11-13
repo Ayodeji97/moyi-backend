@@ -12,15 +12,17 @@ import java.time.Duration
  * (ADR-0017 decision 3, ADR-0047): **photos default to the real moderator,
  * Rekognition, which refuses to start without its credentials**, and
  * production's `config/deploy.yml` gives the media worker, which moderates,
- * its key, and names `none` for the API, which moderates nothing. `none` fails closed: nothing gets a verdict, so nothing
+ * its key (named `allow` for now, ADR-0065), and names `none` for the API,
+ * which moderates nothing. `none` fails closed: nothing gets a verdict, so nothing
  * reaches a partner. It never passes anything.
  *
  * The known-image list and voice moderation default to `none` because no
  * vendor is wired for either yet (ADR-0051 decisions 3 and 5): each needs a
  * decision of the owner's first. `stand-in` (all three) decides by colour, for
- * the `local` profile and the smoke run only. `allow` (voice notes only)
- * passes every voice note unchecked: the owner's ruling of 2026-11-13
- * (ADR-0065), which production names.
+ * the `local` profile and the smoke run only. `allow` passes every photo or
+ * voice note unchecked: the owner's ruling of 2026-11-13 (ADR-0065, amended),
+ * which production's media worker names for both until photos go to
+ * Rekognition.
  */
 @Validated
 @ConfigurationProperties(prefix = "moyi.media.moderation")
@@ -52,6 +54,14 @@ internal data class MediaModerationProperties(
 
         /** Decides by colour: `local` and the smoke run only, never production. */
         STAND_IN,
+
+        /**
+         * Passes every photo unchecked, so a partner sees it once it is ready:
+         * the owner's ruling of 2026-11-13 (ADR-0065, amended), for cost, while
+         * the AWS account stays on its free plan, which reaches no region where
+         * Rekognition runs. Back to [REKOGNITION] once the account is upgraded.
+         */
+        ALLOW,
     }
 
     internal enum class KnownImageProvider {
