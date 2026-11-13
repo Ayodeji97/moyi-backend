@@ -23,7 +23,8 @@ internal fun documentPrompts(api: OpenAPI) {
         ?.description =
         "The bond's prompt of the day: the same prompt for both members, each in their own language. Null when the " +
         "bond takes no writes from the caller (it has ended, is counting down to deletion, or the caller has left), " +
-        "and when the library holds nothing for this bond. Optional to answer; dismissing it is the client's alone."
+        "while it is paused (`paused` is true), and when the library holds nothing for this bond. " +
+        "Optional to answer; dismissing it is the client's alone."
     api.components.schemas[OpenApiConfiguration.SUBMIT_ENTRY_REQUEST]
         ?.properties
         ?.get(PROMPT_ID_PROPERTY)
