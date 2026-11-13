@@ -73,6 +73,8 @@ internal data class TodayResponse(
     /** Doc 06 §3.4. About the bond, never about either member: see [StreakResponse]. */
     val streak: TodayStreakResponse,
     val prompt: TodayPromptResponse?,
+    /** The bond takes no new entries, edits or reactions; `prompt` is `null` while this is true. It says nothing of why. */
+    val paused: Boolean,
 ) {
     companion object {
         fun from(view: TodayView): TodayResponse =
@@ -95,6 +97,7 @@ internal data class TodayResponse(
                     },
                 streak = TodayStreakResponse.from(view.streak),
                 prompt = view.prompt?.let(TodayPromptResponse::from),
+                paused = view.paused,
             )
     }
 }

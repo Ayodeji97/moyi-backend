@@ -119,6 +119,9 @@ internal class ReactToEntry(
                         // Both the bond's state and the caller's leaving, as on every write (`BondArchivedException` has why).
                         !membership.takesWrites -> BondArchivedException()
 
+                        // Right after the ended-bond answer, before the statement: nothing is written in a paused bond.
+                        membership.paused -> BondPausedException()
+
                         // The statement is the second line: nothing written means the entry was erased since the gate answered.
                         reactions.set(entryId, membership.memberId, type) -> null
 

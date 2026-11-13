@@ -175,6 +175,8 @@ class OpenApiConfiguration {
             documentRevalidation(api)
             documentFavourites(api)
             documentReactions(api)
+            // After `documentReactions`: it sets `reactToEntry`'s description and this adds to it.
+            documentPausedWrites(api)
             documentEntryImage(api)
             documentPrompts(api)
             documentSearch(api)
@@ -698,6 +700,29 @@ private fun documentPausedBond(api: OpenAPI) {
         .filter { it.operationId == GET_BOND_OPERATION }
         .forEach { it.description = PAUSED_DESCRIPTION }
 }
+
+/**
+ * Admin A3 (spec §9): the three writes a paused bond refuses say so, and `today` says what `paused` is.
+ * Appended, since two of them already carry a description. None names a cause.
+ */
+private fun documentPausedWrites(api: OpenAPI) {
+    api.paths.values.flatMap { it.readOperations() }.forEach { operation ->
+        val added =
+            when (operation.operationId) {
+                "submitEntry", "patchEntry", "reactToEntry" -> PAUSED_WRITE_DESCRIPTION
+                "today" -> PAUSED_TODAY_DESCRIPTION
+                else -> null
+            }
+        if (added != null) operation.description = listOfNotNull(operation.description, added).joinToString(" ")
+    }
+}
+
+private const val PAUSED_WRITE_DESCRIPTION =
+    "`409 BOND_PAUSED` while the bond is paused: nothing is written, and the same request succeeds once it resumes."
+
+private const val PAUSED_TODAY_DESCRIPTION =
+    "`paused` is true while the bond takes no new entries, edits or reactions; `prompt` is null while it is true. " +
+        "It says nothing of why."
 
 private const val GET_BOND_OPERATION = "getBond"
 
