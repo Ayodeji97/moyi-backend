@@ -138,6 +138,10 @@ internal class SecondFactor(
  * on ([back], where its POST returns), where it posts,
  * the hidden fields it carries (the reason the page showed, the takedown), the note as typed, and
  * whether it asks for a code. [toString] leaves the note out.
+ *
+ * [wording] is how the note and the code are named on the form: A2's decisions post a `note` and
+ * ask for a code because the act cannot be undone; A3's suspension posts a `justification` and asks
+ * for a new code every time.
  */
 @Suppress("LongParameterList") // A form's parts, each shown by the fragment.
 internal class DecisionForm(
@@ -152,6 +156,7 @@ internal class DecisionForm(
     val note: String = "",
     val error: String? = null,
     val warning: String? = null,
+    val wording: Wording = Wording.DECISION,
 ) {
     val noteHint: String = NOTE_HINT
 
@@ -160,7 +165,17 @@ internal class DecisionForm(
         note: String,
         askCode: Boolean,
         error: String?,
-    ): DecisionForm = DecisionForm(id, back, action, label, hidden, reasons, gated, askCode, note, error, warning)
+    ): DecisionForm = DecisionForm(id, back, action, label, hidden, reasons, gated, askCode, note, error, warning, wording)
+
+    /** The note's field name and label, and the code field's hint. */
+    enum class Wording(
+        val noteField: String,
+        val noteLabel: String,
+        val codeHint: String,
+    ) {
+        DECISION("note", "Note", "This cannot be undone, so it needs a code proven in the last five minutes."),
+        SUSPENSION("justification", "Justification", "Each suspension, and each lift, needs a new code."),
+    }
 
     override fun toString(): String = "DecisionForm($action)"
 

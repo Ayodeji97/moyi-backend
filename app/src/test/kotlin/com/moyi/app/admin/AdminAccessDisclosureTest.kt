@@ -246,9 +246,11 @@ class AdminAccessDisclosureTest(
         seed("ACCOUNT_SUSPENDED", "USER", ada, """{"reportDriven": false}""")
         val after = ExportArchives.build(jobs, jdbc, clock, ada)
 
+        // Ada's alone: other classes in this JVM (SuspensionTest) write real suspension rows to the shared database.
         jdbc.queryForObject(
-            "SELECT count(*) FROM audit_log WHERE action IN ('ACCOUNT_SUSPENDED', 'ACCOUNT_UNSUSPENDED')",
+            "SELECT count(*) FROM audit_log WHERE action IN ('ACCOUNT_SUSPENDED', 'ACCOUNT_UNSUSPENDED') AND target_id = ?",
             Int::class.java,
+            ada.toString(),
         ) shouldBe 5
         json.readTree(after)["adminAccess"]["accesses"].toList().map { it["action"].asString() } shouldContainExactly
             listOf("ACCOUNT_LOOKED_UP")
