@@ -71,6 +71,11 @@ class ArchitectureTest {
                     "HeldMedia",
                     "ReportLogLine",
                     "ReasonsReview",
+                    // A5: the one door to a reported entry's words (A5 spec §6).
+                    "ReportedEntryText",
+                    "ReportedEntryRead",
+                    "ReportedWords",
+                    "WordsRefusal",
                 ).map { "com.moyi.gratitude.api.$it" }
 
         /** The `api` packages A2's console reaches for its two queues, and for nothing else. */
@@ -215,6 +220,9 @@ class ArchitectureTest {
                 "EmbedPendingEntries.kt",
                 "EraseDeletedAccount.kt",
                 "ExpireWithdrawnExports.kt",
+                // A5: an ADMIN reading a reported entry is no member of its bond, and must not take
+                // the bond's lock (A5 spec §6); it reads the withdrawn authors from the unlocked view.
+                "ReportedEntryTextStore.kt",
             )
 
         /**
@@ -479,7 +487,8 @@ class ArchitectureTest {
         assertTrue(
             violations.isEmpty(),
             "Only the close job, the withdrawal's consumer, the reminder sweep, the day's push consumer, the on-this-day " +
-                "sweep, the embedding sweep, the account deletion's erasure and the export's withdrawal consumer may call " +
+                "sweep, the embedding sweep, the account deletion's erasure, the export's withdrawal consumer and the " +
+                "console's read of a reported entry may call " +
                 "bond's unguarded reads. Found in: $violations",
         )
     }
@@ -587,6 +596,35 @@ class ArchitectureTest {
             violations.isEmpty(),
             "modules/admin may import from gratitude.api and media.api only the moderation ports and their types " +
                 "(A2 spec §7.1). Found: $violations",
+        )
+    }
+
+    @Test
+    fun `within the admin module only ContentAccess imports the port to an entry's words`() {
+        // A5 spec §6: `ReportedEntryText` reads an entry's words; inside `admin` one class may
+        // hold it, the service that checks the role, the justification and the second factor
+        // and writes the audit row. A controller or a second service that held the port could
+        // read the words past all three. A wildcard import of gratitude's api is already refused
+        // by the rule above, so the exact import is what this sees.
+        val port = "com.moyi.gratitude.api.ReportedEntryText"
+        val allowed = "/modules/admin/src/main/kotlin/com/moyi/admin/service/ContentAccess.kt"
+
+        fun importsPort(importName: String): Boolean = importName == port || importName.startsWith("$port.")
+        // Positive controls: the matcher is not vacuous, and does not catch the port's result types.
+        assertTrue(importsPort(port), "the port's import was not matched")
+        assertTrue(!importsPort("com.moyi.gratitude.api.ReportedEntryRead"), "the port's result type was matched")
+        assertTrue(!importsPort("com.moyi.gratitude.api.ReportedEntryTextual"), "a name sharing the prefix was matched")
+        val adminFiles = project.files.filter { it.normalisedProjectPath.startsWith("/modules/admin/") }
+        assertTrue(adminFiles.isNotEmpty(), "the scope saw no admin files")
+        val violations =
+            adminFiles
+                .filter { it.normalisedProjectPath != allowed }
+                .filter { file -> file.imports.any { importsPort(it.name) } }
+                .map { it.normalisedProjectPath }
+
+        assertTrue(
+            violations.isEmpty(),
+            "Within modules/admin only service/ContentAccess.kt may import ReportedEntryText (A5 spec §6). Found: $violations",
         )
     }
 

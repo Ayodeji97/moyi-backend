@@ -166,6 +166,14 @@ the text read is the text reported, unless its author erased it (`ERASED`).
   private `ReportModerationStore.gate` (hard-coded `FOR UPDATE`), given a lock-mode parameter or a
   `FOR SHARE` sibling; §4's rule is a function in
   `gratitude.domain` (one place).
+  **Locks: the report `FOR SHARE`, then the entry `FOR SHARE`, and no bond lock** *(added while
+  building, plan Task 1)*. The withdrawn authors are read through `BondAccess.closingViewOf`,
+  which takes no lock, after the entry's lock. The reason is a deadlock: the reporter's own
+  account erasure (`EraseDeletedAccount`) takes the bond's lock and then `UPDATE entry_reports SET
+  detail = NULL` on the same report, so a read that held the report's share lock and then waited
+  for the bond would close a cycle with it. Read after the entry's lock, the view sees any
+  withdrawal committed before that statement, as `Reader` reads it after the entry is loaded.
+  `ReportedEntryTextRaceTest` holds both orders, including the one that would deadlock.
 - **`admin.service`**: `ContentAccess.readReportedEntry(…)`, `@PreAuthorize("hasRole('ADMIN')")`,
   `@Transactional`; it validates, takes the step-up the controller already proved (it never
   steps up itself, so the proof's own transaction is not joined to the read's), calls the port,

@@ -49,6 +49,36 @@ internal enum class ReportReason(
     }
 }
 
+/** Whether a report's entry may be read by an `ADMIN` ([wordsReadable]), or why not. */
+internal enum class WordsReadable { YES, NOT_OPEN, MEMBER_REPORT, IMAGE_REASON }
+
+/**
+ * A5 spec §4, written once: **a report's entry may be read when the report is `OPEN`, its
+ * target is `ENTRY`, and its reason is about words** (`HARASSMENT`, `VIOLENCE_OR_SELF_HARM`,
+ * `OTHER`). Asked by the read and by the page that offers it, so the two cannot differ.
+ *
+ * - Not `OPEN`: decided, so there is nothing left to decide from the words.
+ * - A `MEMBER` report names no entry: there is nothing to read.
+ * - The image reasons are exactly those whose media is never looked at
+ *   ([ReportReason.mediaReviewable] false: `NON_CONSENSUAL`, `MINOR_SEXUAL_CONTENT`), and the
+ *   same caution keeps the words of such a report closed until it is reclassified (runbook
+ *   §2: "do not view"). `WordsReadableTest` names every reason's answer, so a reason added
+ *   later fails it until it is classified here.
+ *
+ * [target] and [status] are the columns' own names (`ENTRY`, `MEMBER`; `OPEN`, `DISMISSED`,
+ * `UPHELD`), as V39 and V48 hold them.
+ */
+internal fun ReportReason.wordsReadable(
+    target: String,
+    status: String,
+): WordsReadable =
+    when {
+        status != "OPEN" -> WordsReadable.NOT_OPEN
+        target != "ENTRY" -> WordsReadable.MEMBER_REPORT
+        !mediaReviewable -> WordsReadable.IMAGE_REASON
+        else -> WordsReadable.YES
+    }
+
 /**
  * The reporter's own words to the person who reviews the report: optional, at
  * most [MAX_CHARACTERS] code points, not blank, no NUL (Postgres refuses one
