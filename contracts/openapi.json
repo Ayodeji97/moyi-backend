@@ -1191,6 +1191,7 @@
     },
     "/api/v1/bonds/{bondId}" : {
       "get" : {
+        "description" : "`paused` is true while the bond takes no new entries, edits or reactions; everything in it can still be read. It says nothing of why.",
         "operationId" : "getBond",
         "parameters" : [ {
           "in" : "path",
@@ -6335,6 +6336,9 @@
           "name" : {
             "type" : "string"
           },
+          "paused" : {
+            "type" : "boolean"
+          },
           "pendingDeletionRequest" : {
             "oneOf" : [ {
               "$ref" : "#/components/schemas/PendingDeletionRequestResponse"
@@ -6381,7 +6385,7 @@
             "enum" : [ "COUPLE", "FRIENDS", "FAMILY", "PARENT_CHILD" ]
           }
         },
-        "required" : [ "anchorTimezone", "archivedAt", "createdAt", "deletionScheduledFor", "id", "invite", "maxMembers", "me", "members", "name", "pendingDeletionRequest", "pendingSemanticSearchRequest", "pendingTimezoneChange", "revealTimeLocal", "semanticSearchEnabled", "status", "strictMode", "timezoneChangeAllowedFrom", "type" ]
+        "required" : [ "anchorTimezone", "archivedAt", "createdAt", "deletionScheduledFor", "id", "invite", "maxMembers", "me", "members", "name", "paused", "pendingDeletionRequest", "pendingSemanticSearchRequest", "pendingTimezoneChange", "revealTimeLocal", "semanticSearchEnabled", "status", "strictMode", "timezoneChangeAllowedFrom", "type" ]
       },
       "BondsResponse" : {
         "type" : "object",

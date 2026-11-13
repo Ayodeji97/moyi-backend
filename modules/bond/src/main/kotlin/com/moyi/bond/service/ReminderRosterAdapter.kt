@@ -7,6 +7,7 @@ import com.moyi.bond.domain.ReminderTime
 import com.moyi.bond.infra.database.AnchorIntervalStore
 import com.moyi.bond.infra.database.MemberNotifications
 import com.moyi.bond.infra.database.ReminderCandidate
+import com.moyi.identity.api.AccountStanding
 import com.moyi.notification.api.PushRecipient
 import com.moyi.notification.api.QuietHoursWindow
 import org.springframework.stereotype.Service
@@ -24,12 +25,26 @@ import java.time.ZoneId
 internal class ReminderRosterAdapter(
     private val members: MemberNotifications,
     private val anchorIntervals: AnchorIntervalStore,
+    private val standing: AccountStanding,
 ) : ReminderRoster {
     @Transactional(readOnly = true)
     override fun remindersDueBetween(
         after: Instant,
         upTo: Instant,
-    ): List<DueReminder> = dueBetween(members.reminderCandidates(), ReminderCandidate::reminderTimeLocal, after, upTo)
+    ): List<DueReminder> = dueBetween(unpaused(members.reminderCandidates()), ReminderCandidate::reminderTimeLocal, after, upTo)
+
+    /**
+     * Of [candidates], those in a bond that is not paused (A3). The candidates are every active
+     * member of every open bond, so a bond is paused when any candidate's user is suspended, and
+     * a paused bond's members get no reminder: they cannot write. **Only the reminder asks this.**
+     * [dueBetween] is shared with the on-this-day push, which the pause does not stop.
+     */
+    private fun unpaused(candidates: List<ReminderCandidate>): List<ReminderCandidate> {
+        val suspended = standing.suspendedAmong(candidates.map { it.userId }.distinct())
+        if (suspended.isEmpty()) return candidates
+        val pausedBonds = candidates.filter { it.userId in suspended }.map { it.bondId }.toSet()
+        return candidates.filter { it.bondId !in pausedBonds }
+    }
 
     /**
      * Each of [candidates] whose [timeOf], in their reminder zone, fell within

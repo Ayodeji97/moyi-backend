@@ -47,7 +47,7 @@ import com.moyi.bond.domain.BondType as DomainBondType
  */
 @Service
 @Suppress(
-    "LongParameterList", // Seven collaborators, each one store or port the facts above are read from; nothing to bundle them into.
+    "LongParameterList", // Nine collaborators, each one store or port the facts above are read from; nothing to bundle them into.
     "TooManyFunctions", // One override per BondAccess method; the member report (ADR-0053 decision 14) added the twelfth.
 )
 internal class BondAccessAdapter(
@@ -59,6 +59,7 @@ internal class BondAccessAdapter(
     private val withdrawals: EntryWithdrawals,
     private val memberships: MembershipRows,
     private val users: UserDirectory,
+    private val pause: BondPause,
 ) : BondAccess {
     @Transactional(readOnly = true)
     override fun membershipOf(
@@ -196,6 +197,8 @@ internal class BondAccessAdapter(
             withdrawnMemberIds = withdrawals.membersOf(membership.bondId),
             type = bond.type.toApi(),
             semanticSearchEnabled = bond.semanticSearchEnabled,
+            // Under `lockMembershipOf` this is read after the bond lock; identity's port takes none.
+            paused = pause.isPaused(bond),
         )
 
     /**

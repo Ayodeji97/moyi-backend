@@ -167,6 +167,7 @@ class OpenApiConfiguration {
             documentMediaRemoval(api)
             documentEndingDefaults(api)
             documentBondNamePattern(api)
+            documentPausedBond(api)
             documentDisplayName(api)
             documentEmailCodes(api)
             documentResetCodeCheck(api)
@@ -685,6 +686,24 @@ private fun documentBondNamePattern(api: OpenAPI) {
             ?.get(BOND_NAME_PROPERTY) ?: return
     name.pattern = NOT_ONLY_SPACE_DOCUMENTED_PATTERN
 }
+
+/**
+ * Says what `paused` means on `getBond` (admin console A3). The flag is on the one bond shape
+ * every route returns, so the sentence is said once, on the route a client reads a bond by.
+ * It names no cause, as the field does not.
+ */
+private fun documentPausedBond(api: OpenAPI) {
+    api.paths.values
+        .flatMap { it.readOperations() }
+        .filter { it.operationId == GET_BOND_OPERATION }
+        .forEach { it.description = PAUSED_DESCRIPTION }
+}
+
+private const val GET_BOND_OPERATION = "getBond"
+
+private const val PAUSED_DESCRIPTION =
+    "`paused` is true while the bond takes no new entries, edits or reactions; everything in it can still be read. " +
+        "It says nothing of why."
 
 /**
  * Says, on each of the two routes that end a bond, what an absent

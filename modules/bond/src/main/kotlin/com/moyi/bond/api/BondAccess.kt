@@ -295,6 +295,15 @@ class BondMembership internal constructor(
      * vector is read and none is written.
      */
     val semanticSearchEnabled: Boolean,
+    /**
+     * True while the bond is open and a member who has not left is suspended (A3): the bond
+     * takes no new entry, edit or reaction, and everything in it can still be read. **Checked
+     * after [takesWrites], never folded into it** (spec §14 question 2): an ended bond answers
+     * `BOND_ARCHIVED` whatever its members' standing, and `BOND_PAUSED` is the answer only for
+     * a bond that would otherwise take the write. Names no cause, no date and no member: it is
+     * the same fact for both members, read after the bond lock under [BondAccess.lockMembershipOf].
+     */
+    val paused: Boolean,
 ) {
     /**
      * Whether this member's writes are taken: the bond is open (`PENDING_MEMBER` or `ACTIVE`)
@@ -394,17 +403,38 @@ class BondClosingView internal constructor(
      */
     fun wasPausedAt(instant: Instant): Boolean = past.pausedAt(instant)
 
+    /**
+     * Whether any member of this bond, **one who has since left included**, was suspended at any
+     * point of `[startsAt, endsAt)`: some span with `from < endsAt` and (`to` is open or
+     * `startsAt < to`). What the close job asks of a day, with the day's own bounds; a day that
+     * overlaps a suspension is `SUSPENDED`, not missed (A3 spec §7). Half open on both ends: a
+     * span ending exactly as the day starts, or starting exactly as it ends, does not touch it.
+     */
+    fun wasSuspendedDuring(
+        startsAt: Instant,
+        endsAt: Instant,
+    ): Boolean = past.suspendedDuring(startsAt, endsAt)
+
+    /**
+     * Whether any member of this bond, one who has since left included, was suspended at
+     * [instant]: some span with `from <= instant` and (`to` open or `instant < to`). The span's
+     * start is in it and its end is not, as an entry's `createdAt` is judged.
+     */
+    fun wasSuspendedAt(instant: Instant): Boolean = past.suspendedAt(instant)
+
     override fun toString(): String = "BondClosingView(bondId=$bondId)"
 }
 
 /**
- * The two questions [BondClosingView] answers about a bond's past, as the
+ * The questions [BondClosingView] answers about a bond's past, as the
  * functions that answer them. Built inside this module from its own records;
  * the view shows a caller the questions and not the records.
  */
 internal class BondPast(
     val strictModeBefore: (Instant) -> Boolean,
     val pausedAt: (Instant) -> Boolean,
+    val suspendedDuring: (Instant, Instant) -> Boolean,
+    val suspendedAt: (Instant) -> Boolean,
 )
 
 /**

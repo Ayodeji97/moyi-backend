@@ -48,10 +48,11 @@ internal class ResolveInvite(
     private val blocks: BlockStore,
     private val users: UserDirectory,
     private val clock: Clock,
+    private val pause: BondPause,
 ) {
     /** @throws InviteNotUsableException for every way the code might not work (FR-024) */
     @Transactional(readOnly = true)
-    // Four guard clauses, all throwing the *same* exception on purpose:
+    // Five guard clauses, all throwing the *same* exception on purpose:
     // that is FR-024's one answer, and the rule counts statements rather than
     // outcomes.
     @Suppress("ThrowsCount")
@@ -63,6 +64,9 @@ internal class ResolveInvite(
         val invite = invites.findLiveByCode(code, now) ?: throw InviteNotUsableException()
         val bond = bonds.findAnyForInvite(invite.bondId) ?: throw InviteNotUsableException()
         if (!bond.hasRoom) throw InviteNotUsableException()
+        // A paused bond takes no new member (A3): one answer with a revoked code, or the refusal
+        // would tell a stranger that the creator is suspended. Their standing is theirs to say.
+        if (pause.isPaused(bond)) throw InviteNotUsableException()
         if (blocks.existsBetween(caller, bond.everyMemberUserId())) throw InviteNotUsableException()
 
         val inviter = bond.members.firstOrNull { it.id == invite.createdByMemberId }

@@ -38,6 +38,7 @@ internal class BondViews(
     private val proposals: ProposalStore,
     private val links: InviteLinks,
     private val clock: Clock,
+    private val pause: BondPause,
 ) {
     fun of(
         bond: Bond,
@@ -56,6 +57,8 @@ internal class BondViews(
         // the same reason: `GET /bonds` returns up to three, and a query per
         // bond would be an N+1 nobody would notice until there were more.
         val pending = this.proposals.findAllLiveOf(bonds.map { it.id }, now)
+        // One `suspendedAmong` for every bond's members, like the queries above and for their reason.
+        val paused = pause.pausedAmong(bonds)
         return bonds.map { bond ->
             BondView(
                 bond = bond,
@@ -68,6 +71,7 @@ internal class BondViews(
                 invite = live[bond.id]?.let { InviteView(it, links.linkFor(it.code)) },
                 proposals = pending[bond.id].orEmpty(),
                 timezoneChangeAllowedFrom = bond.timezoneChangeAllowedFrom(now),
+                paused = paused.getValue(bond.id.value),
             )
         }
     }
@@ -111,6 +115,12 @@ internal data class BondView(
      * write, which is why `entityTag` digests it.
      */
     val timezoneChangeAllowedFrom: LocalDate? = null,
+    /**
+     * A3: the bond is paused ([Bond.isPausedFor]). Like [timezoneChangeAllowedFrom] it changes
+     * with no write to this bond's row, so `entityTag` digests it: without that a client holding
+     * the old tag is answered `304` and never learns the bond paused, or resumed.
+     */
+    val paused: Boolean = false,
 ) {
     val timezoneChange: Proposal? get() = proposals.firstOrNull { it.kind == ProposalKind.TIMEZONE_CHANGE }
 
