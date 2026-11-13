@@ -76,7 +76,7 @@ internal class SuspendedMemberTest(
         wrongPassword.status shouldBe 401
         val failuresBefore = failedAttempts(ada)
 
-        transactions.execute { suspension.suspend(ada) }!!.outcome shouldBe SuspensionOutcome.SUSPENDED
+        transactions.execute { suspension.suspend(ada) }.outcome shouldBe SuspensionOutcome.SUSPENDED
         clock.advance(Duration.ofSeconds(1))
 
         val me = get("/api/v1/me", access)
@@ -104,11 +104,11 @@ internal class SuspendedMemberTest(
         before.status shouldBe 200
         val oldRefresh = refreshToken(before.contentAsString)
         val oldAccess = accessToken(before.contentAsString)
-        transactions.execute { suspension.suspend(ada) }!!.outcome shouldBe SuspensionOutcome.SUSPENDED
+        transactions.execute { suspension.suspend(ada) }.outcome shouldBe SuspensionOutcome.SUSPENDED
         clock.advance(Duration.ofSeconds(1))
         forgot(email).status shouldBe 202
 
-        transactions.execute { suspension.lift(ada) }!!.outcome shouldBe SuspensionOutcome.LIFTED
+        transactions.execute { suspension.lift(ada) }.outcome shouldBe SuspensionOutcome.LIFTED
         clock.advance(Duration.ofSeconds(1))
 
         val after = login(email, PASSWORD)

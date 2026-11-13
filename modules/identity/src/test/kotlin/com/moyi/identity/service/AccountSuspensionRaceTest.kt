@@ -114,7 +114,7 @@ internal class AccountSuspensionRaceTest(
     @Test
     fun `a suspension that waits on a lift sees it, and suspends again`() {
         val ada = signUp()
-        transactions.execute { suspension.suspend(ada) }!!.outcome shouldBe SuspensionOutcome.SUSPENDED
+        transactions.execute { suspension.suspend(ada) }.outcome shouldBe SuspensionOutcome.SUSPENDED
         clock.advance(Duration.ofSeconds(1))
 
         val first = holding { suspension.lift(ada) }

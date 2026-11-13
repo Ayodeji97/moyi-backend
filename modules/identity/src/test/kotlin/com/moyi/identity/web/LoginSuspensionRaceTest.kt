@@ -107,7 +107,7 @@ internal class LoginSuspensionRaceTest(
         val signIn = pool.submit<MockHttpServletResponse> { login(email) }
         stopped.awaitReached()
         // The password was judged right against an ACTIVE account; the account is then suspended.
-        transactions.execute { suspension.suspend(ada) }!!.outcome shouldBe SuspensionOutcome.SUSPENDED
+        transactions.execute { suspension.suspend(ada) }.outcome shouldBe SuspensionOutcome.SUSPENDED
         stopped.release()
 
         signIn.get(WAIT.seconds, TimeUnit.SECONDS).status shouldBe 401
