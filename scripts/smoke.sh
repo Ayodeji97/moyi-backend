@@ -4056,6 +4056,12 @@ else
   adm_code "$ADM_DIR/refused" "$ADM/login" -H 'X-Forwarded-For: 203.0.113.9'
   if printf '%s\n' "$ADM_HEADERS" | grep -qi '^set-cookie:'; then fail "admin: a refused address is given no session" "a cookie was set"; else pass "admin: a refused address is given no session"; fi
 
+  # A5: the read of a reported entry's words is no more reachable from a refused address than any other path.
+  expect "admin: POST an unknown path from a refused address gets the API's 401" 401 '"status":401' -- -X POST "$ADM/reports/00000000-0000-7000-8000-000000000000/no-such-path" -H 'X-Forwarded-For: 203.0.113.9'
+  ADM_UNKNOWN_POST="$(no_instance)"
+  expect "admin: POST …/entry-text from a refused address gets the API's 401 too" 401 '"status":401' -- -X POST "$ADM/reports/00000000-0000-7000-8000-000000000000/entry-text" -H 'X-Forwarded-For: 203.0.113.9'
+  is "admin: …byte for byte what an unknown path answers (but its instance)" "$(no_instance)" "$ADM_UNKNOWN_POST"
+
   AD_EMAIL="admin-smoke-$RANDOM$RANDOM@example.com"
   AD_PASSWORD="smoke admin passphrase $RANDOM-$RANDOM-x7Q"
   AD_TOKEN="$(sql "SELECT admin_invite('$AD_EMAIL', 'SUPPORT')")"

@@ -10,10 +10,10 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-ACTORS = ("you", "partner", "system")
+ACTORS = ("you", "partner", "system", "admin")
 OUTCOMES = ("ok", "refused", "unreachable")
 EVIDENCE = ("smoke", "test", "hand", "never-run")
-ROW_FILES = ("day.json", "bond.json", "account.json", "media.json")
+ROW_FILES = ("day.json", "bond.json", "account.json", "media.json", "admin.json")
 ROW_KEYS = (
     "id", "region", "from", "action", "actor", "when", "guards", "outcome",
     "to", "status", "code", "reason", "rule", "evidence", "evidenceRef", "codeRef",

@@ -162,8 +162,8 @@ def machine_md(model: Model, machine_id: str) -> str:
         f"# The {machine['label'].lower()} machine",
         f"Describes `main @ {model.stamp}`. How to read this: [README](README.md).",
         *([ENDPOINTS_LINK] if model.endpoints else []),
-        "Each region below has its own diagram. Each arrow says who acts: you, your partner or the "
-        "system. Refusals are not drawn; they are in the tables. Grey means designed or only partly "
+        "Each region below has its own diagram. Each arrow says who acts: you, your partner, the "
+        "system or an admin. Refusals are not drawn; they are in the tables. Grey means designed or only partly "
         "built, and no endpoint reaches it.",
     ]
     for region in machine["regions"]:
@@ -266,7 +266,7 @@ def sequence_diagram(model: Model, journey: dict) -> str:
             groups.append([rows[step["row"]]])
     for group in groups:
         row = group[0]
-        who = {"you": "You", "partner": "Partner", "system": "Job"}[row["actor"]]
+        who = {"you": "You", "partner": "Partner", "system": "Job", "admin": "Job"}[row["actor"]]
         lines.append(f"    {who}->>API: {clean(told(model, row))}")
         regions = ", ".join(f"{r['region']} is {r['to']}" for r in group)
         if row["outcome"] == "refused":

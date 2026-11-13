@@ -6,7 +6,7 @@ Describes `main @ 5839d47`. How to read this: [README](README.md).
 
 Every answer of every endpoint, with its cause and how to try it: [endpoints](endpoints.md)
 
-Each region below has its own diagram. Each arrow says who acts: you, your partner or the system. Refusals are not drawn; they are in the tables. Grey means designed or only partly built, and no endpoint reaches it.
+Each region below has its own diagram. Each arrow says who acts: you, your partner, the system or an admin. Refusals are not drawn; they are in the tables. Grey means designed or only partly built, and no endpoint reaches it.
 
 ## The day
 
