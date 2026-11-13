@@ -33,6 +33,11 @@ internal class MediaModerationConfiguration {
                 log.warn("Photo moderation: STAND-IN, deciding by colour. Never in production (ADR-0051).")
                 StandInImageModerator()
             }
+
+            MediaModerationProperties.ImageProvider.ALLOW -> {
+                log.warn("Photo moderation: ALLOW. Every photo passes unchecked (ADR-0065); Rekognition once the AWS account is upgraded.")
+                AllowImageModeration()
+            }
         }
 
     @Bean

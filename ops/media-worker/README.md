@@ -29,9 +29,11 @@ upload intent, signs the PUT straight to R2's `moyi-media`, and on the
 completion publishes `MediaUploaded`; the worker claims it, reads the upload
 from `in/`, writes what it makes of it under `v/` (a photo's two WebP variants,
 a voice note's Ogg Opus) and deletes the upload. Since ADR-0065 (the owner's
-ruling of 2026-11-13) the worker moderates photos with Rekognition, whose key
-only it holds, and passes voice notes unchecked (`allow`): the partner sees a
-photo once Rekognition has passed it, and hears a voice note once it is ready.
+ruling of 2026-11-13) the worker passes photos and voice notes unchecked
+(`allow`): the partner sees each once it is ready. Rekognition is wired for
+photos (its key only the worker holds, AWS's ranges in the egress limit) and is
+switched on by one line in `config/deploy.yml` once the AWS account leaves its
+free plan, which reaches no region where Rekognition runs (ADR-0065, amended).
 Before that, under `none` (ADR-0051), the moderation consumers subscribed to
 nothing and no partner was shown anything.
 
@@ -157,7 +159,7 @@ ssh moyi 'systemctl enable --now moyi-media-check.timer && systemctl start moyi-
 ```
 
 which should end `moyi-media-check: ok (…)`. With a moderator running
-(Rekognition and voice `allow` since ADR-0065), set `MEDIA_MODERATION_ON=1`
+(`allow` for photos and voice notes since ADR-0065, or Rekognition), set `MEDIA_MODERATION_ON=1`
 (ops/monitoring/README.md), so media left without a verdict raises the alarm.
 Leave it unset only while moderation is `none`.
 
@@ -273,7 +275,7 @@ while any of these holds** (ADR-0050 and ADR-0052, Owed):
 - **The known-image list is `none`** (ADR-0051 decision 3): uploads are stored
   without being matched against any list of known abuse material.
 - **Voice notes are `allow`** (ADR-0065): every voice note reaches the partner
-  unchecked, until it is reported. Photos are moderated by Rekognition.
+  unchecked, until it is reported. So, for now, are photos (ADR-0065, amended).
 
 ### To switch off again
 

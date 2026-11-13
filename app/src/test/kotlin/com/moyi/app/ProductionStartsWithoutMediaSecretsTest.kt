@@ -208,11 +208,12 @@ internal class ProductionStartsWithoutMediaSecretsTest {
      * start without its key pair, so the file names `none` (which moderates
      * nothing and shows no partner any photo) or gives Rekognition both
      * halves of its key, as secrets: since ADR-0065, the API names `none` and
-     * the media worker holds the key. The jar was started with this environment and no
+     * the media worker holds the key, naming `allow` until the AWS account is
+     * upgraded (ADR-0065, amended). The jar was started with this environment and no
      * AWS credentials when this landed (the pull request records the run).
      */
     @Test
-    fun `deploy-yml names photo moderation none, or gives Rekognition both halves of its key, in every role`() {
+    fun `deploy-yml names photo moderation none or allow, or gives Rekognition both halves of its key, in every role`() {
         roles.forEach { (role, env) ->
             val provider =
                 env.clear["MOYI_MEDIA_MODERATION_IMAGE_PROVIDER"]
@@ -227,7 +228,8 @@ internal class ProductionStartsWithoutMediaSecretsTest {
             val found = provider ?: "<default Rekognition>"
 
             withClue("config/deploy.yml would start a $role whose photo moderation refuses to start (provider: $found)") {
-                (provider == "none" || ((provider == null || provider == "rekognition") && rekognitionComplete)) shouldBe true
+                val passesOrNot = provider == "none" || provider == "allow"
+                (passesOrNot || ((provider == null || provider == "rekognition") && rekognitionComplete)) shouldBe true
             }
         }
     }

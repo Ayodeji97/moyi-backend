@@ -114,7 +114,8 @@ internal class ModeratorUnavailableException(
 /**
  * No photo is moderated in this process (`provider: none`). Never the default;
  * production names it for the API, which moderates nothing; the media worker
- * runs Rekognition (ADR-0065). Fails closed by construction: with it nothing gets a verdict,
+ * names `allow`, and Rekognition once the AWS account is upgraded (ADR-0065).
+ * Fails closed by construction: with it nothing gets a verdict,
  * so no partner is shown a photo; it does not pass anything.
  */
 internal class NoImageModeration : ImageModerator {
@@ -141,6 +142,21 @@ internal class NoVoiceModeration : VoiceModerator {
         ogg: ByteArray,
         durationMs: Int,
     ): Moderated = error("No voice note is moderated in this process (moyi.media.moderation.voice.provider: none).")
+}
+
+/**
+ * Every photo passes, unchecked (`provider: allow`): the owner's ruling of
+ * 2026-11-13 (ADR-0065, amended), for cost, while the AWS account is on its
+ * free plan. It moderates here, so `media.moderate-image` subscribes and is
+ * handed every photo made before (`StartFrom.BEGINNING`); each gets a `PASSED`
+ * verdict whose record names `allow`, so a photo passed this way can always be
+ * told from one Rekognition looked at.
+ */
+internal class AllowImageModeration : ImageModerator {
+    override val moderatesHere: Boolean = true
+    override val name: String = "allow"
+
+    override fun moderate(jpeg: ByteArray): Moderated = Moderated.Found(emptyList())
 }
 
 /**

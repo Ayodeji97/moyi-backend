@@ -9,8 +9,9 @@ import javax.imageio.ImageIO
  * The moderators the `local` profile and the smoke run select
  * (`provider: stand-in`), so that every verdict can be reached on the wire
  * without a vendor (spec §4 D4: "the fake is selected by profile, as LOG is
- * for email"). **Never in production**: `config/deploy.yml` names Rekognition
- * for photos and `allow` for voice notes (ADR-0065), and
+ * for email"). **Never in production**: `config/deploy.yml` names `allow` for
+ * photos and voice notes (ADR-0065, amended; Rekognition for photos once the
+ * AWS account is upgraded), and
  * `ProductionStartsWithoutMediaSecretsTest` refuses a stand-in there.
  *
  * They decide by colour, so that a test or the smoke run chooses a verdict by
