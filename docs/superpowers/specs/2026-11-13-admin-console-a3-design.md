@@ -145,9 +145,14 @@ rulings or from doc 04's wording.
 
 ## 4. What "paused" means to a day *(rulings 8, 16, 17 together)*
 
-16. ✱ **A day any part of which fell inside a suspension span is not one anybody missed.** A day
-    `[startsAt, endsAt)` **overlaps** a span `[suspended_at, lifted_at ?: ∞)` of any member of its
-    bond. Such a day, when it closes:
+16. ✱ **A day any part of whose writable window fell inside a suspension span is not one anybody
+    missed.** A day's writable window is `[startsAt, endsAt + LateEntryGrace)` (BR-3a's 12 hours,
+    the one `LateEntryGrace` bean the close job and `SubmitEntry` use; `startsAt`/`endsAt` are the
+    day's bounds after `extendedTo`), and it **overlaps** a span `[suspended_at, lifted_at ?: ∞)`
+    of any member of its bond. *Why the grace:* a late entry is refused while the bond is paused,
+    so a span that begins in the grace stops the day being finished, as one inside it would
+    (controller ruling, 2026-11-13, amending the first text, which judged `[startsAt, endsAt)`).
+    Such a day, when it closes:
     - `OPEN` or `PARTIAL` (nobody, or one, wrote) → closes **`SUSPENDED`**, not `EMPTY`/`SOLO`:
       no lone entry is unlocked (FR-063 does not run), no `DayClosed`, and the streak walk skips it;
     - `REVEALED` (both wrote and read each other before the pause) → stays `REVEALED`, `COMPLETE`;
@@ -165,12 +170,14 @@ rulings or from doc 04's wording.
     9 gives an ended bond. Judged at `revealFallsDueAt`, never at the run's time. A due instant
     before the suspension reveals as normal. *Cost:* a mistaken suspension costs that couple one
     exchange they will never read together; the alternative delivers a suspended member's words
-    the moment time passes.
+    the moment time passes. **A reveal caused by the partner's own second entry after the lift is
+    allowed** (`SubmitEntry` reveals at once, even if the reveal time fell inside the span): it is
+    the partner's act, not time passing, so `SubmitEntry` and the close job do not disagree.
 
-The decision for a day is stable from its end: spans only ever begin at "now", so no span can
-reach back over a day that has already ended, and a span still open at a day's end overlaps it
-whatever its later `lifted_at`. Days close after the 12-hour late-entry grace, so the close job
-always reads settled spans.
+The decision for a day is stable from the end of its grace: spans only ever begin at "now", so no
+span can reach back over a writable window that has already ended, and a span still open at that
+end overlaps it whatever its later `lifted_at`. Days close only after the 12-hour late-entry grace
+(and the job's settle margin), so the close job always reads settled spans.
 
 ## 5. The pages and the flow
 
@@ -238,11 +245,12 @@ user id, result), never the note.
   each existing `BondArchivedException` check in `SubmitEntry`, `ChangeEntry` (edit only, not the
   erasure) and `ReactToEntry` (`PUT` only); `DailyPrompt` returns null when `paused`;
   `TodayResponse.paused`. `BondDay.close(now, withheld, paused)`: `paused` turns `OPEN`/`PARTIAL`
-  into `SUSPENDED`. `CloseDay` passes `view.wasSuspendedDuring(day)` and folds
+  into `SUSPENDED`. `CloseDay` passes `view.wasSuspendedDuring(startsAt, endsAt + grace)` (ruling 16) and folds
   `view.wasSuspendedAt(revealFallsDueAt)` into the withholding; `CreateMissingDays` writes
-  `SUSPENDED` for an overlapping gap; `EvaluateStreaks.outcomeOf` maps a `MISSED` overlapping day
-  to `SUSPENDED` (belt and braces, as it does for `wasPausedAt`); `ReconcileJoiningDay` withholds
-  while `membership.paused` (it only defers: the close then judges by the due instant).
+  `SUSPENDED` for an overlapping gap (the same window); `EvaluateStreaks.outcomeOf` maps a `MISSED`
+  overlapping day to `SUSPENDED` (belt and braces, as it does for `wasPausedAt`);
+  `ReconcileJoiningDay` withholds while `membership.paused` (it only defers: the close then judges
+  by the due instant).
 - **`admin`**: `SuspensionConsole` (service), `SuspensionController` (web), `users.html`'s
   status and forms, `AuditAction` + V66, `Disclosure`'s explicit case (§10). A new ArchitectureTest
   rule: within `admin`, only `service/SuspensionConsole.kt` imports `AccountSuspension` (A5's
@@ -332,7 +340,9 @@ proves an export built after a suspension and a lift equals, byte for byte, one 
   shown to the partner; `REVEALED` → `COMPLETE`; `PENDING_REVEAL` due inside the span → withheld,
   `COMPLETE`, nothing stamped; due before → revealed; missing days → `SUSPENDED`; no `DayClosed`
   for them; a 5-day run with one freeze: pause three days, lift, both write → run 6, freeze kept;
-  the lift day with one entry → `SUSPENDED`, not missed.
+  the lift day with one entry → `SUSPENDED`, not missed; a span beginning inside a day's late-entry
+  grace → that day `SUSPENDED` (lone entry locked, not `SOLO`, not `EMPTY`, no freeze spent), and
+  one beginning at `endsAt + grace` leaves it as it was.
 - **Races** (synchronised on locks, never a sleep): login holding the sessions lock past its
   password check while a suspension waits, and the reverse; partner submit vs an uncommitted
   suspension (write lands) and a committed one (409); suspension vs deletion execution, both orders;
