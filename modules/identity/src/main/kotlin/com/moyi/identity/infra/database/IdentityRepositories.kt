@@ -34,6 +34,41 @@ internal interface UserRepository : JpaRepository<UserEntity, UUID> {
         """,
     )
     fun findRevocation(id: UUID): UserRevocationRow?
+
+    /**
+     * The account has proved it controls its address (FR-002), in one statement that writes
+     * only what verifying means to change.
+     *
+     * Only `PENDING_VERIFICATION` becomes `ACTIVE`. A suspended or deletion-pending account
+     * records the verification (the fact is true and worth keeping), but a verification email
+     * must not be a way out of suspension, so its status is left where an administrator or the
+     * person put it. Idempotent: an address already verified keeps its first time, and the row
+     * is not touched.
+     *
+     * A statement, not a load-and-save, because the account was read earlier in the
+     * verification's transaction without a lock on its row (admin console A3, found while
+     * building it). A suspension can commit in between; saving the entity read before it would
+     * write `ACTIVE` and the old `tokens_invalid_before` over the suspension. The `CASE` is
+     * evaluated against the row as it is when this statement takes it, after any such commit.
+     *
+     * @return 1 when the address was newly verified, 0 when it already was
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        nativeQuery = true,
+        value = """
+        UPDATE users
+           SET email_verified_at = :now,
+               status = CASE WHEN status = 'PENDING_VERIFICATION' THEN 'ACTIVE' ELSE status END,
+               updated_at = :now
+         WHERE id = :id
+           AND email_verified_at IS NULL
+        """,
+    )
+    fun markEmailVerified(
+        id: UUID,
+        now: Instant,
+    ): Int
 }
 
 /**

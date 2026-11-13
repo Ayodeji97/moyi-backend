@@ -26,6 +26,7 @@ import java.time.Instant
  * have been a name that lies.
  */
 @Component
+@Suppress("TooManyFunctions") // One per thing done to an account; A3 added the eleventh, verifying in one statement.
 internal class AccountStore(
     private val users: UserRepository,
     private val credentials: CredentialsRepository,
@@ -76,6 +77,14 @@ internal class AccountStore(
             }
         user.applyTo(entity)
         users.save(entity)
+    }
+
+    /** See [UserRepository.markEmailVerified]: the whole of the rule, and why it is one statement. */
+    fun markEmailVerified(
+        userId: UserId,
+        now: Instant,
+    ) {
+        users.markEmailVerified(userId.value, now)
     }
 
     fun revokeAllSessions(

@@ -85,7 +85,7 @@ internal class SuspendAccount(
             when (standing.status) {
                 UserStatus.SUSPENDED -> {
                     // Ruling 5: the status the account has earned, not a stored one. A verification
-                    // recorded while suspended counts (`User.verifyEmail` keeps the status).
+                    // recorded while suspended counts (`AccountStore.markEmailVerified` keeps the status).
                     val earned = if (standing.emailVerified) UserStatus.ACTIVE else UserStatus.PENDING_VERIFICATION
                     suspensions.markLifted(id, earned, now)
                     val closed = suspensions.closeOpenSpan(id, now)

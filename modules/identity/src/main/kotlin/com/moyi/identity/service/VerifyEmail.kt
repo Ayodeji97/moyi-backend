@@ -101,7 +101,9 @@ internal class VerifyEmail(
         user: User,
         now: Instant,
     ) {
-        accounts.update(user.verifyEmail(now))
+        // A targeted statement, never a save of [user]: that was read before any lock on its row,
+        // and a suspension may have committed since (see `AccountStore.markEmailVerified`).
+        accounts.markEmailVerified(user.id, now)
 
         // Any other *live* link still in this person's inbox is now moot.
         // Deleted rather than left to expire, so a stale one presented later
