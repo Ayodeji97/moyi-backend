@@ -106,7 +106,7 @@ internal class SuspensionController(
                 }
             }
         } catch (_: InvalidModerationNote) {
-            again(form, justification, DecisionForm.NOTE_REFUSED, HttpStatus.UNPROCESSABLE_CONTENT)
+            again(form, justification, form.wording.noteRefused, HttpStatus.UNPROCESSABLE_CONTENT)
         }
     }
 

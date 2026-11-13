@@ -201,7 +201,9 @@ internal class SuspensionControllerTest(
                 withClue("$route ${bad.take(8)}") {
                     posted.response.status shouldBe 422
                     posted.modelAndView!!.viewName shouldBe "admin/decide"
-                    posted.response.page() shouldContain DecisionForm.NOTE_REFUSED
+                    // The refusal names the field as its label does, not A2's "note".
+                    posted.response.page() shouldContain "Write a justification of 1 to $MAX_JUSTIFICATION characters saying why."
+                    posted.response.page() shouldNotContain DecisionForm.NOTE_REFUSED
                     posted.response.page() shouldContain """name="justification""""
                     posted.response.page() shouldContain """name="code""""
                     posted.response.redirectedUrl.shouldBeNull()

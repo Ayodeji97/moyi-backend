@@ -167,21 +167,34 @@ internal class DecisionForm(
         error: String?,
     ): DecisionForm = DecisionForm(id, back, action, label, hidden, reasons, gated, askCode, note, error, warning, wording)
 
-    /** The note's field name and label, and the code field's hint. */
+    /** The note's field name and label, the code field's hint, and the line a refused note gets, in the label's word. */
     enum class Wording(
         val noteField: String,
         val noteLabel: String,
         val codeHint: String,
+        val noteRefused: String,
     ) {
-        DECISION("note", "Note", "This cannot be undone, so it needs a code proven in the last five minutes."),
-        SUSPENSION("justification", "Justification", "Each suspension, and each lift, needs a new code."),
+        DECISION(
+            "note",
+            "Note",
+            "This cannot be undone, so it needs a code proven in the last five minutes.",
+            "Write a note of 1 to ${ModerationNote.MAX_CODE_POINTS} characters saying why.",
+        ),
+        SUSPENSION(
+            "justification",
+            "Justification",
+            "Each suspension, and each lift, needs a new code.",
+            "Write a justification of 1 to ${ModerationNote.MAX_CODE_POINTS} characters saying why.",
+        ),
     }
 
     override fun toString(): String = "DecisionForm($action)"
 
     companion object {
         val NOTE_HINT = "Required: 1 to ${ModerationNote.MAX_CODE_POINTS} characters. It is kept in the audit log as your reason."
-        val NOTE_REFUSED = "Write a note of 1 to ${ModerationNote.MAX_CODE_POINTS} characters saying why."
+
+        /** A2's line, unchanged; a form with other [Wording] says its own ([Wording.noteRefused]). */
+        val NOTE_REFUSED = Wording.DECISION.noteRefused
         const val CODE_NEEDED = "This cannot be undone. Enter a code from your authenticator app to confirm it."
         const val DECIDE_VIEW = "admin/decide"
     }
