@@ -99,7 +99,8 @@
 #                                            photos and voice notes each holds back, whether it has a
 #                                            detail, when. A MINOR_SEXUAL_CONTENT row is marked DO NOT VIEW
 #   moyi reports show <reportId>             one report: the reporter's detail and what it holds back
-#                                            (the look is recorded)
+#                                            (the look is recorded), then a "words read by <actor> at <time>"
+#                                            line for each time an ADMIN read the entry's words in the console
 #   moyi reports dismiss <reportId> "<note>" not what was reported: its photo and voice note are given back
 #                                            as they were, unless another report or moderation holds them
 #   moyi reports reclassify <reportId> <reason> "<note>"
@@ -594,6 +595,11 @@ case "$cmd" in
           }
           $10 != "" { held++; print "  " $11 "\t" $10 "\t" $12 "\t" $13 }
           END { if (held == 0) print "  nothing" }'
+        # An ADMIN's read of the entry's words (A5, ADR-0064) is in the report's own history: who and when, never
+        # the words or the reason given (that is in the console's audit log). None is printed when none was made.
+        ops_sql "SELECT 'words read by ' || actor || ' at ' || at FROM entry_report_log
+                 WHERE report_id = :'report'::uuid AND action = 'WORDS_READ' ORDER BY at, id;" "report=$1" ||
+          die "the database refused (see above)"
         ;;
       dismiss)
         [ $# -eq 2 ] || die "$usage"

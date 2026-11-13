@@ -1,8 +1,12 @@
 package com.moyi.admin.web
 
 import com.moyi.admin.service.ConditionalOnAdminConsole
+import com.moyi.admin.service.ContentAccess
+import com.moyi.admin.service.EntryTextResult
+import com.moyi.admin.service.FreshStepUp
 import com.moyi.admin.service.InvalidModerationNote
 import com.moyi.admin.service.ModerationConsole
+import com.moyi.admin.service.ModerationNote
 import com.moyi.admin.service.ReportPage
 import com.moyi.admin.service.StepUpRequired
 import com.moyi.common.security.ClientAddressResolver
@@ -11,9 +15,13 @@ import com.moyi.gratitude.api.ReclassifyOutcome
 import com.moyi.gratitude.api.ReportCase
 import com.moyi.gratitude.api.ReportModeration
 import com.moyi.gratitude.api.ReportRow
+import com.moyi.gratitude.api.ReportedEntryRead
 import com.moyi.gratitude.api.Takedown
 import com.moyi.gratitude.api.UpholdResult
+import com.moyi.gratitude.api.WordsRefusal
 import jakarta.servlet.http.HttpServletRequest
+import jakarta.servlet.http.HttpServletResponse
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.Authentication
@@ -40,6 +48,11 @@ import java.util.UUID
  * The reclassify form's choice is [ReportModeration.reasons]: gratitude's domain's own list, read
  * here and never restated, which writes nothing and needs no transaction.
  *
+ * One route is `ADMIN`'s alone (A5 spec §5): the POST that reads a reported entry's words, whose
+ * method-level `@PreAuthorize` overrides the class's. It is deliberately **not** `@Transactional`:
+ * the code it proves commits its own `ADMIN_STEP_UP` row before `ContentAccess` opens the read's
+ * transaction, so a read that fails never un-spends the code.
+ *
  * Named as a bean: gratitude's member-facing `ReportsController` (the report route) has the
  * default name, and two beans may not share one.
  */
@@ -51,6 +64,7 @@ internal class ReportsController(
     private val console: ModerationConsole,
     private val reports: ReportModeration,
     private val secondFactor: SecondFactor,
+    private val content: ContentAccess,
     private val addresses: ClientAddressResolver,
     private val clock: Clock,
 ) {
@@ -71,17 +85,121 @@ internal class ReportsController(
         authentication: Authentication,
         request: HttpServletRequest,
     ): ModelAndView {
-        val id = ModerationPages.uuidOrNull(reportId)
+        val id = ModerationPages.uuidOrNull(reportId) ?: return ModerationPages.notFound()
+        return reportPage(id, view, authentication, request)
+    }
+
+    /**
+     * Reads a reported entry's words (A5 spec §5), `ADMIN` only, in the spec's order: the role
+     * (here, before any of this runs), the justification (`ModerationNote`'s own rule, before the
+     * code is touched, so a refused one spends nothing), the code, proved in this request and
+     * committed on its own, then the read in `ContentAccess`'s transaction, rendered only after it
+     * returns. Every answer is this POST's own response, never stored, never a redirect or a flash;
+     * the words reach only `admin/entry-text`. The [FreshStepUp] is handed to that one call and
+     * kept nowhere.
+     */
+    @PostMapping("/admin/reports/{reportId}/entry-text")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Suppress("LongParameterList") // The form's three fields, and who asked from where.
+    fun entryText(
+        @PathVariable reportId: String,
+        @RequestParam(defaultValue = "") expectedReason: String,
+        @RequestParam(defaultValue = "") justification: String,
+        @RequestParam(defaultValue = "") code: String,
+        authentication: Authentication,
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+    ): ModelAndView {
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store")
+        response.setHeader(HttpHeaders.PRAGMA, "no-cache")
+        response.setHeader(REFERRER_POLICY, "no-referrer")
+        val id = ModerationPages.uuidOrNull(reportId) ?: return ModerationPages.notFound()
         val adminId = ModerationPages.adminId(authentication)
-        val page = id?.let { console.report(it, adminId, addresses.orNull(request)) } ?: return ModerationPages.notFound()
+        val from = addresses.orNull(request)
+        val form = ReadWordsForm(pageOf(id), expectedReason, justification)
+        return try {
+            ModerationNote.require(justification)
+            when (val fresh = secondFactor.proveNow(adminId, code, from)) {
+                SecondFactor.Fresh.Missing -> {
+                    form.again(CODE_NEEDED_TO_READ, HttpStatus.OK)
+                }
+
+                SecondFactor.Fresh.Refused -> {
+                    form.again(AdminAuthController.WRONG_CODE, HttpStatus.UNAUTHORIZED)
+                }
+
+                is SecondFactor.Fresh.Proved -> {
+                    val result = content.readReportedEntry(id, expectedReason, justification, fresh.stepUp, adminId, from)
+                    rendered(id, result, authentication, request)
+                }
+            }
+        } catch (_: InvalidModerationNote) {
+            form.again(WHY_REFUSED, HttpStatus.UNPROCESSABLE_CONTENT)
+        }
+    }
+
+    /** What a read answered, as a page: the words page for the two that completed, the report's page for a refusal. */
+    private fun rendered(
+        id: UUID,
+        result: EntryTextResult,
+        authentication: Authentication,
+        request: HttpServletRequest,
+    ): ModelAndView =
+        when (val read = result.read) {
+            is ReportedEntryRead.Shown -> {
+                ModelAndView(ENTRY_TEXT_VIEW, mapOf("words" to read.words, "date" to read.date, "reportId" to id))
+            }
+
+            is ReportedEntryRead.Erased -> {
+                ModelAndView(ENTRY_TEXT_VIEW, mapOf("notice" to ERASED, "reportId" to id))
+            }
+
+            is ReportedEntryRead.NotOpen -> {
+                reportPage(id, null, authentication, request, result = ALREADY_DECIDED)
+            }
+
+            is ReportedEntryRead.Stale -> {
+                reportPage(id, null, authentication, request, result = STALE)
+            }
+
+            is ReportedEntryRead.NotAboutWords -> {
+                val why = if (read.imageReason) WordsRefusal.IMAGE_REASON else WordsRefusal.MEMBER_REPORT
+                reportPage(id, null, authentication, request, refusal = why)
+            }
+        }
+
+    /**
+     * A report's page (A2 spec §5.1), with A5's half: the read form when an `ADMIN` may read its
+     * entry's words, the hint for anyone else when they may be read, otherwise why not. [refusal]
+     * is the read's own answer when there was one; otherwise the page asks `ContentAccess.whyNot`,
+     * the same rule the read applies. [result] is a refused read's one line, in the model (never a
+     * flash). An unknown report is the `404` page.
+     */
+    @Suppress("LongParameterList") // The report, the photo asked for, who asks, and what a refused read adds.
+    private fun reportPage(
+        id: UUID,
+        view: String?,
+        authentication: Authentication,
+        request: HttpServletRequest,
+        result: String? = null,
+        refusal: WordsRefusal? = null,
+    ): ModelAndView {
+        val adminId = ModerationPages.adminId(authentication)
+        val page = console.report(id, adminId, addresses.orNull(request)) ?: return ModerationPages.notFound()
         val held = page.case.media.map { HeldItem(it.mediaId, it.kind, it.status, it.verdict, barred(page.case, it.verdict)) }
+        val whyNot = refusal ?: content.whyNot(id)
+        val canReadWords = whyNot == null && secondFactor.isAdmin(authentication)
         val model =
-            mapOf(
+            mutableMapOf<String, Any?>(
                 "page" to page,
                 "held" to held,
                 "embed" to held.firstOrNull { it.barred == null && it.mediaId.toString() == view },
                 "forms" to forms(page, secondFactor.asksForCode(request.getSession(false))),
+                "canReadWords" to canReadWords,
+                "whyNot" to whyNot?.let(::refusalLine),
             )
+        if (canReadWords) model["readForm"] = ReadWordsForm(pageOf(id), page.case.reason, "")
+        if (result != null) model[Decisions.RESULT] = result
         return ModelAndView("admin/report", model)
     }
 
@@ -255,6 +373,19 @@ internal class ReportsController(
     }
 
     companion object {
+        /** Why a report's entry may not be read, in the page's words (A5 spec §5). */
+        fun refusalLine(refusal: WordsRefusal): String =
+            when (refusal) {
+                WordsRefusal.IMAGE_REASON -> "This report's reason is about images. If its detail is about words, reclassify it first."
+                WordsRefusal.MEMBER_REPORT -> "This report is about a member, not an entry. There are no words to read."
+                WordsRefusal.NOT_OPEN -> "This report is decided. An entry's words are read only while its report is open."
+            }
+
+        const val ENTRY_TEXT_VIEW = "admin/entry-text"
+        const val CODE_NEEDED_TO_READ = "Enter a code from your authenticator app. Every read needs a new one."
+        const val WHY_REFUSED = "Write why you need to read them: 1 to ${ModerationNote.MAX_CODE_POINTS} characters."
+        const val ERASED = "Its author erased this entry. There are no words to read."
+        const val REFERRER_POLICY = "Referrer-Policy"
         const val EXPECTED_REASON = "expectedReason"
         const val OPEN = "OPEN"
         const val BLOCKED = "BLOCKED"
@@ -262,6 +393,33 @@ internal class ReportsController(
         const val DO_NOT_VIEW = "DO NOT VIEW — runbook §2"
         const val ALREADY_DECIDED = "Already decided by someone else."
         const val STALE = "The report changed after this page was shown. Read it again before deciding."
+    }
+}
+
+/**
+ * The form that reads a reported entry's words (A5 spec §5): the report's page it belongs to, the
+ * reason that page showed (A2's stale check), and the justification as typed, shown back escaped
+ * when the form is rendered again. [toString] leaves the justification out.
+ */
+internal class ReadWordsForm(
+    val back: String,
+    val expectedReason: String,
+    val justification: String,
+    val error: String? = null,
+) {
+    val action: String = "$back/entry-text"
+    val hint: String = DecisionForm.NOTE_HINT
+
+    /** This form again, its justification kept, on a page of its own: nothing was read. */
+    fun again(
+        error: String,
+        status: HttpStatus,
+    ): ModelAndView = ModelAndView(VIEW, mapOf("form" to ReadWordsForm(back, expectedReason, justification, error)), status)
+
+    override fun toString(): String = "ReadWordsForm($action)"
+
+    companion object {
+        const val VIEW = "admin/read-words"
     }
 }
 

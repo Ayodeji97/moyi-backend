@@ -168,7 +168,10 @@ docker exec -i moyi-postgres psql -U moyi -d moyi -c \
 `justification`, and the module logs (`entry_report_log`, `media_moderation_log`) name the same
 admin as `admin:<account id>`. The Prometheus counters are `moyi_admin_sign_in_total{outcome}`,
 `moyi_admin_lookup_total`, `moyi_admin_moderation_decision_total{queue, decision, outcome}` and
-`moyi_admin_media_review_total{outcome}`.
+`moyi_admin_media_review_total{outcome}`, and, for an `ADMIN`'s read of a reported entry's
+words, `moyi_admin_content_read_total{outcome}` (`SHOWN`, `ERASED`, `NOT_OPEN`, `STALE`,
+`NOT_ABOUT_WORDS`); its row is `ENTRY_TEXT_READ`, with the justification and `metadata.result`,
+and a member's export never lists it while its case is open (ADR-0064).
 
 A member's data export lists only a lookup made at their request or for operations
 (`ACCOUNT_LOOKED_UP`) and the removal of their own media from a moderation quarantine
@@ -194,10 +197,13 @@ The console never does these; they are `scripts/moyi` or `psql` on the server, a
 - the TOTP key, the allowlist and the switch itself (deploy-time configuration).
 
 Once the console is on, an entry's words are no longer read at `psql` to decide a report (the
-owner's ruling 2, runbook §3.3).
+owner's ruling 2, runbook §3.3). They are read in the console, by an `ADMIN` only, from an open
+report about words, each read with a typed justification and a new authenticator code (ADR-0064,
+runbook §3.3). Read the words page once and do not reload it or go back to it: the browser posts
+the spent code again, which answers `401` and counts towards the five-failure lockout.
 
 ## What this does not do
 
-No entry content (A5, content access with a typed justification, is built next), no suspension,
+No entry content beyond that one read (A5, ADR-0064), no suspension,
 no job re-runs, no passkeys (ADR-0055, the owner's ruling 1: TOTP only until a second operator
-joins). Those are A3 to A5.
+joins). Those are A3 and A4.

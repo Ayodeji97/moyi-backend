@@ -376,6 +376,35 @@
           ]
         }
       ]
+    },
+    {
+      "id": "admin",
+      "label": "Admin",
+      "regions": [
+        {
+          "id": "admin.report",
+          "label": "A report, as an ADMIN reading its entry's words finds it (the console, A5, ADR-0064)",
+          "states": [
+            {
+              "id": "OPEN_WORDS",
+              "label": "open, about words, the entry has its words",
+              "initial": true
+            },
+            {
+              "id": "OPEN_ERASED",
+              "label": "open, about words, its author erased the entry or withdrew"
+            },
+            {
+              "id": "NOT_ABOUT_WORDS",
+              "label": "open, but a member report or an image reason"
+            },
+            {
+              "id": "DECIDED",
+              "label": "decided: dismissed or upheld"
+            }
+          ]
+        }
+      ]
     }
   ],
   "events": [
@@ -568,6 +597,31 @@
       "id": "event:entries-withdrawn",
       "label": "you or your partner withdraw your entries on a leave or a block",
       "actor": "system"
+    },
+    {
+      "id": "event:author-erases-reported-entry",
+      "label": "the author erases the reported entry, or withdraws from the bond",
+      "actor": "system"
+    },
+    {
+      "id": "event:report-decided",
+      "label": "a moderator or an admin decides the report",
+      "actor": "admin"
+    },
+    {
+      "id": "event:report-reclassified-to-image",
+      "label": "a moderator or an admin reclassifies the report to an image reason",
+      "actor": "admin"
+    },
+    {
+      "id": "event:report-reclassified-to-words",
+      "label": "a moderator or an admin reclassifies the report to a reason about words",
+      "actor": "admin"
+    },
+    {
+      "id": "event:admin-reads-words",
+      "label": "an ADMIN asks to read the reported entry's words, with a justification and a code proved in that request",
+      "actor": "admin"
     }
   ],
   "everywhere": [

@@ -26,8 +26,11 @@
     <p th:if="${page.case.status != 'OPEN'}">Emptied when decided.</p>
     <blockquote th:if="${page.case.status == 'OPEN' and page.case.detail != null}" id="detail" th:text="${page.case.detail}"></blockquote>
     <p th:if="${page.case.status == 'OPEN' and page.case.detail == null}">The reporter wrote no detail.</p>
-    <p class="hint">The entry's words are not shown here. Reading them is content access (FR-112), which needs the
-        ADMIN role and a typed justification.</p>
+    <!--/* A5 spec §5: the read form for an ADMIN when the entry's words may be read; the hint for
+           anyone else when they may; otherwise why not. The words themselves are never on this page. */-->
+    <p th:if="${whyNot != null}" class="hint" id="words-refused" th:text="${whyNot}">Why not.</p>
+    <th:block th:if="${canReadWords}"><form th:replace="~{admin/fragments/read-words :: form(${readForm})}"></form></th:block>
+    <p th:if="${whyNot == null and !canReadWords}" class="hint" id="words-hint">The entry's words are not shown here. An admin can read them, with a reason and a code.</p>
 
     <h2>Media it holds</h2>
     <p th:if="${#lists.isEmpty(held)}">None: this report is decided from the detail.</p>

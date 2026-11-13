@@ -94,6 +94,15 @@ internal class DisclosureTest {
     }
 
     @Test
+    fun `an entry text read is withheld whatever its outcome, target, metadata or report-drivenness`() {
+        everyRow().filter { it.action == AuditAction.ENTRY_TEXT_READ }.also { it.isNotEmpty() shouldBe true }.forEach { row ->
+            withClue(row) { Disclosure.shows(row.action, row.outcome, row.targetType, row.purpose, row.reportDriven).shouldBeNull() }
+        }
+        // The case a future widening would be tempted by: a successful read of an entry, not report-driven.
+        Disclosure.shows(AuditAction.ENTRY_TEXT_READ, AuditOutcome.SUCCEEDED, "ENTRY", null, false).shouldBeNull()
+    }
+
+    @Test
     fun `a lookup is shown only on a USER row and a removal only on a MEDIA row`() {
         (TARGETS - USER).forEach { target ->
             withClue(target) {
@@ -159,6 +168,6 @@ internal class DisclosureTest {
         const val MEDIA = "MEDIA"
 
         /** Every `target_type` the console writes, an unknown one, and none. */
-        val TARGETS: List<String?> = listOf(USER, MEDIA, "REPORT", "ADMIN_ACCOUNT", "SOMETHING_ELSE", null)
+        val TARGETS: List<String?> = listOf(USER, MEDIA, "ENTRY", "REPORT", "ADMIN_ACCOUNT", "SOMETHING_ELSE", null)
     }
 }

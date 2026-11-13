@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+<!--/* The form that reads a reported entry's words (A5 spec §5): the hidden reason the page showed,
+       a required justification, and a code, every time (a read has no step-up window). th:text
+       only: the justification typed is shown back escaped. Never holds a word of the entry. */-->
+<form th:fragment="form(f)" method="post" th:action="@{${f.action}}" class="decision" id="read-words">
+    <h3>Read the entry's words</h3>
+    <input type="hidden" name="expectedReason" th:value="${f.expectedReason}">
+    <div class="field">
+        <label for="read-words-justification">Why you need to read them</label>
+        <p id="read-words-justification-hint" class="hint" th:text="${f.hint}">Required.</p>
+        <textarea id="read-words-justification" name="justification" rows="3" required
+                  aria-describedby="read-words-justification-hint" th:text="${f.justification}"></textarea>
+    </div>
+    <div class="field">
+        <label for="read-words-code">Code from your authenticator app</label>
+        <p id="read-words-code-hint" class="hint">Every read needs a new code, and is kept in the audit log.</p>
+        <input id="read-words-code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+               autocomplete="one-time-code" required aria-describedby="read-words-code-hint">
+    </div>
+    <p th:if="${f.error != null}" class="error" role="alert" th:text="${f.error}">Error.</p>
+    <button type="submit">Read the entry's words</button>
+</form>
+</body>
+</html>

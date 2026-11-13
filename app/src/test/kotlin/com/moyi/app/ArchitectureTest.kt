@@ -71,6 +71,11 @@ class ArchitectureTest {
                     "HeldMedia",
                     "ReportLogLine",
                     "ReasonsReview",
+                    // A5: the one door to a reported entry's words (A5 spec §6).
+                    "ReportedEntryText",
+                    "ReportedEntryRead",
+                    "ReportedWords",
+                    "WordsRefusal",
                 ).map { "com.moyi.gratitude.api.$it" }
 
         /** The `api` packages A2's console reaches for its two queues, and for nothing else. */
@@ -201,7 +206,9 @@ class ArchitectureTest {
          * withdrawal's consumer, the daily reminder's sweep, the day's push consumer, the
          * on-this-day sweep and the embedding sweep (ADR-0054). Each reads a bond with no caller
          * whose membership could be checked. (`ForgetBondEmbeddings`, the embedding's other
-         * caller-less work, reads no bond at all, so it is not here.)
+         * caller-less work, reads no bond at all, so it is not here.) And one read that has a
+         * request but no member: the admin console's read of a reported entry (A5 spec §6),
+         * reached only through the `ADMIN` role and a second factor, never a member's route.
          */
         private val WORK_WITH_NO_CALLER =
             setOf(
@@ -215,6 +222,9 @@ class ArchitectureTest {
                 "EmbedPendingEntries.kt",
                 "EraseDeletedAccount.kt",
                 "ExpireWithdrawnExports.kt",
+                // A5: an ADMIN reading a reported entry is no member of its bond, and must not take
+                // the bond's lock (A5 spec §6); it reads the withdrawn authors from the unlocked view.
+                "ReportedEntryTextStore.kt",
             )
 
         /**
@@ -458,7 +468,7 @@ class ArchitectureTest {
     }
 
     @Test
-    fun `the unguarded view of a bond is asked for by the work that has no caller, and by nobody else`() {
+    fun `the unguarded view of a bond is asked for by the work that has no caller or the admin's guarded read, and nobody else`() {
         // The closing-view methods and `bondsToSweep` run no membership
         // guard: the close job has no caller to ask about, nor has the
         // consumer that erases a withdrawal's entries (ADR-0031, Owed,
@@ -466,6 +476,8 @@ class ArchitectureTest {
         // the guard, so these are the only ones a request must never
         // reach — and a request reaches a service as easily as a controller,
         // so the rule is a list of who MAY name them, not of who may not.
+        // The one listed reader that serves a request is the admin's
+        // role-guarded read of a reported entry (A5): no member route reaches it.
         // Text-based: the names are distinctive, and a call through an alias
         // would still have to spell one of them.
         val violations =
@@ -479,7 +491,8 @@ class ArchitectureTest {
         assertTrue(
             violations.isEmpty(),
             "Only the close job, the withdrawal's consumer, the reminder sweep, the day's push consumer, the on-this-day " +
-                "sweep, the embedding sweep, the account deletion's erasure and the export's withdrawal consumer may call " +
+                "sweep, the embedding sweep, the account deletion's erasure, the export's withdrawal consumer and the " +
+                "admin's role-guarded read of a reported entry may call " +
                 "bond's unguarded reads. Found in: $violations",
         )
     }
@@ -587,6 +600,67 @@ class ArchitectureTest {
             violations.isEmpty(),
             "modules/admin may import from gratitude.api and media.api only the moderation ports and their types " +
                 "(A2 spec §7.1). Found: $violations",
+        )
+    }
+
+    @Test
+    fun `within the admin module only ContentAccess imports the port to an entry's words`() {
+        // A5 spec §6: `ReportedEntryText` reads an entry's words; inside `admin` one class may
+        // hold it, the service that checks the role, the justification and the second factor
+        // and writes the audit row. A controller or a second service that held the port could
+        // read the words past all three. A wildcard import of gratitude's api is already refused
+        // by the rule above, so the exact import is what this sees.
+        val port = "com.moyi.gratitude.api.ReportedEntryText"
+        val allowed = "/modules/admin/src/main/kotlin/com/moyi/admin/service/ContentAccess.kt"
+
+        fun importsPort(importName: String): Boolean = importName == port || importName.startsWith("$port.")
+        // Positive controls: the matcher is not vacuous, and does not catch the port's result types.
+        assertTrue(importsPort(port), "the port's import was not matched")
+        assertTrue(!importsPort("com.moyi.gratitude.api.ReportedEntryRead"), "the port's result type was matched")
+        assertTrue(!importsPort("com.moyi.gratitude.api.ReportedEntryTextual"), "a name sharing the prefix was matched")
+        val adminFiles = project.files.filter { it.normalisedProjectPath.startsWith("/modules/admin/") }
+        assertTrue(adminFiles.isNotEmpty(), "the scope saw no admin files")
+        val violations =
+            adminFiles
+                .filter { it.normalisedProjectPath != allowed }
+                .filter { file -> file.imports.any { importsPort(it.name) } }
+                .map { it.normalisedProjectPath }
+
+        assertTrue(
+            violations.isEmpty(),
+            "Within modules/admin only service/ContentAccess.kt may import ReportedEntryText (A5 spec §6). Found: $violations",
+        )
+    }
+
+    @Test
+    fun `only SecondFactor's proveNow makes the per-read step-up proof`() {
+        // A5 spec §5 step 3: `FreshStepUp` says a code was proved in this request. Its constructor
+        // is `internal`, so anything in `admin` could call it; a second caller (a controller that
+        // made one from the session's window) would open the words with no code. So outside its
+        // own file only `web/ModerationPages.kt`, where `SecondFactor.proveNow` makes it after
+        // `AdminSignIn.stepUp` accepts the code, may call it. Comments are stripped first: KDoc
+        // names it. Tests make their own and are not scanned.
+        val call = Regex("""\bFreshStepUp\s*\(""")
+        val comments = Regex("""/\*[\s\S]*?\*/|//[^\n]*""")
+
+        fun calls(text: String): Boolean = call.containsMatchIn(text.replace(comments, ""))
+        // Positive controls: a call is seen, and one only in a comment, or the type named, is not.
+        assertTrue(calls("val p = FreshStepUp(id, now)"), "a call was not matched")
+        assertTrue(!calls("/** [FreshStepUp](x) */ val a = 1\n// FreshStepUp(id)"), "a call in a comment was matched")
+        assertTrue(!calls("fun f(stepUp: FreshStepUp): Unit = Unit"), "the type's name was matched")
+        val proveNow = "/modules/admin/src/main/kotlin/com/moyi/admin/web/ModerationPages.kt"
+        val allowed = setOf("/modules/admin/src/main/kotlin/com/moyi/admin/service/FreshStepUp.kt", proveNow)
+        val adminMain = project.files.filter { it.normalisedProjectPath.startsWith("/modules/admin/src/main/") }
+        assertTrue(adminMain.any { it.normalisedProjectPath == proveNow && calls(it.text) }, "proveNow's call was not seen")
+        val violations =
+            adminMain
+                .filter { it.normalisedProjectPath !in allowed && calls(it.text) }
+                .map { it.normalisedProjectPath }
+
+        assertTrue(
+            violations.isEmpty(),
+            "Within modules/admin only SecondFactor.proveNow (web/ModerationPages.kt) may make a FreshStepUp (A5 spec §5). " +
+                "Found: $violations",
         )
     }
 

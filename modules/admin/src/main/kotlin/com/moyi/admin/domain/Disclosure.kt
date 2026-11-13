@@ -23,6 +23,8 @@ package com.moyi.admin.domain
  * act a report drove, because in a bond of two it names the reporter; every block; lookups for
  * `SAFETY` or `LEGAL`; a lookup with no purpose (a row written before A2); every refusal; and
  * the rows that are about no one member (queue views, report reads and decisions, step-ups).
+ * An `ENTRY_TEXT_READ` row is withheld whatever its outcome, target or metadata (A5 spec §9,
+ * ruling 2): every such read is report-driven, and in a bond of two the reporter is the partner.
  * A `MEDIA_DELETED` row whose `reportDriven` is unknown (`null`) is withheld too: only a row
  * that says no report drove it is shown.
  */
@@ -44,6 +46,7 @@ internal object Disclosure {
         reportDriven: Boolean?,
     ): String? =
         when {
+            action == AuditAction.ENTRY_TEXT_READ -> null
             outcome != AuditOutcome.SUCCEEDED -> null
             action == AuditAction.USER_LOOKED_UP && targetType == USER && purpose?.disclosed == true -> ACCOUNT_LOOKED_UP
             action == AuditAction.MEDIA_DELETED && targetType == MEDIA && reportDriven == false -> MEDIA_REMOVED

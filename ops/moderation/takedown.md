@@ -199,11 +199,18 @@ meanwhile, nothing is decided and the page says to read it again. A priority rep
    - a report about **words** (harassment, a threat): the report holds nothing back, and upholding it
      deletes nothing; the words stay unless their author erases them. **Decide it from the reporter's
      detail.** Reading an entry's words is content access (FR-112, doc 09: an `ADMIN`'s, with a typed
-     justification, disclosed), which the console does not offer until A5. The owner ruled
-     (2026-11-11, ADR-0063 ruling 2) that **once the console is switched on, entry text is no longer
-     read at `psql`** to decide a report. Until then, read the words only to decide a report that
-     names them, and say so in the note. There is no takedown of words in v1 (ADR-0053, question 3);
-     a threat to someone's safety is section 4's territory and the reporter's to take to the police.
+     justification). The owner ruled (2026-11-11, ADR-0063 ruling 2) that **once the console is
+     switched on, entry text is no longer read at `psql`** to decide a report, and A5 (ADR-0064) is
+     where it is read: on the report's page, an `ADMIN` (not a `MODERATOR`) opens **Read the entry's
+     words**, types why (1 to 400 characters) and a fresh authenticator code (every read needs a new
+     one, and the five-minute window of the decisions does not count), for an open report whose reason
+     is harassment, violence or self-harm, or other. For an image reason whose detail is about words,
+     reclassify first. If the author has erased the entry, the page says so and you decide from the
+     reporter's detail. The read is in `audit_log` and in the report's history (`moyi reports show`
+     prints `words read by <actor> at <time>`). Until the console is on, the `psql` rule stands: read
+     the words only to decide a report that names them, and say so in the note. There is no
+     takedown of words in v1 (ADR-0053, question 3); a threat to someone's safety is section 4's
+     territory and the reporter's to take to the police.
    - a report about **the other member** (target `MEMBER`, ADR-0053 decision 14; `show` names
      the reported member's `bond_members` id and the bond): it holds nothing back and names no
      entry. Read the detail and decide as for words: `dismiss`, or `uphold … delete` to record it

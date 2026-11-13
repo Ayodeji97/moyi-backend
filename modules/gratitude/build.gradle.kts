@@ -45,6 +45,9 @@ dependencies {
     testRuntimeOnly("org.springframework.boot:spring-boot-starter-flyway")
     testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
     testRuntimeOnly("org.postgresql:postgresql")
+    // Flyway's own API, at compile time, for one test: V63MigrationTest stops the schema at
+    // V62, writes report log rows, and then migrates on, as admin's V61MigrationTest does.
+    testImplementation("org.flywaydb:flyway-core")
 }
 
 // SearchTermsTest holds the committed contract's search limits to SearchTerms (ADR-0039): the

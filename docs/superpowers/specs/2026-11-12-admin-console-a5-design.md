@@ -158,14 +158,23 @@ the text read is the text reported, unless its author erased it (`ERASED`).
 
 ## 6. Where the code lives
 
-- **`gratitude.api`**: a new port `ReportedEntryText` with one method,
-  `read(reportId: UUID, expectedReason: String): ReportedEntryRead`, `@Transactional(propagation =
-  MANDATORY)` like every A2 port. `ReportedEntryRead` is a sealed result carrying, for `SHOWN`, the
+- **`gratitude.api`**: a new port `ReportedEntryText` with two methods,
+  `read(reportId: UUID, expectedReason: String, actor: String): ReportedEntryRead` and
+  `whyNot(reportId: UUID): WordsRefusal?` (the GET's question, the same rule, no lock, no write),
+  both `@Transactional(propagation = MANDATORY)` like every A2 port. `ReportedEntryRead` is a sealed result carrying, for `SHOWN`, the
   entry id, its bond-day date and the text as a type whose `toString` is redacted (reuse
   `EntryText`'s pattern; never a raw `String` field on a data class). The gate follows A2's
   private `ReportModerationStore.gate` (hard-coded `FOR UPDATE`), given a lock-mode parameter or a
   `FOR SHARE` sibling; §4's rule is a function in
   `gratitude.domain` (one place).
+  **Locks: the report `FOR SHARE`, then the entry `FOR SHARE`, and no bond lock** *(added while
+  building, plan Task 1)*. The withdrawn authors are read through `BondAccess.closingViewOf`,
+  which takes no lock, after the entry's lock. The reason is a deadlock: the reporter's own
+  account erasure (`EraseDeletedAccount`) takes the bond's lock and then `UPDATE entry_reports SET
+  detail = NULL` on the same report, so a read that held the report's share lock and then waited
+  for the bond would close a cycle with it. Read after the entry's lock, the view sees any
+  withdrawal committed before that statement, as `Reader` reads it after the entry is loaded.
+  `ReportedEntryTextRaceTest` holds both orders, including the one that would deadlock.
 - **`admin.service`**: `ContentAccess.readReportedEntry(…)`, `@PreAuthorize("hasRole('ADMIN')")`,
   `@Transactional`; it validates, takes the step-up the controller already proved (it never
   steps up itself, so the proof's own transaction is not joined to the read's), calls the port,
@@ -173,7 +182,9 @@ the text read is the text reported, unless its author erased it (`ERASED`).
   this method is entered (§5 step 3; A2's `ReportsController` → `decideGated` pattern).
 - **`admin.web`**: one POST on `ReportsController` (method-level `ADMIN` over the class's
   `MODERATOR`), and the GET's model gains `canReadWords` and `whyNot`.
-- **`ArchitectureTest`**: `ReportedEntryText` joins `MODERATED_APIS`; a new rule that no class in
+- **`ArchitectureTest`**: `ReportedEntryText` and its types (`ReportedEntryRead`, `ReportedWords`,
+  `WordsRefusal`) join `A2_MODERATION_TYPES`, the only types `admin` may import from
+  `MODERATED_APIS`; a new rule that no class in
   `admin` other than `ContentAccess` depends on it.
 
 ## 7. Audit, V63 and V64

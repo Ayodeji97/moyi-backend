@@ -333,6 +333,12 @@
 # 0 failed, 0 skipped, 73 "admin A2" checks among them. A run before it on the same stack failed one
 # probe (late entries: "the job has run since", the ShedLock floor named under #126) and then stopped
 # in the A2 section on `tr` meeting the review copy's bytes, fixed by LC_ALL=C.
+# Since the admin console A5 (FR-112, FR-116, ADR-0064) the admin section also posts to
+# /admin/reports/{id}/entry-text from a refused address: the API's own 401, byte for byte what an
+# unknown path answers but for its instance. The read itself is not driven here (it needs an ADMIN,
+# a code per read and an open report about words; EntryTextControllerTest holds it). Last run on
+# 2026-11-13, on feat/admin-console-a5, against a compose project of its own: 1804 passed, 0 failed,
+# 0 skipped.
 # The late-entries probe "the job has run since" (the ShedLock floor named under #126, and failed in
 # four recorded runs) now waits up to 60 s for the close job's next run, not 30: the lock's 30 s floor
 # plus the five-second cron put that run up to 35 s away, and the 30 one-second polls ran out first.
@@ -4055,6 +4061,12 @@ else
   is "admin: …byte for byte the same problem (but its instance)" "$(no_instance)" "$ADM_REFUSED"
   adm_code "$ADM_DIR/refused" "$ADM/login" -H 'X-Forwarded-For: 203.0.113.9'
   if printf '%s\n' "$ADM_HEADERS" | grep -qi '^set-cookie:'; then fail "admin: a refused address is given no session" "a cookie was set"; else pass "admin: a refused address is given no session"; fi
+
+  # A5: the read of a reported entry's words is no more reachable from a refused address than any other path.
+  expect "admin: POST an unknown path from a refused address gets the API's 401" 401 '"status":401' -- -X POST "$ADM/reports/00000000-0000-7000-8000-000000000000/no-such-path" -H 'X-Forwarded-For: 203.0.113.9'
+  ADM_UNKNOWN_POST="$(no_instance)"
+  expect "admin: POST …/entry-text from a refused address gets the API's 401 too" 401 '"status":401' -- -X POST "$ADM/reports/00000000-0000-7000-8000-000000000000/entry-text" -H 'X-Forwarded-For: 203.0.113.9'
+  is "admin: …byte for byte what an unknown path answers (but its instance)" "$(no_instance)" "$ADM_UNKNOWN_POST"
 
   AD_EMAIL="admin-smoke-$RANDOM$RANDOM@example.com"
   AD_PASSWORD="smoke admin passphrase $RANDOM-$RANDOM-x7Q"

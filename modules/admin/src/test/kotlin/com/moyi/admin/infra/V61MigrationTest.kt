@@ -68,7 +68,7 @@ internal class V61MigrationTest : PostgresIntegrationTest() {
 
     @Test
     fun `each new action is refused before V61 and inserts after it`() {
-        val added = AuditAction.entries.map { it.name } - A1_ACTIONS
+        val added = AuditAction.entries.map { it.name } - A1_ACTIONS - LATER_ACTIONS
         added shouldHaveSize 11
 
         added.forEach { action ->
@@ -78,7 +78,7 @@ internal class V61MigrationTest : PostgresIntegrationTest() {
         flyway("61").migrate()
 
         (A1_ACTIONS + added).forEach { action -> withClue(action) { insert(action) shouldBe 1 } }
-        AuditAction.entries shouldHaveSize 17
+        (A1_ACTIONS + added) shouldHaveSize 17
     }
 
     @Test
@@ -148,6 +148,9 @@ internal class V61MigrationTest : PostgresIntegrationTest() {
 
     private companion object {
         const val DATABASE = "moyi_v61_audit_actions"
+
+        /** Added by migrations after V61 (V64); refused here, at V61, by design. */
+        val LATER_ACTIONS = listOf("ENTRY_TEXT_READ")
         val A1_ACTIONS =
             listOf("ADMIN_INVITED", "ADMIN_DISABLED", "ADMIN_ENROLLED", "ADMIN_SIGN_IN", "ADMIN_SIGN_OUT", "USER_LOOKED_UP")
     }

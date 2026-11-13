@@ -1,5 +1,6 @@
 package com.moyi.app.admin
 
+import com.moyi.app.admin.AdminConsoleDriver.Companion.code
 import com.moyi.app.admin.ModerationRig.Companion.result
 import com.moyi.common.testing.MutableClock
 import io.kotest.assertions.withClue
@@ -7,6 +8,7 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.micrometer.core.instrument.MeterRegistry
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
@@ -17,6 +19,8 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpSession
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.post
+import java.sql.Timestamp
+import java.time.Duration
 import java.util.UUID
 import javax.sql.DataSource
 import kotlin.random.Random
@@ -39,10 +43,12 @@ import kotlin.random.Random
 class ModerationPrivacyTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val clock: MutableClock,
+    @Autowired private val meters: MeterRegistry,
     @Autowired dataSource: DataSource,
 ) : AdminEnabledTest() {
     private val jdbc = JdbcTemplate(dataSource)
     private val rig = ModerationRig(mockMvc, jdbc, clock)
+    private val driver = AdminConsoleDriver(mockMvc, jdbc)
 
     @Test
     @Suppress("LongMethod") // One reported entry walked through every A2 response; split, each part would rebuild it.
@@ -158,6 +164,108 @@ class ModerationPrivacyTest(
 
         auditKeepsOnlyTheNote(marker, detail, note, rig.adminOf(session), rig.adminOf(stale))
         listOf(marker, detail, note).forEach { output.all shouldNotContain it }
+    }
+
+    /**
+     * A5 (spec §2's goals, §5, §11; plan Task 4): an `ADMIN` reads a reported entry's words, which
+     * hold a unique marker and planted HTML. The marker is in exactly one response body, the read's
+     * own, escaped; in no page the console serves before or after it (home, the queue, the report's
+     * page with its history); in no log line, no metric tag, no `audit_log` and no `entry_report_log`
+     * column.
+     */
+    @Test
+    @Suppress("LongMethod") // One read walked through every page around it; split, each part would rebuild it.
+    fun `an entry's words read by an ADMIN are in the read's response alone, escaped`(output: CapturedOutput) {
+        val marker = "MARKER-${UUID.randomUUID()}"
+        val why = "WHY-${UUID.randomUUID()}"
+        val entry = entry(user(), user(), "$marker $PLANTED")
+        // A bond as bond's own view of it needs: the anchor interval it was created in (the read asks bond who withdrew).
+        jdbc.update(
+            "INSERT INTO bond_anchor_intervals (id, bond_id, zone, first_label, effective_from, effective_to, created_at) " +
+                "SELECT ?, bond_id, 'Africa/Lagos', (now() AT TIME ZONE 'Africa/Lagos')::date, now(), NULL, now() " +
+                "FROM entries WHERE id = ?",
+            UUID.randomUUID(),
+            entry,
+        )
+        val report = UUID.randomUUID()
+        jdbc.update(
+            "INSERT INTO entry_reports (id, target, entry_id, bond_id, reporter_member_id, reason, detail, status, created_at) " +
+                "VALUES (?, 'ENTRY', ?, (SELECT bond_id FROM entries WHERE id = ?), ?, 'HARASSMENT', NULL, 'OPEN', ?)",
+            report,
+            entry,
+            entry,
+            UUID.randomUUID(),
+            Timestamp.from(clock.instant()),
+        )
+        val email = "words-${UUID.randomUUID().toString().take(8)}@example.com"
+        val start = clock.instant()
+        try {
+            val secret = driver.enrol(email, PASSWORD, clock.instant(), role = "ADMIN")
+            val session = MockHttpSession()
+            driver.password(session, email, PASSWORD).status shouldBe 302
+            clock.advance(Duration.ofSeconds(STEP_SECONDS))
+            driver.code(session, code(secret, clock.instant())).status shouldBe 302
+
+            val before =
+                mapOf(
+                    "home" to rig.get(session, "/admin"),
+                    "queue" to rig.get(session, "/admin/reports"),
+                    "report" to rig.get(session, "/admin/reports/$report"),
+                )
+            before.getValue("report").contentAsString shouldContain "Read the entry"
+
+            clock.advance(Duration.ofSeconds(STEP_SECONDS))
+            val read =
+                rig.post(
+                    session,
+                    "/admin/reports/$report/entry-text",
+                    mapOf("expectedReason" to "HARASSMENT", "justification" to why, "code" to code(secret, clock.instant())),
+                )
+
+            val after =
+                mapOf(
+                    "home, after" to rig.get(session, "/admin"),
+                    "queue, after" to rig.get(session, "/admin/reports"),
+                    "report and its history, after" to rig.get(session, "/admin/reports/$report"),
+                )
+            read.response.status shouldBe 200
+            read.response.redirectedUrl shouldBe null
+            read.flashMap.isEmpty() shouldBe true
+            read.response.getHeader("Cache-Control") shouldBe "no-store"
+            read.response.getHeader("Pragma") shouldBe "no-cache"
+            read.response.getHeader("Referrer-Policy") shouldBe "no-referrer"
+            val body = read.response.contentAsString
+            Regex(Regex.escape(marker)).findAll(body).count() shouldBe 1
+            body shouldContain ESCAPED
+            body shouldNotContain PLANTED
+            HISTORY.find(after.getValue("report and its history, after").contentAsString).shouldNotBeNull().value shouldContain
+                "WORDS_READ"
+            (before + after).forEach { (name, page) ->
+                withClue(name) {
+                    page.status shouldBe 200
+                    page.contentAsString shouldNotContain marker
+                }
+            }
+
+            meters.meters.forEach { meter ->
+                withClue(meter.id.name) {
+                    meter.id.tags
+                        .joinToString()
+                        .contains(marker) shouldBe false
+                }
+            }
+            jdbc.queryForObject("SELECT count(*) FROM audit_log a WHERE a::text LIKE ?", Int::class.java, "%$marker%") shouldBe 0
+            jdbc.queryForObject("SELECT count(*) FROM entry_report_log l WHERE l::text LIKE ?", Int::class.java, "%$marker%") shouldBe 0
+            jdbc.queryForObject(
+                "SELECT count(*) FROM audit_log WHERE action = 'ENTRY_TEXT_READ' AND justification = ? AND outcome = 'SUCCEEDED'",
+                Int::class.java,
+                why,
+            ) shouldBe 1
+            output.all shouldNotContain marker
+            output.all shouldNotContain why
+        } finally {
+            clock.set(start)
+        }
     }
 
     /**
@@ -285,5 +393,9 @@ class ModerationPrivacyTest(
 
     private companion object {
         val HISTORY = Regex("""<table id="history">.*?</table>""", RegexOption.DOT_MATCHES_ALL)
+        const val PASSWORD = "nineteen silver kettles hum"
+        const val STEP_SECONDS = 30L
+        const val PLANTED = "<script>alert(1)</script><b>x</b>"
+        const val ESCAPED = "&lt;script&gt;alert(1)&lt;/script&gt;&lt;b&gt;x&lt;/b&gt;"
     }
 }
