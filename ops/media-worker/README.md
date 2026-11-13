@@ -159,7 +159,7 @@ ssh moyi 'systemctl enable --now moyi-media-check.timer && systemctl start moyi-
 ```
 
 which should end `moyi-media-check: ok (…)`. With a moderator running
-(Rekognition and voice `allow` since ADR-0065), set `MEDIA_MODERATION_ON=1`
+(`allow` for photos and voice notes since ADR-0065, or Rekognition), set `MEDIA_MODERATION_ON=1`
 (ops/monitoring/README.md), so media left without a verdict raises the alarm.
 Leave it unset only while moderation is `none`.
 

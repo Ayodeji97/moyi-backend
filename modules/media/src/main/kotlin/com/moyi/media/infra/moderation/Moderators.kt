@@ -114,7 +114,8 @@ internal class ModeratorUnavailableException(
 /**
  * No photo is moderated in this process (`provider: none`). Never the default;
  * production names it for the API, which moderates nothing; the media worker
- * runs Rekognition (ADR-0065). Fails closed by construction: with it nothing gets a verdict,
+ * names `allow`, and Rekognition once the AWS account is upgraded (ADR-0065).
+ * Fails closed by construction: with it nothing gets a verdict,
  * so no partner is shown a photo; it does not pass anything.
  */
 internal class NoImageModeration : ImageModerator {

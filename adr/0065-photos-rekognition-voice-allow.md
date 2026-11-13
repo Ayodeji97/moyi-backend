@@ -1,6 +1,6 @@
-# ADR-0065 — Photos moderated by Rekognition in the media worker; voice notes pass unchecked
+# ADR-0065 — Photos to Rekognition in the media worker, passed unchecked until the AWS account is upgraded; voice notes pass unchecked
 
-**Status:** Accepted, amended the same day (below) · **Date:** 2026-11-13 · **Deciders:** Daniel · **Amends:** ADR-0051
+**Status:** Accepted, amended the same day (below: **in force now, photos and voice notes both pass unchecked**) · **Date:** 2026-11-13 · **Deciders:** Daniel · **Amends:** ADR-0051
 (production's providers: photos switched on, voice `allow`), ADR-0049 decision 7 (a voice note
 reaches a partner once it has a `PASSED` verdict: it still does, and the verdict is `allow`'s)
 
@@ -22,7 +22,8 @@ chose to pass both unchecked, for cost, and on hearing the figure chose Rekognit
 
 ## Decision
 
-1. **Photos: Rekognition, in the media worker only.** The worker's role names
+1. **Photos: Rekognition, in the media worker only** (switched off by the amendment below until
+   the AWS account is upgraded; everything here stays wired). The worker's role names
    `MOYI_MEDIA_MODERATION_IMAGE_PROVIDER: rekognition` and alone holds the IAM user's key
    (`rekognition:DetectModerationLabels` and nothing else, ADR-0051), from the vault through
    `.kamal/secrets`. The API keeps `none`: it processes nothing, so it moderates nothing, and it
@@ -34,7 +35,7 @@ chose to pass both unchecked, for cost, and on hearing the figure chose Rekognit
    found. Its name, `allow`, is what `moderation_scores` and the audit log record, so a voice note
    passed this way can always be told from one a moderator listened to. "Unchecked" means no one
    judges what it says: a voice note whose file is missing or unreadable is still held back for
-   the operator (`UNMODERATABLE`), never passed. Photos have no `allow`.
+   the operator (`UNMODERATABLE`), never passed. (Photos gained an `allow` of their own in the amendment below.)
 3. **Media already sent is moderated too.** Under `none` neither consumer subscribed to anything,
    so neither was ever stored as a subscriber (`ConsumerRegistry.register` stores only declared
    types). On the first deploy each subscribes for the first time and, starting from the beginning
@@ -88,7 +89,10 @@ vault, AWS's `eu-central-1` ranges in its egress limit), so switching on is one 
   and caps spend at a monthly limit (the owner chose $20). Owed: upgrade, then switch on, before
   the app is public. Photos passed by `allow` keep their verdict.
 - The photos that waited while Rekognition refused them are passed on this deploy: their
-  deliveries are still being retried, and the next attempt meets `allow`.
+  deliveries are still being retried (the outbox has no last attempt; backoff caps at 15
+  minutes), and the next attempt meets `allow`. Unlike the first deploy, nothing is backfilled:
+  the image consumer was already subscribed. A photo whose display variant is missing or
+  unreadable is held back for the operator (`UNMODERATABLE`), as under any moderator.
 - Nothing stops an image a moderator would hold back, including child sexual abuse material,
   from reaching a partner until it is reported. Accepted by the owner for two known testers;
   not for the public.

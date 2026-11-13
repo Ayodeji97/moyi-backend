@@ -64,7 +64,7 @@ internal class MediaModerationConfigurationTest {
     /**
      * ADR-0065: voice `allow` moderates here (so the consumer subscribes and is
      * handed every voice note made before), passes every one, and says `allow`
-     * in the record. Photos have no `allow`.
+     * in the record.
      */
     @Test
     fun `voice allow, asked for by name, starts with no credentials and passes every voice note`() {

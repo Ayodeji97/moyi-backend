@@ -330,8 +330,9 @@ env:
     # Spring Boot would read "false" as OFF anyway (seen), but the file says what it means.
     MOYI_MEDIA_PROCESSING_PROVIDER: "off"
     # Moderation (ADR-0051, ADR-0065, the owner's ruling of 2026-11-13).
-    # Photos: Rekognition, in the media worker only, which overrides this
-    # line and alone holds the AWS key (servers.media-worker below). The API
+    # Photos: the media worker overrides this line (`allow` for now,
+    # Rekognition once the AWS account is upgraded) and alone holds the AWS
+    # key (servers.media-worker below). The API
     # processes nothing, so it moderates nothing; `none` keeps it starting
     # without the key. Never `stand-in`, which decides by colour for local
     # runs.
