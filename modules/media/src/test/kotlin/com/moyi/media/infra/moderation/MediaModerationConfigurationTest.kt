@@ -62,28 +62,23 @@ internal class MediaModerationConfigurationTest {
     }
 
     /**
-     * ADR-0065: `allow` moderates here (so the consumers subscribe and are handed
-     * every photo and voice note made before) and passes everything, even what a
-     * stand-in or Rekognition would hold back, and says `allow` in the record.
+     * ADR-0065: voice `allow` moderates here (so the consumer subscribes and is
+     * handed every voice note made before), passes every one, and says `allow`
+     * in the record. Photos have no `allow`.
      */
     @Test
-    fun `allow, asked for by name, starts with no credentials and passes everything`() {
+    fun `voice allow, asked for by name, starts with no credentials and passes every voice note`() {
         runner
             .withPropertyValues(
-                "moyi.media.moderation.image.provider=allow",
+                "moyi.media.moderation.image.provider=none",
                 "moyi.media.moderation.voice.provider=allow",
             ).run { context ->
-                val image = context.getBean(ImageModerator::class.java)
                 val voice = context.getBean(VoiceModerator::class.java)
-                image.shouldBeInstanceOf<AllowImageModeration>()
                 voice.shouldBeInstanceOf<AllowVoiceModeration>()
-                image.moderatesHere shouldBe true
                 voice.moderatesHere shouldBe true
-                image.name shouldBe "allow"
                 voice.name shouldBe "allow"
-                image.moderate(solid(Color(220, 20, 20))) shouldBe Moderated.Found(emptyList())
                 voice.moderate(byteArrayOf(), 1_000) shouldBe Moderated.Found(emptyList())
-                context.getBean(KnownImageMatcher::class.java).shouldBeInstanceOf<NoKnownImageList>()
+                context.getBean(ImageModerator::class.java).moderatesHere shouldBe false
             }
     }
 

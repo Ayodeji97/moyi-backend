@@ -14,10 +14,9 @@ import com.moyi.media.domain.ImageFormat
 import com.moyi.media.domain.ModerationCategory
 import com.moyi.media.infra.MediaIntegrationTest
 import com.moyi.media.infra.MediaTestApplication
+import com.moyi.media.infra.moderation.AllowVoiceModeration
 import com.moyi.media.infra.moderation.Moderated
 import com.moyi.media.infra.moderation.ModeratorUnavailableException
-import com.moyi.media.infra.moderation.AllowImageModeration
-import com.moyi.media.infra.moderation.AllowVoiceModeration
 import com.moyi.media.infra.moderation.NoImageModeration
 import com.moyi.media.infra.moderation.NoKnownImageList
 import com.moyi.media.infra.moderation.NoVoiceModeration
@@ -439,18 +438,16 @@ internal class ModerateMediaTest(
     }
 
     /**
-     * ADR-0065: `allow` moderates here, so both consumers subscribe from the
-     * beginning, and every photo and voice note sent while `none` ran is handed
-     * to them and passed once production names `allow`.
+     * ADR-0065: voice `allow` moderates here, so the voice consumer subscribes
+     * from the beginning, and every voice note sent while `none` ran is handed
+     * to it and passed once production names `allow`.
      */
     @Test
-    fun `with allow, both consumers subscribe from the beginning`() {
-        val images = ModerateImages(moderation, imageProcessor, AllowImageModeration(), NoKnownImageList())
+    fun `with voice allow, the voice consumer subscribes from the beginning`() {
         val voices = ModerateVoices(moderation, voiceProcessor, AllowVoiceModeration())
-        images.eventTypes shouldBe setOf("MediaReady")
         voices.eventTypes shouldBe setOf("MediaReady")
-        images.startFrom shouldBe StartFrom.BEGINNING
         voices.startFrom shouldBe StartFrom.BEGINNING
+        ModerateImages(moderation, imageProcessor, moderator, knownImages).startFrom shouldBe StartFrom.BEGINNING
     }
 
     private fun readyPhoto(bytes: ByteArray): UUID {

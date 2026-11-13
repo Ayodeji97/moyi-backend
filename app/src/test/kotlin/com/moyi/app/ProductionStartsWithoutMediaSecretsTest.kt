@@ -126,13 +126,13 @@ internal class ProductionStartsWithoutMediaSecretsTest {
      * only what it needs, the database's password and the bucket's three
      * values; the session-signing pair, the HMAC key and the email key are the
      * API's alone. A secret added to the top-level `env` later reaches the
-     * worker too, and fails this until it is put where it belongs. (When
-     * moderation is switched on, its key is the worker's, and is added here.)
+     * worker too, and fails this until it is put where it belongs. Rekognition's
+     * key is the worker's alone (ADR-0065): the API never moderates.
      */
     @Test
     fun `the media worker holds only the database's and the bucket's secrets, the API its own as well`() {
         roles.getValue("media-worker").secret shouldContainExactlyInAnyOrder
-            listOf("SPRING_DATASOURCE_PASSWORD") + STORAGE_SECRETS
+            listOf("SPRING_DATASOURCE_PASSWORD") + STORAGE_SECRETS + REKOGNITION_SECRETS
         roles.getValue("web").secret shouldContainExactlyInAnyOrder
             listOf("SPRING_DATASOURCE_PASSWORD") + STORAGE_SECRETS + API_SECRETS
     }
@@ -206,13 +206,13 @@ internal class ProductionStartsWithoutMediaSecretsTest {
     /**
      * ADR-0051: photo moderation defaults to Rekognition, which refuses to
      * start without its key pair, so the file names `none` (which moderates
-     * nothing and shows no partner any photo), `allow` (which passes every
-     * photo unchecked: the owner's ruling of 2026-11-13, ADR-0065), or gives
-     * Rekognition both halves of its key, as secrets. The jar was started with this environment and no
+     * nothing and shows no partner any photo) or gives Rekognition both
+     * halves of its key, as secrets: since ADR-0065, the API names `none` and
+     * the media worker holds the key. The jar was started with this environment and no
      * AWS credentials when this landed (the pull request records the run).
      */
     @Test
-    fun `deploy-yml names photo moderation none or allow, or gives Rekognition both halves of its key, in every role`() {
+    fun `deploy-yml names photo moderation none, or gives Rekognition both halves of its key, in every role`() {
         roles.forEach { (role, env) ->
             val provider =
                 env.clear["MOYI_MEDIA_MODERATION_IMAGE_PROVIDER"]
@@ -227,7 +227,7 @@ internal class ProductionStartsWithoutMediaSecretsTest {
             val found = provider ?: "<default Rekognition>"
 
             withClue("config/deploy.yml would start a $role whose photo moderation refuses to start (provider: $found)") {
-                (provider == "none" || provider == "allow" || ((provider == null || provider == "rekognition") && rekognitionComplete)) shouldBe true
+                (provider == "none" || ((provider == null || provider == "rekognition") && rekognitionComplete)) shouldBe true
             }
         }
     }
@@ -254,8 +254,8 @@ internal class ProductionStartsWithoutMediaSecretsTest {
      * ADR-0051: the stand-ins decide by colour (a photo that is not red passes)
      * and pass every voice note. A partner is shown what passes, so a stand-in
      * in production would show partners unmoderated media. None of the three
-     * may name it, in any role. `allow` passes everything too, but says so by name
-     * and is the owner's ruling (ADR-0065); a stand-in would pass by accident.
+     * may name it, in any role. Voice `allow` passes every voice note too, but says
+     * so by name and is the owner's ruling (ADR-0065); a stand-in would pass by accident.
      */
     @Test
     fun `deploy-yml never names a moderation stand-in`() {
@@ -420,6 +420,13 @@ internal class ProductionStartsWithoutMediaSecretsTest {
                 "MOYI_MEDIA_STORAGE_R2_ENDPOINT",
                 "MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID",
                 "MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY",
+            )
+
+        /** Rekognition's key pair: the media worker's alone, which moderates photos (ADR-0065). */
+        val REKOGNITION_SECRETS =
+            setOf(
+                "MOYI_MEDIA_MODERATION_REKOGNITION_ACCESS_KEY_ID",
+                "MOYI_MEDIA_MODERATION_REKOGNITION_SECRET_ACCESS_KEY",
             )
 
         /** What the API alone needs: the session-signing pair, the HMAC key, the email key, FCM's service account. */

@@ -33,11 +33,6 @@ internal class MediaModerationConfiguration {
                 log.warn("Photo moderation: STAND-IN, deciding by colour. Never in production (ADR-0051).")
                 StandInImageModerator()
             }
-
-            MediaModerationProperties.ImageProvider.ALLOW -> {
-                log.warn("Photo moderation: ALLOW. Every photo passes unchecked (ADR-0065); switch on Rekognition before launch.")
-                AllowImageModeration()
-            }
         }
 
     @Bean

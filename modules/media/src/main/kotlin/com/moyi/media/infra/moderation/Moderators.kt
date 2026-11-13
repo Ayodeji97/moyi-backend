@@ -112,9 +112,9 @@ internal class ModeratorUnavailableException(
 ) : RuntimeException(message, cause)
 
 /**
- * No photo is moderated in this process (`provider: none`). Never the default:
- * production's `config/deploy.yml` names it until the owner supplies AWS
- * credentials. Fails closed by construction: with it nothing gets a verdict,
+ * No photo is moderated in this process (`provider: none`). Never the default;
+ * production names it for the API, which moderates nothing; the media worker
+ * runs Rekognition (ADR-0065). Fails closed by construction: with it nothing gets a verdict,
  * so no partner is shown a photo; it does not pass anything.
  */
 internal class NoImageModeration : ImageModerator {
@@ -144,21 +144,13 @@ internal class NoVoiceModeration : VoiceModerator {
 }
 
 /**
- * Every photo passes, unchecked (`provider: allow`): the owner's ruling of
- * 2026-11-13 (ADR-0065), for cost, while only testers use the app. It
- * moderates here, so `media.moderate-image` subscribes and is handed every
- * photo made before (`StartFrom.BEGINNING`), and each gets a `PASSED` verdict
- * whose record names `allow`, so a photo passed this way can always be told
- * from one a moderator looked at. Owed: Rekognition before the app is public.
+ * Every voice note passes, unchecked (`provider: allow`): the owner's ruling of
+ * 2026-11-13 (ADR-0065). No vendor moderates audio (ADR-0051 decision 5). It
+ * moderates here, so `media.moderate-voice` subscribes and is handed every voice
+ * note made before (`StartFrom.BEGINNING`); each gets a `PASSED` verdict whose
+ * record names `allow`, so a voice note passed this way can always be told from
+ * one a moderator listened to.
  */
-internal class AllowImageModeration : ImageModerator {
-    override val moderatesHere: Boolean = true
-    override val name: String = "allow"
-
-    override fun moderate(jpeg: ByteArray): Moderated = Moderated.Found(emptyList())
-}
-
-/** Every voice note passes, unchecked (`provider: allow`, ADR-0065), as [AllowImageModeration] for photos. */
 internal class AllowVoiceModeration : VoiceModerator {
     override val moderatesHere: Boolean = true
     override val name: String = "allow"
