@@ -115,6 +115,42 @@ internal class ReportedEntryTextTest(
         rig.log(report) shouldContainExactly listOf("WORDS_READ|$ACTOR|null")
     }
 
+    /** V39: a report outlives its entry's row. No route removes one today; the row is deleted by hand. */
+    @Test
+    fun `an entry whose row is gone is erased, and the read is logged`() {
+        val entry = rig.revealed(bond, bea, ada, """{"text":"$MARKER"}""")
+        val report = rig.reportEntry(ada, entry, "HARASSMENT")
+        jdbc.update("DELETE FROM entries WHERE id = ?", entry) shouldBe 1
+
+        tx { port.read(report, "HARASSMENT", ACTOR) } shouldBe ReportedEntryRead.Erased(entry)
+
+        rig.log(report) shouldContainExactly listOf("WORDS_READ|$ACTOR|null")
+    }
+
+    /** A bond `closingViewOf` no longer finds: the report is pointed at a bond id with no row, as no route can. */
+    @Test
+    fun `an entry whose bond is gone is erased, and the read is logged`() {
+        val entry = rig.revealed(bond, bea, ada, """{"text":"$MARKER"}""")
+        val report = rig.reportEntry(ada, entry, "HARASSMENT")
+        jdbc.update("UPDATE entry_reports SET bond_id = ? WHERE id = ?", UUID.randomUUID(), report) shouldBe 1
+
+        tx { port.read(report, "HARASSMENT", ACTOR) } shouldBe ReportedEntryRead.Erased(entry)
+
+        rig.log(report) shouldContainExactly listOf("WORDS_READ|$ACTOR|null")
+    }
+
+    /** `Entry.isErased`: either mark counts. A row stamped `deleted_at` with its status not yet `DELETED`, written by hand. */
+    @Test
+    fun `an entry stamped deleted while its status is not yet DELETED is erased, and the read is logged`() {
+        val entry = rig.revealed(bond, bea, ada, """{"text":"$MARKER"}""")
+        val report = rig.reportEntry(ada, entry, "HARASSMENT")
+        jdbc.update("UPDATE entries SET deleted_at = now() WHERE id = ? AND status = 'REVEALED'", entry) shouldBe 1
+
+        tx { port.read(report, "HARASSMENT", ACTOR) } shouldBe ReportedEntryRead.Erased(entry)
+
+        rig.log(report) shouldContainExactly listOf("WORDS_READ|$ACTOR|null")
+    }
+
     /**
      * The domain forbids a live entry with no text (`Entry.init`), and no route can make one; the
      * row is written by hand. The store refuses to show it, writes nothing, and says why without a word.
