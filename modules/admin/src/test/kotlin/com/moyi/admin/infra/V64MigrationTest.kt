@@ -49,7 +49,13 @@ internal class V64MigrationTest : PostgresIntegrationTest() {
     fun `every older action still inserts after V64, and one outside the list is still refused`() {
         flyway("64").migrate()
 
-        (AuditAction.entries.map { it.name }).forEach { action -> withClue(action) { insert(action) shouldBe 1 } }
+        // V66 added the two suspension actions, which V64 rightly refuses.
+        (AuditAction.entries.map { it.name } - listOf("ACCOUNT_SUSPENDED", "ACCOUNT_UNSUSPENDED")).forEach { action ->
+            withClue(action) {
+                insert(action) shouldBe
+                    1
+            }
+        }
         shouldThrow<DataIntegrityViolationException> { insert("NOPE") }.message!! shouldContain "audit_log_action_check"
     }
 

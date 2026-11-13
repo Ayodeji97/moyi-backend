@@ -696,6 +696,40 @@ class ArchitectureTest {
     }
 
     @Test
+    fun `within the admin module only SuspensionConsole imports the port that suspends an account`() {
+        // A3 spec §6: `AccountSuspension` suspends and lifts an account; inside `admin` one class
+        // may hold it, the service that checks the role, the justification and the second factor
+        // and writes the audit row. A controller or a second service that held the port could
+        // suspend past all three. A wildcard import of identity's api is already refused by the
+        // rules above, so the exact import is what this sees. Tests (AdminTestApplication's fake)
+        // are not scanned.
+        val port = "com.moyi.identity.api.AccountSuspension"
+        val allowed = "/modules/admin/src/main/kotlin/com/moyi/admin/service/SuspensionConsole.kt"
+
+        fun importsPort(importName: String): Boolean = importName == port || importName.startsWith("$port.")
+        // Positive controls: the matcher is not vacuous, and does not catch the port's result types.
+        assertTrue(importsPort(port), "the port's import was not matched")
+        assertTrue(!importsPort("com.moyi.identity.api.SuspensionResult"), "the port's result type was matched")
+        assertTrue(!importsPort("com.moyi.identity.api.AccountSuspensionish"), "a name sharing the prefix was matched")
+        val adminMain = project.files.filter { it.normalisedProjectPath.startsWith("/modules/admin/src/main/") }
+        assertTrue(adminMain.isNotEmpty(), "the scope saw no admin main files")
+        assertTrue(
+            adminMain.any { it.normalisedProjectPath == allowed && it.imports.any { import -> importsPort(import.name) } },
+            "the one allowed import was not seen",
+        )
+        val violations =
+            adminMain
+                .filter { it.normalisedProjectPath != allowed }
+                .filter { file -> file.imports.any { importsPort(it.name) } }
+                .map { it.normalisedProjectPath }
+
+        assertTrue(
+            violations.isEmpty(),
+            "Within modules/admin only service/SuspensionConsole.kt may import AccountSuspension (A3 spec §6). Found: $violations",
+        )
+    }
+
+    @Test
     fun `only SecondFactor's proveNow makes the per-read step-up proof`() {
         // A5 spec §5 step 3: `FreshStepUp` says a code was proved in this request. Its constructor
         // is `internal`, so anything in `admin` could call it; a second caller (a controller that

@@ -2,7 +2,10 @@ package com.moyi.admin.infra
 
 import com.moyi.bond.api.BondAdminLookup
 import com.moyi.common.security.TokenRevocations
+import com.moyi.identity.api.AccountSuspension
 import com.moyi.identity.api.PasswordHashing
+import com.moyi.identity.api.SuspensionOutcome
+import com.moyi.identity.api.SuspensionResult
 import com.moyi.identity.api.UserAdminLookup
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -11,6 +14,9 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan
 import org.springframework.boot.persistence.autoconfigure.EntityScan
 import org.springframework.context.annotation.Bean
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories
+import org.springframework.transaction.support.TransactionSynchronizationManager
+import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * A Spring context just large enough to test this module, test-only. It exists
@@ -65,8 +71,12 @@ internal class AdminTestApplication {
     @Bean
     fun bondAdminLookup(): BondAdminLookup =
         object : BondAdminLookup {
-            override fun bondsOf(userId: java.util.UUID) = emptyList<com.moyi.bond.api.BondAdminView>()
+            override fun bondsOf(userId: UUID) = emptyList<com.moyi.bond.api.BondAdminView>()
         }
+
+    /** Identity's port, scripted: [ScriptedAccountSuspension] answers what a test sets and records each call. */
+    @Bean
+    fun accountSuspension(): AccountSuspension = ScriptedAccountSuspension
 
     /** No actuator in this context; the sign-in counter needs a registry to count in. */
     @Bean
@@ -75,4 +85,35 @@ internal class AdminTestApplication {
     companion object {
         const val BREACHED = "passwordpassword"
     }
+}
+
+/**
+ * A stand-in for identity's `AccountSuspension`, which this context does not build. It records each
+ * call as `suspend:<user>` or `lift:<user>` and answers [answer]. Like the real port it refuses to
+ * run outside a transaction, so a test sees a console that forgot to open one.
+ */
+internal object ScriptedAccountSuspension : AccountSuspension {
+    val calls: MutableList<String> = CopyOnWriteArrayList()
+
+    @Volatile var answer: SuspensionResult = SuspensionResult(SuspensionOutcome.SUSPENDED, null, null)
+
+    fun reset() {
+        calls.clear()
+        answer = SuspensionResult(SuspensionOutcome.SUSPENDED, null, null)
+    }
+
+    override fun suspend(userId: UUID): SuspensionResult {
+        mandatory()
+        calls += "suspend:$userId"
+        return answer
+    }
+
+    override fun lift(userId: UUID): SuspensionResult {
+        mandatory()
+        calls += "lift:$userId"
+        return answer
+    }
+
+    /** The real port is `MANDATORY`; a final object cannot be proxied, so the rule is checked by hand. */
+    private fun mandatory() = check(TransactionSynchronizationManager.isActualTransactionActive()) { "No transaction (MANDATORY)." }
 }
