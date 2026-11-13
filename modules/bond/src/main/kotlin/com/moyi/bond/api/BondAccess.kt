@@ -84,6 +84,20 @@ interface BondAccess {
      * **[BondClosingView.withdrawnMemberIds] read through this method is not
      * read under the bond's lock** and must not be used to decide an erasure
      * or a reveal.
+     *
+     * **One exception, and the one request that reaches this: the admin
+     * console's read of a reported entry's words** (`gratitude`'s
+     * `ReportedEntryTextStore`, A5 spec §6). It is reached only from a
+     * method that requires the `ADMIN` role and a second factor proved in
+     * the same request, never from a member's route. It asks whether the
+     * entry's author has withdrawn, to show a tombstone rather than words,
+     * and it asks after taking the entry's row lock: a withdrawal committed
+     * before that statement is seen, and one committing after is ordered
+     * after the read, which shows the words as they stood before it. It must
+     * not take [lockClosingViewOf]: the read already holds the report's
+     * share lock, and the reporter's own account erasure takes the bond's
+     * lock and then empties that report's detail (`EntryReports.forgetDetailOf`),
+     * so waiting on the bond would close a cycle with it.
      */
     fun closingViewOf(bondId: UUID): BondClosingView?
 

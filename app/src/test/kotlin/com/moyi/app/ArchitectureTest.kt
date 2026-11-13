@@ -206,7 +206,9 @@ class ArchitectureTest {
          * withdrawal's consumer, the daily reminder's sweep, the day's push consumer, the
          * on-this-day sweep and the embedding sweep (ADR-0054). Each reads a bond with no caller
          * whose membership could be checked. (`ForgetBondEmbeddings`, the embedding's other
-         * caller-less work, reads no bond at all, so it is not here.)
+         * caller-less work, reads no bond at all, so it is not here.) And one read that has a
+         * request but no member: the admin console's read of a reported entry (A5 spec §6),
+         * reached only through the `ADMIN` role and a second factor, never a member's route.
          */
         private val WORK_WITH_NO_CALLER =
             setOf(
@@ -466,7 +468,7 @@ class ArchitectureTest {
     }
 
     @Test
-    fun `the unguarded view of a bond is asked for by the work that has no caller, and by nobody else`() {
+    fun `the unguarded view of a bond is asked for by the work that has no caller or the admin's guarded read, and nobody else`() {
         // The closing-view methods and `bondsToSweep` run no membership
         // guard: the close job has no caller to ask about, nor has the
         // consumer that erases a withdrawal's entries (ADR-0031, Owed,
@@ -474,6 +476,8 @@ class ArchitectureTest {
         // the guard, so these are the only ones a request must never
         // reach — and a request reaches a service as easily as a controller,
         // so the rule is a list of who MAY name them, not of who may not.
+        // The one listed reader that serves a request is the admin's
+        // role-guarded read of a reported entry (A5): no member route reaches it.
         // Text-based: the names are distinctive, and a call through an alias
         // would still have to spell one of them.
         val violations =
@@ -488,7 +492,7 @@ class ArchitectureTest {
             violations.isEmpty(),
             "Only the close job, the withdrawal's consumer, the reminder sweep, the day's push consumer, the on-this-day " +
                 "sweep, the embedding sweep, the account deletion's erasure, the export's withdrawal consumer and the " +
-                "console's read of a reported entry may call " +
+                "admin's role-guarded read of a reported entry may call " +
                 "bond's unguarded reads. Found in: $violations",
         )
     }
