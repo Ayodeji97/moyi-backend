@@ -142,6 +142,38 @@ internal class LoginSuspensionRaceTest(
         me.andReturn().response.status shouldBe 401
     }
 
+    /**
+     * §8's refresh row, for the access token as well as the refresh token: a refresh mints under
+     * the sessions lock, so a suspension waiting on it stamps after this token's `iat`.
+     */
+    @Test
+    fun `a refresh that holds the sessions lock finishes first and its access token is then refused`() {
+        val (ada, email) = signUp()
+        val signedIn = login(email)
+        signedIn.status shouldBe 200
+        val stopped = issuer.gate.arm()
+
+        val rotation = pool.submit<MockHttpServletResponse> { refresh(refreshToken(signedIn.contentAsString)) }
+        stopped.awaitReached()
+        val suspended = pool.submit<SuspensionResult> { transactions.execute { suspension.suspend(ada) } }
+        // Only if the token is minted inside the rotation's transaction is the suspension held here.
+        awaitSessionsLockWaiter(ada)
+        // Minted after the commit, the token would be stamped later than a suspension that ran in
+        // between; held here, the suspension can only stamp after the rotation commits.
+        clock.advance(Duration.ofSeconds(5))
+        stopped.release()
+
+        val response = rotation.get(WAIT.seconds, TimeUnit.SECONDS)
+        response.status shouldBe 200
+        suspended.get(WAIT.seconds, TimeUnit.SECONDS).outcome shouldBe SuspensionOutcome.SUSPENDED
+
+        liveRefreshTokens(ada) shouldBe 0
+        refresh(refreshToken(response.contentAsString)).status shouldBe 401
+        clock.advance(Duration.ofSeconds(1))
+        val me = mockMvc.get("/api/v1/me") { header(HttpHeaders.AUTHORIZATION, "Bearer ${accessToken(response.contentAsString)}") }
+        me.andReturn().response.status shouldBe 401
+    }
+
     @Test
     fun `a password reset committed during the check also wins`() {
         val (_, email) = signUp()
