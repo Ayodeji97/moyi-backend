@@ -68,7 +68,7 @@
     "to": "ACTIVE",
     "status": 200,
     "code": null,
-    "reason": "The bond is listed with both members and whatever is waiting to be agreed.",
+    "reason": "The bond is listed with both members and whatever is waiting to be agreed. Each bond carries paused: true while a member who has not left it is suspended, and nothing about why (A3).",
     "rule": "",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -455,7 +455,7 @@
     "from": "ACTIVE",
     "action": "GET /api/v1/bonds/{bondId}",
     "actor": "you",
-    "when": "",
+    "when": "the bond is not paused",
     "guards": [
       {
         "region": "account",
@@ -468,11 +468,36 @@
     "to": "ACTIVE",
     "status": 200,
     "code": null,
-    "reason": "The bond with both members, no invite, and anything waiting to be agreed.",
+    "reason": "The bond with both members, no invite, and anything waiting to be agreed. paused is false.",
     "rule": "",
     "evidence": "smoke",
     "evidenceRef": "the creator sees the same active bond",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/BondsController.kt#val view = getBond.view(membership)"
+  },
+  {
+    "id": "bond-active-read-paused",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "GET /api/v1/bonds/{bondId}",
+    "actor": "you",
+    "when": "the bond is paused: a member who has not left is suspended",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "The bond as ever, with paused: true and nothing about why: no reason, no date, no member named. paused is in the ETag's digest, so a client holding the tag from before the pause is answered 200, not 304, and learns of it (and of the resume).",
+    "rule": "doc 04 §8.1, ADR-0066 ruling 10",
+    "evidence": "smoke",
+    "evidenceRef": "admin A3: the partner's GET of the bond says paused",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/BondResponse.kt#paused = view.paused,"
   },
   {
     "id": "bond-pending-deletion-read",
@@ -768,7 +793,7 @@
     "to": "ARCHIVED",
     "status": 204,
     "code": null,
-    "reason": "One member leaving ends the bond for both: it becomes ARCHIVED, a record each of you can still read. Nobody is notified, and anything waiting to be agreed is cancelled. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11).",
+    "reason": "One member leaving ends the bond for both: it becomes ARCHIVED, a record each of you can still read. Nobody is notified, and anything waiting to be agreed is cancelled. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11). Allowed while the bond is paused: a partner is never kept from leaving (ADR-0066 ruling 9; PausedBondEndpointTest).",
     "rule": "FR-026, ADR-0028 §1",
     "evidence": "smoke",
     "evidenceRef": "leaving is 204",
@@ -918,7 +943,7 @@
     "to": "ARCHIVED",
     "status": 204,
     "code": null,
-    "reason": "The bond ends as it does for a leave, with the same answer, and it is also recorded that the two accounts are not to be paired again. Nothing your partner can read says which of the two happened. The body must say which: withdrawEntries: true takes your entries back for both of you, false keeps them; without the flag the block is refused and nothing is ended (ADR-0035 §11 and question 1; the refusal is asserted by BondEndingEndpointTest#an absent flag is refused on a block and keeps on a leave, however it is absent).",
+    "reason": "The bond ends as it does for a leave, with the same answer, and it is also recorded that the two accounts are not to be paired again. Nothing your partner can read says which of the two happened. The body must say which: withdrawEntries: true takes your entries back for both of you, false keeps them; without the flag the block is refused and nothing is ended (ADR-0035 §11 and question 1; the refusal is asserted by BondEndingEndpointTest#an absent flag is refused on a block and keeps on a leave, however it is absent). Allowed while the bond is paused, as leaving is (ADR-0066 ruling 9; PausedBondEndpointTest).",
     "rule": "FR-029, ADR-0028 §1, doc 26 §2.1",
     "evidence": "test",
     "evidenceRef": "BondEndingEndpointTest#blocking is 204 and writes one row per other member",
@@ -3055,7 +3080,7 @@
     "from": "ACTIVE",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "the day takes the entry",
+    "when": "the bond is not paused, and the day takes the entry",
     "guards": [
       {
         "region": "account",
@@ -3073,6 +3098,31 @@
     "evidence": "smoke",
     "evidenceRef": "the first entry is 201, SUBMITTED",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-active-write-paused",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the bond is paused: a member who has not left is suspended; a new request",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE",
+    "status": 409,
+    "code": "BOND_PAUSED",
+    "reason": "\"This bond is paused. Everything in it can still be read; new entries wait until it resumes.\" It names no cause, no date and no member. Nothing is written; a late entry and an offline draft are refused the same way. Checked right after BOND_ARCHIVED, so an ended bond answers that first, and inside the idempotent execution, so a submit accepted before the pause and replayed after it answers its original 201. Only the partner can meet this: the suspended member cannot sign in.",
+    "rule": "FR-113, doc 04 §8.1, ADR-0066 ruling 9",
+    "evidence": "smoke",
+    "evidenceRef": "admin A3: the partner's new entry is 409 BOND_PAUSED",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (membership.paused) throw BondPausedException()"
   },
   {
     "id": "bond-pending-deletion-write",
@@ -3230,7 +3280,7 @@
     "from": "ACTIVE",
     "action": "PATCH /api/v1/entries/{entryId}",
     "actor": "you",
-    "when": "the entry is yours and can still be edited",
+    "when": "the entry is yours and can still be edited, and the bond is not paused",
     "guards": [
       {
         "region": "account",
@@ -3248,6 +3298,31 @@
     "evidence": "smoke",
     "evidenceRef": "PATCH before reveal changes the author's words",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (replacement != null && (membership.hasLeft || !membership.isOpen)) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-active-edit-paused",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "the entry is yours, a new edit (with or without media), and the bond is paused: a member who has not left is suspended",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE",
+    "status": 409,
+    "code": "BOND_PAUSED",
+    "reason": "An edit, which is also how media is attached, is refused while paused and the entry is untouched. Erasing one's own entry (the same route with no text) is still allowed: BR-10a is the author's right.",
+    "rule": "ADR-0066 ruling 9",
+    "evidence": "test",
+    "evidenceRef": "PausedBondWritesTest#an edit, with or without media, is refused and the entry is untouched",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (replacement != null && membership.paused) throw BondPausedException()"
   },
   {
     "id": "bond-pending-deletion-edit",
@@ -3455,7 +3530,7 @@
     "from": "ACTIVE",
     "action": "GET /api/v1/bonds/{bondId}/today",
     "actor": "you",
-    "when": "",
+    "when": "the bond is not paused",
     "guards": [
       {
         "region": "account",
@@ -3473,6 +3548,31 @@
     "evidence": "test",
     "evidenceRef": "RevealGateTest#a day nobody has written to yet is OPEN with two absent entries",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
+  },
+  {
+    "id": "bond-active-today-paused",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "the bond is paused: a member who has not left is suspended",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "Today is readable, with paused: true and prompt null: a suggestion to write is not shown where writing is refused.",
+    "rule": "ADR-0066 ruling 10",
+    "evidence": "smoke",
+    "evidenceRef": "admin A3: …and so does today, with no prompt",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/DailyPrompt.kt#if (!membership.takesWrites || membership.paused) return null"
   },
   {
     "id": "bond-pending-deletion-today",
@@ -4673,7 +4773,7 @@
     "from": "CREATED",
     "action": "GET /api/v1/invites/{code}",
     "actor": "you",
-    "when": "you and the members of its bond have not blocked one another",
+    "when": "you and the members of its bond have not blocked one another, and its creator is not suspended",
     "guards": [
       {
         "region": "account",
@@ -4716,6 +4816,31 @@
     "evidence": "test",
     "evidenceRef": "InviteOneAnswerTest#every way a code can fail is one response, on resolve and on accept alike",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ResolveInvite.kt#if (blocks.existsBetween(caller, bond.everyMemberUserId())) throw InviteNotUsableException()"
+  },
+  {
+    "id": "invite-created-lookup-paused",
+    "region": "bond.invite",
+    "from": "CREATED",
+    "action": "GET /api/v1/invites/{code}",
+    "actor": "you",
+    "when": "its bond's creator is suspended",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "CREATED",
+    "status": 404,
+    "code": "INVITE_NOT_USABLE",
+    "reason": "An invite into a bond whose creator is suspended answers exactly what a revoked invite answers, so a stranger learns nothing of the creator's standing. It is not revoked: once the suspension is lifted it works again, if it has not expired. (The test asserts the 404 and that the body equals a revoked code's, whose code InviteOneAnswerTest asserts.)",
+    "rule": "ADR-0066 ruling 11",
+    "evidence": "test",
+    "evidenceRef": "PausedBondEndpointTest#resolving and accepting an invite of a bond whose creator is suspended is a revoked invite's answer",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ResolveInvite.kt#if (pause.isPaused(bond)) throw InviteNotUsableException()"
   },
   {
     "id": "invite-accepted-lookup",
@@ -4848,7 +4973,7 @@
     "from": "CREATED",
     "action": "POST /api/v1/invites/{code}/accept",
     "actor": "you",
-    "when": "your email is verified, you are not already in its bond, you are in fewer than three bonds that are open or counting down, and you and its members have not blocked one another",
+    "when": "your email is verified, you are not already in its bond, you are in fewer than three bonds that are open or counting down, and you and its members have not blocked one another, and its bond's creator is not suspended",
     "guards": [
       {
         "region": "account",
@@ -4966,6 +5091,31 @@
     "evidence": "smoke",
     "evidenceRef": "the blocked account cannot join it: 404 INVITE_NOT_USABLE",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/AcceptInvite.kt#if (blocks.existsBetween(caller, bond.everyMemberUserId())) throw InviteNotUsableException()"
+  },
+  {
+    "id": "invite-created-accept-paused",
+    "region": "bond.invite",
+    "from": "CREATED",
+    "action": "POST /api/v1/invites/{code}/accept",
+    "actor": "you",
+    "when": "your email is verified, you are not in its bond, you are under the limit, and its bond's creator is suspended",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "CREATED",
+    "status": 404,
+    "code": "INVITE_NOT_USABLE",
+    "reason": "An invite into a bond whose creator is suspended answers exactly what a revoked invite answers, so a stranger learns nothing of the creator's standing. It is not revoked: once the suspension is lifted it works again, if it has not expired. (The test asserts the 404 and that the body equals a revoked code's, whose code InviteOneAnswerTest asserts.) Judged under the bond lock the accept already takes; the code is not spent.",
+    "rule": "ADR-0066 ruling 11",
+    "evidence": "test",
+    "evidenceRef": "PausedBondEndpointTest#resolving and accepting an invite of a bond whose creator is suspended is a revoked invite's answer",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/AcceptInvite.kt#if (pause.isPaused(bond)) throw InviteNotUsableException()"
   },
   {
     "id": "invite-accepted-accept",
@@ -8213,5 +8363,180 @@
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-none-react",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "PUT /api/v1/entries/{entryId}/reaction",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "An entry you were never shown, of a bond you are not in, is one 404 with an id nobody was issued.",
+    "rule": "T-02, FR-048",
+    "evidence": "smoke",
+    "evidenceRef": "a stranger reacting to a revealed entry of a bond they are not in is 404",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReactToEntry.kt#Reacting.NEVER_SHOWN -> {"
+  },
+  {
+    "id": "bond-pending-member-react",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "PUT /api/v1/entries/{entryId}/reaction",
+    "actor": "you",
+    "when": "the entry is your own",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_MEMBER",
+    "status": 409,
+    "code": "REACTION_ON_OWN_ENTRY",
+    "reason": "A bond waiting for its second member holds only your own entries, and nobody reacts to their own.",
+    "rule": "FR-048",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReactToEntry.kt#Reacting.OWN_ENTRY -> {"
+  },
+  {
+    "id": "bond-pending-member-react-unknown",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "PUT /api/v1/entries/{entryId}/reaction",
+    "actor": "you",
+    "when": "the id is anything else",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_MEMBER",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Nothing of anybody else's has been shown to you here.",
+    "rule": "T-02, FR-048",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReactToEntry.kt#Reacting.NEVER_SHOWN -> {"
+  },
+  {
+    "id": "bond-active-react",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "PUT /api/v1/entries/{entryId}/reaction",
+    "actor": "you",
+    "when": "the entry is your partner's, shown to you in full, and the bond is not paused",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 204,
+    "code": null,
+    "reason": "The reaction is set or replaced. What else the route refuses (your own entry, one never shown) is the day machine's.",
+    "rule": "FR-048",
+    "evidence": "smoke",
+    "evidenceRef": "PUT /entries/{id}/reaction on the partner's revealed entry is 204",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReactToEntry.kt#fun react("
+  },
+  {
+    "id": "bond-active-react-paused",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "PUT /api/v1/entries/{entryId}/reaction",
+    "actor": "you",
+    "when": "the entry is your partner's, shown to you in full, and the bond is paused: a member who has not left is suspended",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE",
+    "status": 409,
+    "code": "BOND_PAUSED",
+    "reason": "No reaction is written while paused. Removing your own reaction is still allowed. Own-entry and never-shown answers come first, as the route decides them before the bond's state.",
+    "rule": "ADR-0066 ruling 9, plan ruling 4",
+    "evidence": "test",
+    "evidenceRef": "PausedBondWritesTest#a reaction is refused and no row is written",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReactToEntry.kt#membership.paused -> BondPausedException()"
+  },
+  {
+    "id": "bond-pending-deletion-react",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "PUT /api/v1/entries/{entryId}/reaction",
+    "actor": "you",
+    "when": "the entry is your partner's, shown to you in full",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "A bond counting down to its deletion takes no writes, a reaction included.",
+    "rule": "BR-9",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReactToEntry.kt#!membership.takesWrites -> BondArchivedException()"
+  },
+  {
+    "id": "bond-archived-react",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "PUT /api/v1/entries/{entryId}/reaction",
+    "actor": "you",
+    "when": "the entry is your partner's, shown to you in full",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "An ended bond takes no new reaction, from either member. BOND_ARCHIVED comes before BOND_PAUSED: an ended bond is never paused.",
+    "rule": "BR-9, ADR-0037",
+    "evidence": "smoke",
+    "evidenceRef": "PUT …/reaction by the one who stayed is 409 BOND_ARCHIVED",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReactToEntry.kt#!membership.takesWrites -> BondArchivedException()"
   }
 ]

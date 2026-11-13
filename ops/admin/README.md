@@ -6,8 +6,10 @@ legal checks ADR-0063 owes (GDPR Art. 15/23, DSA Art. 16(5)/17) are done.
 
 What exists: sign-in with a password and an authenticator code, three roles, an append-only
 audit log (A1, ADR-0055); a user lookup by id or exact email, metadata only, with a stated
-purpose; and, for a `MODERATOR` or `ADMIN`, the report queue and the quarantined media (A2,
-ADR-0063). The moderation steps themselves are `ops/moderation/takedown.md`'s.
+purpose; for a `MODERATOR` or `ADMIN`, the report queue and the quarantined media (A2,
+ADR-0063); for an `ADMIN`, reading a reported entry's words (A5, ADR-0064) and suspending an
+account or lifting its suspension (A3, ADR-0066, below). The moderation steps themselves are
+`ops/moderation/takedown.md`'s.
 It lives under `/admin`. The owner ruled (2026-11-11, ADR-0055) that it is reached at
 `admin.getmoyi.app`, DNS only, allowlisted to his own address; that host is not routed yet (see
 "Routing a host of its own").
@@ -171,11 +173,64 @@ admin as `admin:<account id>`. The Prometheus counters are `moyi_admin_sign_in_t
 `moyi_admin_media_review_total{outcome}`, and, for an `ADMIN`'s read of a reported entry's
 words, `moyi_admin_content_read_total{outcome}` (`SHOWN`, `ERASED`, `NOT_OPEN`, `STALE`,
 `NOT_ABOUT_WORDS`); its row is `ENTRY_TEXT_READ`, with the justification and `metadata.result`,
-and a member's export never lists it while its case is open (ADR-0064).
+and a member's export never lists it while its case is open (ADR-0064). A suspension or a lift is
+`moyi_admin_suspension_total{action, result}` (`action` `suspend` or `lift`; `result` `SUSPENDED`,
+`ALREADY_SUSPENDED`, `LIFTED`, `NOT_SUSPENDED`, `GONE`, `NO_SUCH_ACCOUNT`); its row is
+`ACCOUNT_SUSPENDED` or `ACCOUNT_UNSUSPENDED`, with the justification and `metadata.result`,
+`statusBefore` and `deletionPending`, and a member's export never lists either (ADR-0066).
 
 A member's data export lists only a lookup made at their request or for operations
 (`ACCOUNT_LOOKED_UP`) and the removal of their own media from a moderation quarantine
 (`MEDIA_REMOVED`), never a note; everything else is withheld (ADR-0063 decision 13).
+
+## Suspending an account
+
+For an `ADMIN` only (a `MODERATOR` and `SUPPORT` see "Only an ADMIN can suspend an account."). The
+console is the only way: there is no SQL function and no `moyi` command (ADR-0066 decision 14).
+
+1. **Look the person up first,** by id or exact email, with the purpose `SAFETY` and a note that
+   says why (the report, the complaint). The lookup is its own audit row.
+2. The result shows **Status** (`ACTIVE`, `PENDING_VERIFICATION`, `SUSPENDED since <instant>`,
+   `DELETED`) and "paused" beside each bond that is. Under **Suspension**: the form **Suspend this
+   account** (for `ACTIVE` or `PENDING_VERIFICATION`) or **Lift the suspension** (for `SUSPENDED`).
+3. **Type a justification** (1 to 400 characters) and **a code from your authenticator app.** Each
+   act needs a new code, so a suspension and its lift are two 30-second steps apart. A justification
+   that is refused shows the form again and spends no code; a wrong or reused code is refused. The
+   justification is kept only as the audit row's `justification`: never in the page you are sent
+   to, a log line or a metric.
+4. You are sent back to the lookup page (a `303`), with one line saying what happened. Do not
+   resubmit the form from the browser's history: the spent code is refused and counts towards the
+   five-failure lockout.
+
+**What the member meets:** every session ends at once (refresh tokens revoked, push tokens forgotten,
+access tokens refused from the next whole second); signing in answers exactly what a wrong password
+answers; a reset asked for now sends nothing; a verification link records itself and leaves the
+account suspended. **They are told nothing**: no email, no screen. One gap: a reset link sent
+*before* the suspension still changes the password for the rest of its hour (the account stays
+suspended; owed in ADR-0066).
+
+**What the partner meets:** each bond the member is in (and has not left) shows `paused: true`, and
+today gives no prompt. A new entry, an edit and a reaction are `409 BOND_PAUSED` ("This bond is
+paused. Everything in it can still be read; new entries wait until it resumes."). Everything else
+still works, leaving and reporting above all. No push says the bond paused or resumed, and the daily
+reminder is not sent while it is paused. Days of the pause are `SUSPENDED`: no streak breaks and no
+freeze is spent. An invite into the member's bond answers as a revoked one, until the lift.
+
+**Tell nobody why.** Not the member, not the partner, not someone who asks by email. Whether the
+member must be sent a statement of reasons (DSA Art. 17) is one of the legal checks the console
+waits on; until it is answered, no message is sent.
+
+**A pending deletion:** if the person had asked to delete their account, the page says "A deletion
+this person asked for runs on <instant>, suspended or not." It is carried out on time; the suspension
+does not stop it (ADR-0066 decision 15).
+
+**Lifting** returns the account to `ACTIVE` (or `PENDING_VERIFICATION` if the address was never
+verified) and the partner's bonds take entries again at once. **It restores no session:** the member
+signs in afresh, and is not told the suspension was lifted. A reveal that fell due during the pause
+stays withheld after the lift (ADR-0066 decision 17).
+
+The same attempt twice (suspending a suspended account, lifting one that is not) changes nothing and
+is still recorded, `REFUSED`.
 
 ## Routing a host of its own
 
@@ -204,6 +259,5 @@ the spent code again, which answers `401` and counts towards the five-failure lo
 
 ## What this does not do
 
-No entry content beyond that one read (A5, ADR-0064), no suspension,
-no job re-runs, no passkeys (ADR-0055, the owner's ruling 1: TOTP only until a second operator
-joins). Those are A3 and A4.
+No entry content beyond that one read (A5, ADR-0064), no job re-runs, no passkeys (ADR-0055, the owner's ruling 1: TOTP only until a second operator
+joins), no suspension with an end date and no appeal route (ADR-0066). Jobs are A4.
