@@ -12,6 +12,21 @@
 -- `identity` does not know admins. The row holds ids and instants only, so it outlives an
 -- erasure (ruling 15): the user id it names is the anonymised account's, as `blocks` keeps.
 -- Instants are written truncated to microseconds: they are compared with day bounds.
+
+-- The invariant starts true or this does not apply. V2's CHECK has admitted 'SUSPENDED' since
+-- the start, but nothing wrote it before A3, so no row should hold it. One that did would have
+-- no span, and lifting it would fail for good (`SuspendAccount.lift` checks it closes exactly
+-- one). Refusing here makes that a fact checked on every database rather than an assumption
+-- about production; a database that trips it needs a person, not a guessed `suspended_at`.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM users WHERE status = 'SUSPENDED') THEN
+        RAISE EXCEPTION 'V65: % users row(s) already SUSPENDED with no suspension span; resolve them before migrating',
+            (SELECT count(*) FROM users WHERE status = 'SUSPENDED');
+    END IF;
+END
+$$;
+
 CREATE TABLE account_suspensions (
     id           uuid        PRIMARY KEY,
     -- No ON DELETE CASCADE: the user row is never removed, only anonymised (doc 07 §7).

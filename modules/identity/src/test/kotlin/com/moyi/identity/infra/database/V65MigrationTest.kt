@@ -5,6 +5,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.flywaydb.core.Flyway
+import org.flywaydb.core.api.FlywayException
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -29,13 +30,7 @@ internal class V65MigrationTest : PostgresIntegrationTest() {
     fun create() {
         admin.execute("DROP DATABASE IF EXISTS $DATABASE WITH (FORCE)")
         admin.execute("CREATE DATABASE $DATABASE")
-        Flyway
-            .configure()
-            .dataSource(target)
-            .locations("classpath:db/migration")
-            .target("65")
-            .load()
-            .migrate()
+        migrateTo("65")
     }
 
     @AfterEach
@@ -84,6 +79,34 @@ internal class V65MigrationTest : PostgresIntegrationTest() {
     fun `a span for a user that does not exist is refused`() {
         shouldThrow<DataIntegrityViolationException> { span(UUID.randomUUID(), FROM, null) }
             .message!! shouldContain "account_suspensions_user_id_fkey"
+    }
+
+    @Test
+    fun `V65 refuses to apply over a users row already SUSPENDED, which would have no span`() {
+        admin.execute("DROP DATABASE IF EXISTS $DATABASE WITH (FORCE)")
+        admin.execute("CREATE DATABASE $DATABASE")
+        // V52 is identity's last migration before V65 (versions are one sequence across modules).
+        migrateTo("52")
+        val ada = user()
+        jdbc.update("UPDATE users SET status = 'SUSPENDED' WHERE id = ?", ada)
+
+        shouldThrow<FlywayException> { migrateTo("65") }.message!! shouldContain "already SUSPENDED with no suspension span"
+        jdbc.queryForObject("SELECT to_regclass('account_suspensions') IS NULL", Boolean::class.java) shouldBe true
+
+        // Resolved by a person, it applies.
+        jdbc.update("UPDATE users SET status = 'ACTIVE' WHERE id = ?", ada)
+        migrateTo("65")
+        jdbc.queryForObject("SELECT to_regclass('account_suspensions') IS NOT NULL", Boolean::class.java) shouldBe true
+    }
+
+    private fun migrateTo(version: String) {
+        Flyway
+            .configure()
+            .dataSource(target)
+            .locations("classpath:db/migration")
+            .target(version)
+            .load()
+            .migrate()
     }
 
     private fun user(): UUID {
