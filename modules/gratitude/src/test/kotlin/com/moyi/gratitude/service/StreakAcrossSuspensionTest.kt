@@ -137,6 +137,27 @@ internal class StreakAcrossSuspensionTest(
     }
 
     /**
+     * The late-entry grace is the day's (controller ruling amending ruling 16): day 15, which
+     * nobody wrote on, ends at 23:00Z; a suspension begins at 01:00Z on day 16, inside its grace,
+     * when a late entry for it would be refused. It is `SUSPENDED`, and the banked freeze is kept.
+     */
+    @Test
+    fun `a day nobody wrote on, suspended in its late-entry hours, spends no freeze`() {
+        // Overlap judged on [startsAt, endsAt) again: day 15 is EMPTY, MISSED, and spends the freeze.
+        (1..14).forEach { bothWriteOn(it) }
+        closeThrough(14)
+        streak().let { Triple(it.current, it.freezes, it.consumed) shouldBe Triple(14, 1, 0) }
+        suspensions.suspend(ada, Instant.parse("${day(16)}T01:00:00Z"))
+        suspensions.lift(ada, Instant.parse("${day(16)}T05:00:00Z"))
+
+        closeThrough(15)
+
+        decisions().last() shouldBe Decision(day(15), "SUSPENDED", "SUSPENDED", freeze = false)
+        streak().let { Triple(it.current, it.freezes, it.consumed) shouldBe Triple(14, 1, 0) }
+        outbox("StreakBroken") shouldBe 0
+    }
+
+    /**
      * Belt and braces (spec §6, as `EvaluateStreaks` does for `wasPausedAt`): a day whose status
      * says missed, and which overlaps a span, is evaluated SUSPENDED. No real ordering produces
      * one (spec §4: a span never reaches back over a day already ended), so the gap is written

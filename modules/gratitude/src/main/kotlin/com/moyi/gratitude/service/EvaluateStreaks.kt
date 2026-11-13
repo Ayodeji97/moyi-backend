@@ -7,6 +7,7 @@ import com.moyi.common.events.EventPublisher
 import com.moyi.common.events.OutboxEvent
 import com.moyi.gratitude.domain.DayOutcome
 import com.moyi.gratitude.domain.Evaluation
+import com.moyi.gratitude.domain.LateEntryGrace
 import com.moyi.gratitude.domain.Milestones
 import com.moyi.gratitude.domain.StreakChange
 import com.moyi.gratitude.domain.StreakRules
@@ -65,6 +66,7 @@ internal class EvaluateStreaks(
     private val ids: IdGenerator,
     private val transactions: TransactionTemplate,
     private val clock: Clock,
+    private val grace: LateEntryGrace,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -193,10 +195,10 @@ internal class EvaluateStreaks(
             // while the bond took no writes. Not a day anybody missed.
             view.wasPausedAt(day.endsAt) -> DayOutcome.SUSPENDED
 
-            // Any part of it fell inside a member's suspension (admin A3
-            // ruling 16). The close already writes such a day SUSPENDED; this
+            // Any part of its writable window, late-entry grace included, fell
+            // inside a member's suspension (admin A3 ruling 16), as CloseDay asks. The close already writes such a day SUSPENDED; this
             // is the same belt and braces as the line above.
-            view.wasSuspendedDuring(day.startsAt, day.endsAt) -> DayOutcome.SUSPENDED
+            view.wasSuspendedDuring(day.startsAt, grace.settlesAt(day.endsAt)) -> DayOutcome.SUSPENDED
 
             else -> DayOutcome.MISSED
         }

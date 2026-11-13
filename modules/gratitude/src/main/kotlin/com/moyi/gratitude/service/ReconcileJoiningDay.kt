@@ -70,6 +70,10 @@ internal class ReconcileJoiningDay(
         // nothing new, and a read must not be the way round that. Nor, while
         // the bond is paused, a suspended member's words (admin A3): this only
         // defers, and the close then judges by the instant the reveal fell due.
+        // Not asked here (Task 5 review, Minor 1, open): after a lift, a legacy
+        // C1 joining day whose reveal fell due inside the span is revealed by
+        // the first read. The span history is on `BondClosingView` alone, and a
+        // request path may not ask for it (ArchitectureTest).
         when {
             resumed == locked -> {
                 Unit

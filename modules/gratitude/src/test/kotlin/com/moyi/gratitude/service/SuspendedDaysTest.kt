@@ -292,28 +292,106 @@ internal class SuspendedDaysTest(
     }
 
     /**
-     * Spec §4's last paragraph: the decision is stable from the day's end. Two bonds, the same day,
-     * each with one entry by the partner; one member's span still open when the job closes it, the
-     * other's lifted after the day ended and before the job came.
+     * Spec §4's last paragraph: the decision is stable once the day's grace has run out. Three
+     * bonds, the same day, each with one entry by the partner and a span that begins at 11:00Z on
+     * it: one still open when the job closes the day, one lifted inside the grace (after the day
+     * ended, before the job), one lifted at 15:00Z, before the day ended. All three are
+     * `SUSPENDED`. The last is what judging by the day's end alone (`wasSuspendedAt(endsAt)`, the
+     * deletion countdown's rule) gets wrong: it would close `SOLO` and unlock the entry.
      */
     @Test
-    fun `a day closed while its span is open and its twin closed after the span was lifted are the same`() {
+    fun `a day is SUSPENDED whether its span is open at the close, lifted in the grace, or lifted before its end`() {
+        // Overlap judged at the day's end only: the bond lifted at 15:00Z closes SOLO.
         val open = pairedBond()
         val cy = users.verified("Cy")
         val dee = users.verified("Dee")
-        val lifted = pairedBond(creator = cy, joiner = dee)
+        val inGrace = pairedBond(creator = cy, joiner = dee)
+        val eve = users.verified("Eve")
+        val fay = users.verified("Fay")
+        val beforeEnd = pairedBond(creator = eve, joiner = fay)
         writeAt(open, bea, at(4), "one")
-        writeAt(lifted, dee, at(4), "two")
-        suspensions.suspend(ada, at(4).plusSeconds(3_600))
-        suspensions.suspend(cy, at(4).plusSeconds(3_600))
+        writeAt(inGrace, dee, at(4), "two")
+        writeAt(beforeEnd, fay, at(4), "three")
+        listOf(ada, cy, eve).forEach { suspensions.suspend(it, at(4).plusSeconds(3_600)) }
         // After day 4 ended (23:00Z), before the job settles it.
         suspensions.lift(cy, Instant.parse("${day(5)}T01:00:00Z"))
+        // Before day 4 ended.
+        suspensions.lift(eve, Instant.parse("${day(4)}T15:00:00Z"))
 
         closeThrough(4)
 
-        statusOf(open, day(4)) shouldBe "SUSPENDED"
-        statusOf(lifted, day(4)) shouldBe statusOf(open, day(4))
-        evaluatedAs(lifted, day(4)) shouldBe evaluatedAs(open, day(4))
+        listOf(open, inGrace, beforeEnd).map { statusOf(it, day(4)) } shouldBe List(3) { "SUSPENDED" }
+        listOf(open, inGrace, beforeEnd).map { evaluatedAs(it, day(4)) } shouldBe List(3) { "SUSPENDED" }
+        revealedEntries(beforeEnd) shouldBe 0
+    }
+
+    // ---- the late-entry grace is part of the day (controller ruling amending ruling 16) ----
+
+    /**
+     * Day 4 ends at 23:00Z and takes late entries until 11:00Z on day 5 (BR-3a). A suspension
+     * that begins at 01:00Z on day 5 refuses the partner's late entry for day 4, so day 4 is one
+     * nobody could finish: `SUSPENDED`. Here the suspended member's lone entry: not unlocked, no
+     * `DayClosed` (the outbox row a `SOLO_UNLOCK` push is made from, `NotifyDayMembers`).
+     */
+    @Test
+    fun `a suspension beginning in a day's late-entry hours suspends that day, and the lone entry stays locked`() {
+        // Overlap judged on [startsAt, endsAt) again: day 4 closes SOLO and unlocks the entry.
+        val bond = pairedBond()
+        writeAt(bond, ada, at(4), "marmalade sunrise")
+        suspensions.suspend(ada, Instant.parse("${day(5)}T01:00:00Z"))
+
+        closeThrough(4)
+
+        statusOf(bond, day(4)) shouldBe "SUSPENDED"
+        revealedEntries(bond) shouldBe 0
+        dayClosedFor(bond, day(4)) shouldBe 0
+        evaluatedAs(bond, day(4)) shouldBe "SUSPENDED"
+        everyReadOf(bea, bond, day(4)).forEach { (read, body) -> withClue(read) { body shouldNotContain WORD } }
+    }
+
+    @Test
+    fun `a suspension beginning in a day's late-entry hours suspends the partner's lone entry's day, not SOLO`() {
+        // Overlap judged on [startsAt, endsAt) again: day 4 closes SOLO.
+        val bond = pairedBond()
+        writeAt(bond, bea, at(4), "hers alone")
+        suspensions.suspend(ada, Instant.parse("${day(5)}T01:00:00Z"))
+
+        closeThrough(4)
+
+        statusOf(bond, day(4)) shouldBe "SUSPENDED"
+        revealedEntries(bond) shouldBe 0
+        dayClosedFor(bond, day(4)) shouldBe 0
+    }
+
+    @Test
+    fun `a suspension beginning in a day's late-entry hours writes the day nobody opened SUSPENDED, not EMPTY`() {
+        // Overlap judged on [startsAt, endsAt) again in CreateMissingDays: day 4 is EMPTY and MISSED.
+        val bond = pairedBond()
+        writeAt(bond, ada, at(3), "his")
+        writeAt(bond, bea, at(3), "hers")
+        suspensions.suspend(ada, Instant.parse("${day(5)}T01:00:00Z"))
+
+        closeThrough(4)
+
+        statusOf(bond, day(4)) shouldBe "SUSPENDED"
+        evaluatedAs(bond, day(4)) shouldBe "SUSPENDED"
+        dayClosedFor(bond, day(4)) shouldBe 0
+    }
+
+    /** The mirror: a span that begins as the grace runs out leaves the day as it was. */
+    @Test
+    fun `a suspension beginning when a day's grace has run out leaves the day SOLO or EMPTY`() {
+        // The grace judged as closed at its end (`<=`) instead of open: day 4 is SUSPENDED.
+        val bond = pairedBond()
+        writeAt(bond, bea, at(4), "hers alone")
+        suspensions.suspend(ada, Instant.parse("${day(5)}T11:00:00Z"))
+
+        closeThrough(4)
+
+        statusOf(bond, day(3)) shouldBe "EMPTY"
+        statusOf(bond, day(4)) shouldBe "SOLO"
+        revealedEntries(bond) shouldBe 1
+        dayClosedFor(bond, day(4)) shouldBe 1
     }
 
     // ---- ReconcileJoiningDay ----------------------------------------------------

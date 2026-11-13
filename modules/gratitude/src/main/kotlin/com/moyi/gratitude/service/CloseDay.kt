@@ -6,6 +6,7 @@ import com.moyi.common.events.OutboxEvent
 import com.moyi.gratitude.domain.BondDay
 import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.domain.BondDayStatus
+import com.moyi.gratitude.domain.LateEntryGrace
 import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
 import com.moyi.gratitude.infra.database.redacted
@@ -69,14 +70,15 @@ import java.time.temporal.ChronoUnit
  *    `DayRevealed`, and counts as a day both wrote on (the owner,
  *    2026-10-22). On a `SOLO` day the lone entry is revealed (FR-063), read
  *    fresh under the lock — unless the bond separated before the day ended
- *    (ADR-0033 decision 9). A day any part of which, **on its bounds from
- *    step 3**, overlaps a member's suspension (`BondClosingView.wasSuspendedDuring`,
+ *    (ADR-0033 decision 9). A day any part of whose writable window — its
+ *    bounds from step 3 **and its late-entry grace after them** — overlaps a member's suspension (`BondClosingView.wasSuspendedDuring`,
  *    admin A3 ruling 16) closes `SUSPENDED` if nobody or one wrote: nothing
  *    is unlocked and no `DayClosed` is written.
  */
 @Service
-// Eight collaborators: what settling one day touches — the bond's view, the day, its
-// entries, the reveal, a withdrawal's erasure, the outbox, a transaction and the clock.
+// Nine collaborators: what settling one day touches — the bond's view, the day, its
+// entries, the reveal, a withdrawal's erasure, the outbox, a transaction, the clock,
+// and the late-entry grace a suspension's overlap is judged over.
 @Suppress("LongParameterList")
 internal class CloseDay(
     private val access: BondAccess,
@@ -87,6 +89,7 @@ internal class CloseDay(
     private val events: EventPublisher,
     private val transactions: TransactionTemplate,
     private val clock: Clock,
+    private val grace: LateEntryGrace,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -175,8 +178,11 @@ internal class CloseDay(
         } else {
             // Overlap judged on `current`'s bounds: after `extendedTo`, so the
             // extra hours a westward zone change gave the day count (admin A3
-            // ruling 16), never the stored row's shorter span.
-            close(current, at, view.separatedAt, withheld, paused = view.wasSuspendedDuring(current.startsAt, current.endsAt))
+            // ruling 16), never the stored row's shorter span. And through its
+            // late-entry grace: the day takes late entries until then, and a
+            // paused bond refuses them, so those hours are the day's too.
+            val paused = view.wasSuspendedDuring(current.startsAt, grace.settlesAt(current.endsAt))
+            close(current, at, view.separatedAt, withheld, paused)
             Outcome.CLOSED
         }
     }
