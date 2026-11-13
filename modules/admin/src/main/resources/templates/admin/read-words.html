@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/* A read of an entry's words that read nothing (A5 spec §5): the form again, the justification
+       kept, with why (a code needed, a wrong code, a justification refused). No word of the entry. */-->
+<head th:replace="~{admin/layout :: head('Read the entry')}"></head>
+<body>
+<header th:replace="~{admin/layout :: masthead}"></header>
+<nav th:replace="~{admin/layout :: nav(true)}"></nav>
+<main>
+    <h1>Read the entry's words</h1>
+    <p>Nothing has been read yet.</p>
+    <form th:replace="~{admin/fragments/read-words :: form(${form})}"></form>
+    <p><a th:href="@{${form.back}}">Back without reading</a></p>
+</main>
+</body>
+</html>

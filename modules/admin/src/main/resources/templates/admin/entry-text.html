@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/* The one page that shows a reported entry's words (A5 spec §5): the POST's own response, never
+       stored (no-store), never a fragment of another page. th:text only: the words are escaped.
+       The model is the words, their bond-day's date and the report, or the erased sentence. */-->
+<head th:replace="~{admin/layout :: head('The entry')}"></head>
+<body>
+<header th:replace="~{admin/layout :: masthead}"></header>
+<nav th:replace="~{admin/layout :: nav(true)}"></nav>
+<main>
+    <h1>The entry's words</h1>
+    <dl>
+        <dt>Report</dt><dd th:text="${reportId}"></dd>
+        <dt th:if="${date != null}">Date</dt><dd th:if="${date != null}" th:text="${date}"></dd>
+    </dl>
+    <blockquote th:if="${words != null}" id="words" th:text="${words.value}"></blockquote>
+    <p th:if="${notice != null}" th:text="${notice}">Its author erased this entry.</p>
+    <p class="hint">This page is not kept. Reading the words again needs a new reason and a new code.</p>
+    <p><a th:href="@{/admin/reports/{id}(id=${reportId})}">Back to the report</a></p>
+</main>
+</body>
+</html>

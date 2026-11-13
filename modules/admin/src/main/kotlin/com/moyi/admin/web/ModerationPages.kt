@@ -109,6 +109,10 @@ internal class SecondFactor(
     fun moderates(authentication: Authentication): Boolean =
         roles.getReachableGrantedAuthorities(authentication.authorities).any { it.authority == "ROLE_MODERATOR" }
 
+    /** Whether the session's role is `ADMIN`: whether the report page offers the read form (A5 spec §5). Display only. */
+    fun isAdmin(authentication: Authentication): Boolean =
+        roles.getReachableGrantedAuthorities(authentication.authorities).any { it.authority == "ROLE_ADMIN" }
+
     sealed interface Proof {
         data class Held(
             val secondFactorAt: Instant?,
