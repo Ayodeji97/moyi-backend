@@ -164,12 +164,36 @@ internal class SuspendedMemberTest(
         login(email, PASSWORD).status shouldBe 200
     }
 
+    @Test
+    fun `resending verification to a suspended account that never verified sends nothing, as for an unknown address`() {
+        val (ada, email) = register()
+        transactions.execute { suspension.suspend(ada) }.outcome shouldBe SuspensionOutcome.SUSPENDED
+        val tokensBefore = liveVerificationTokens(ada)
+
+        val suspended = resend(email)
+        val unknown = resend("nobody-${UUID.randomUUID()}@example.com")
+
+        suspended.status shouldBe 202
+        suspended.status shouldBe unknown.status
+        suspended.contentAsString shouldBe unknown.contentAsString
+        // Checked at the source, as for the reset above: no new token, so nothing for the mail to send.
+        liveVerificationTokens(ada) shouldBe tokensBefore
+        status(ada) shouldBe "SUSPENDED"
+    }
+
     // --- helpers ---
 
     private fun status(userId: UUID): String = jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String::class.java, userId)!!
 
     private fun passwordHash(userId: UUID): String =
         jdbc.queryForObject("SELECT password_hash FROM credentials WHERE user_id = ?", String::class.java, userId)!!
+
+    private fun liveVerificationTokens(userId: UUID): Int =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM verification_tokens WHERE user_id = ? AND purpose = 'EMAIL_VERIFICATION' AND consumed_at IS NULL",
+            Int::class.java,
+            userId,
+        )!!
 
     private fun awaitResetEmails(
         email: String,
@@ -203,6 +227,99 @@ internal class SuspendedMemberTest(
                 content = """{"email":"$email","code":"$code","password":"$NEW_PASSWORD"}"""
             }.andReturn()
             .response
+
+    private fun resend(email: String): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/auth/resend-verification") {
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"email":"$email"}"""
+            }.andReturn()
+            .response
+
+    /** Registered and never verified: `PENDING_VERIFICATION`, with registration's own email settled. */
+    private fun register(): Pair<UUID, String> {
+        val email = "u-${UUID.randomUUID()}@example.com"
+        mockMvc
+            .post("/api/v1/auth/register") {
+                contentType = MediaType.APPLICATION_JSON
+                content =
+                    """{"email":"$email","password":"$PASSWORD","displayName":"Ada","locale":"en",""" +
+                    """"acceptedTermsVersion":"2026-09-01","over18":true}"""
+            }.andReturn()
+            .response.status shouldBe 201
+        await().atMost(WAIT).until { emails.sent.toList().any { it.to == email } }
+        emails.sent.clear()
+        return jdbc.queryForObject("SELECT id FROM users WHERE email = ?", UUID::class.java, email)!! to email
+    }
+
+    /** As the smoke's `no_instance`: the bodies compared apart from the path that was typed. */
+    private fun noInstance(body: String): String = body.replace(Regex(""""instance":"[^"]*""""), "\"instance\":\"-\"")
+
+    private fun failedAttempts(userId: UUID): Int =
+        jdbc.queryForObject("SELECT failed_attempts FROM credentials WHERE user_id = ?", Int::class.java, userId)!!
+
+    private fun resetTokens(userId: UUID): Int =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM verification_tokens WHERE user_id = ? AND purpose = 'PASSWORD_RESET'",
+            Int::class.java,
+            userId,
+        )!!
+
+    private fun liveRefreshTokens(userId: UUID): Int =
+        jdbc.queryForObject("SELECT count(*) FROM refresh_tokens WHERE user_id = ? AND revoked_at IS NULL", Int::class.java, userId)!!
+
+    private fun signUp(): Pair<UUID, String> {
+        val email = "u-${UUID.randomUUID()}@example.com"
+        mockMvc
+            .post("/api/v1/auth/register") {
+                contentType = MediaType.APPLICATION_JSON
+                content =
+                    """{"email":"$email","password":"$PASSWORD","displayName":"Ada","locale":"en",""" +
+                    """"acceptedTermsVersion":"2026-09-01","over18":true}"""
+            }.andReturn()
+            .response.status shouldBe 201
+        jdbc.update("UPDATE users SET email_verified_at = now(), status = 'ACTIVE' WHERE email = ?", email)
+        // Registration's own email, settled, so any later one is a reset's.
+        await().atMost(WAIT).until { emails.sent.toList().any { it.to == email } }
+        emails.sent.clear()
+        return jdbc.queryForObject("SELECT id FROM users WHERE email = ?", UUID::class.java, email)!! to email
+    }
+
+    private fun login(
+        email: String,
+        password: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/auth/login") {
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"email":"$email","password":"$password"}"""
+            }.andReturn()
+            .response
+
+    private fun refresh(token: String): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/auth/refresh") {
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"refreshToken":"$token"}"""
+            }.andReturn()
+            .response
+
+    private fun forgot(email: String): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/auth/forgot-password") {
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"email":"$email"}"""
+            }.andReturn()
+            .response
+
+    private fun get(
+        path: String,
+        access: String,
+    ): MockHttpServletResponse = mockMvc.get(path) { header(HttpHeaders.AUTHORIZATION, "Bearer $access") }.andReturn().response
+
+    private fun refreshToken(body: String): String = Regex("\"refreshToken\":\"([^\"]+)\"").find(body)!!.groupValues[1]
+
+    private fun accessToken(body: String): String = Regex("\"accessToken\":\"([^\"]+)\"").find(body)!!.groupValues[1]
 
     private companion object {
         const val PASSWORD = "correct horse battery"
