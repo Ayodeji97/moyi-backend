@@ -35,7 +35,8 @@ import java.util.UUID
  *
  * **A day that ended while a deletion was counting down, since called off, is
  * written `SUSPENDED`** and not `EMPTY` (ADR-0034, Rulings 1): the bond would
- * take no entry, so nobody missed it.
+ * take no entry, so nobody missed it. So is a day any part of which a
+ * member's suspension overlaps (admin A3 ruling 16).
  *
  * **Never before the pairing, never after the end.** Doc 04 §8.3a creates no
  * day for a bond that is one person. A bond that has ended gets the days up
@@ -211,7 +212,9 @@ internal class CreateMissingDays(
                 // Nobody wrote; and if it ended while the bond would take no
                 // entry — a deletion counting down, since called off — nobody
                 // was let down either (ADR-0034, the owner's ruling).
-                val paused = view.wasPausedAt(window.endsAt)
+                // And a day any part of which fell inside a member's
+                // suspension (admin A3 ruling 16): overlap, not the day's end.
+                val paused = view.wasPausedAt(window.endsAt) || view.wasSuspendedDuring(window.startsAt, window.endsAt)
                 yield(Gap(window, zone, if (paused) BondDayStatus.SUSPENDED else BondDayStatus.EMPTY))
                 check(bounds.endsAt.isAfter(at)) { "a bond's calendar must move forward: ${bounds.date} ends at ${bounds.endsAt}" }
                 previous = window

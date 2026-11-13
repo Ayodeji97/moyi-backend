@@ -67,11 +67,21 @@ internal class ReconcileJoiningDay(
         val locked = withdrawals.on(days.lockAndFind(initial.id), membership.withdrawnMemberIds, now)
         val resumed = locked.extendedTo(joining).resumeJoiningDay(membership.activeSince)
         // ADR-0035 question 9, as CloseDay asks it: an ended bond reveals
-        // nothing new, and a read must not be the way round that.
+        // nothing new, and a read must not be the way round that. Nor, while
+        // the bond is paused, a suspended member's words (admin A3): this only
+        // defers, and the close then judges by the instant the reveal fell due.
         when {
-            resumed == locked -> Unit
-            resumed.isWithheldBy(membership.separatedAt, membership.revealTimeLocal) -> days.update(resumed.withholdReveal())
-            else -> reveal.apply(resumed, membership.revealTimeLocal, now)
+            resumed == locked -> {
+                Unit
+            }
+
+            membership.paused || resumed.isWithheldBy(membership.separatedAt, membership.revealTimeLocal) -> {
+                days.update(resumed.withholdReveal())
+            }
+
+            else -> {
+                reveal.apply(resumed, membership.revealTimeLocal, now)
+            }
         }
     }
 }

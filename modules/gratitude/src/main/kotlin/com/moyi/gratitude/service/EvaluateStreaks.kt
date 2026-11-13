@@ -170,7 +170,8 @@ internal class EvaluateStreaks(
      * What [day] is to the streak. Its status says, with two exceptions no
      * status carries, both for a **missed** day only. One that ended while a
      * deletion since called off was counting down is suspended (ADR-0034,
-     * Rulings 1). And one missed after the bond stopped taking writes
+     * Rulings 1), or that a member's suspension overlapped (admin A3), is
+     * suspended. And one missed after the bond stopped taking writes
      * does not end the run (doc 04 §8.3 — the streak "is preserved at its
      * value"). Only a missed day: a day both wrote on before one of them
      * left that afternoon is a complete day like any other, and §8.3
@@ -191,6 +192,11 @@ internal class EvaluateStreaks(
             // A deletion that counted down and was called off: this day ended
             // while the bond took no writes. Not a day anybody missed.
             view.wasPausedAt(day.endsAt) -> DayOutcome.SUSPENDED
+
+            // Any part of it fell inside a member's suspension (admin A3
+            // ruling 16). The close already writes such a day SUSPENDED; this
+            // is the same belt and braces as the line above.
+            view.wasSuspendedDuring(day.startsAt, day.endsAt) -> DayOutcome.SUSPENDED
 
             else -> DayOutcome.MISSED
         }
