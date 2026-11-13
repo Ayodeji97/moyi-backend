@@ -208,8 +208,9 @@ meanwhile, nothing is decided and the page says to read it again. A priority rep
      reclassify first. If the author has erased the entry, the page says so and you decide from the
      reporter's detail. The read is in `audit_log` and in the report's history (`moyi reports show`
      prints `words read by <actor> at <time>`). Until the console is on, the `psql` rule stands: read
-     the words only to decide a report that names them, and say so in the note. There is no takedown of words in v1 (ADR-0053, question 3);
-     a threat to someone's safety is section 4's territory and the reporter's to take to the police.
+     the words only to decide a report that names them, and say so in the note. There is no
+     takedown of words in v1 (ADR-0053, question 3); a threat to someone's safety is section 4's
+     territory and the reporter's to take to the police.
    - a report about **the other member** (target `MEMBER`, ADR-0053 decision 14; `show` names
      the reported member's `bond_members` id and the bond): it holds nothing back and names no
      entry. Read the detail and decide as for words: `dismiss`, or `uphold … delete` to record it

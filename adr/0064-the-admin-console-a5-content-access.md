@@ -119,9 +119,10 @@ committed before that statement is seen and a later one is ordered after the rea
 
 **11. V63** (gratitude) widens `entry_report_log_action_check` with `WORDS_READ` and does nothing else.
 **V64** (admin) widens `audit_log_action_check` with `ENTRY_TEXT_READ`, A2's drop-and-re-add pattern;
-`AuditActionCheckTest` holds the enum and the SQL together. The report page's history is the report's whole log, so it lists the row too; `moyi reports show` prints one `words read
-by <actor> at <time>` line for each `WORDS_READ` row: who and when, never the words and never the
-reason given.
+`AuditActionCheckTest` holds the enum and the SQL together. The report page's history is the
+report's whole log, so it lists the row too; `moyi reports show` prints one `words read by <actor>
+at <time>` line for each `WORDS_READ` row: who and when, never the words and never the reason
+given.
 
 **12. Copy.** The read has its own two lines rather than A2's decision-form ones, which were false for
 it: "Enter a code from your authenticator app. Every read needs a new one." and "Write why you need to

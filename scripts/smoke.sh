@@ -333,6 +333,12 @@
 # 0 failed, 0 skipped, 73 "admin A2" checks among them. A run before it on the same stack failed one
 # probe (late entries: "the job has run since", the ShedLock floor named under #126) and then stopped
 # in the A2 section on `tr` meeting the review copy's bytes, fixed by LC_ALL=C.
+# Since the admin console A5 (FR-112, FR-116, ADR-0064) the admin section also posts to
+# /admin/reports/{id}/entry-text from a refused address: the API's own 401, byte for byte what an
+# unknown path answers but for its instance. The read itself is not driven here (it needs an ADMIN,
+# a code per read and an open report about words; EntryTextControllerTest holds it). Last run on
+# 2026-11-13, on feat/admin-console-a5, against a compose project of its own: 1804 passed, 0 failed,
+# 0 skipped.
 # The late-entries probe "the job has run since" (the ShedLock floor named under #126, and failed in
 # four recorded runs) now waits up to 60 s for the close job's next run, not 30: the lock's 30 s floor
 # plus the five-second cron put that run up to 35 s away, and the 30 one-second polls ran out first.
