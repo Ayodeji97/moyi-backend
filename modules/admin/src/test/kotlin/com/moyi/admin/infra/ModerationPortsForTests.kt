@@ -1,7 +1,12 @@
 package com.moyi.admin.infra
 
+import com.moyi.bond.api.BondAccess
+import com.moyi.bond.api.BondClosingView
+import io.mockk.every
+import io.mockk.mockk
 import org.springframework.beans.factory.support.BeanDefinitionRegistry
 import org.springframework.beans.factory.support.RootBeanDefinition
+import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.ComponentScan
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.FilterType
@@ -18,9 +23,9 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.Supplier
 
 /**
- * A2's two moderation ports, real, in this module's test context: `ReportModerationStore` and
- * `QuarantineModerationStore`, found by name and nothing else of gratitude or media (their
- * other beans want a world this context does not build). Both are `internal` to their modules,
+ * A2's two moderation ports and A5's, real, in this module's test context: `ReportModerationStore`,
+ * `QuarantineModerationStore` and `ReportedEntryTextStore`, found by name and nothing else of gratitude or media (their
+ * other beans want a world this context does not build). All three are `internal` to their modules,
  * which is why they are named by pattern and never by type.
  *
  * The quarantine store reads bytes through media's `ObjectStore`, also `internal`. [FakeMediaStore]
@@ -36,12 +41,23 @@ import java.util.function.Supplier
     includeFilters = [
         ComponentScan.Filter(
             type = FilterType.REGEX,
-            pattern = [".*\\.ReportModerationStore", ".*\\.QuarantineModerationStore"],
+            pattern = [".*\\.ReportModerationStore", ".*\\.QuarantineModerationStore", ".*\\.ReportedEntryTextStore"],
         ),
     ],
 )
 @Import(FakeMediaStore.Registrar::class)
-internal class ModerationPortsForTests
+internal class ModerationPortsForTests {
+    /**
+     * A5's `ReportedEntryTextStore` asks bond for the withdrawn authors (`closingViewOf`), and
+     * bond is not built here: every bond answers with a view in which nobody has withdrawn. A
+     * withdrawn author's `ERASED` is gratitude's own test (`ReportedEntryTextTest`), on a real bond.
+     */
+    @Bean
+    fun bondAccess(): BondAccess {
+        val nobodyWithdrew = mockk<BondClosingView> { every { withdrawnMemberIds } returns emptySet() }
+        return mockk { every { closingViewOf(any()) } returns nobodyWithdrew }
+    }
+}
 
 /** The stand-in for media's `ObjectStore`; see [ModerationPortsForTests]. */
 internal object FakeMediaStore {

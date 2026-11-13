@@ -633,6 +633,38 @@ class ArchitectureTest {
     }
 
     @Test
+    fun `only SecondFactor's proveNow makes the per-read step-up proof`() {
+        // A5 spec §5 step 3: `FreshStepUp` says a code was proved in this request. Its constructor
+        // is `internal`, so anything in `admin` could call it; a second caller (a controller that
+        // made one from the session's window) would open the words with no code. So outside its
+        // own file only `web/ModerationPages.kt`, where `SecondFactor.proveNow` makes it after
+        // `AdminSignIn.stepUp` accepts the code, may call it. Comments are stripped first: KDoc
+        // names it. Tests make their own and are not scanned.
+        val call = Regex("""\bFreshStepUp\s*\(""")
+        val comments = Regex("""/\*[\s\S]*?\*/|//[^\n]*""")
+
+        fun calls(text: String): Boolean = call.containsMatchIn(text.replace(comments, ""))
+        // Positive controls: a call is seen, and one only in a comment, or the type named, is not.
+        assertTrue(calls("val p = FreshStepUp(id, now)"), "a call was not matched")
+        assertTrue(!calls("/** [FreshStepUp](x) */ val a = 1\n// FreshStepUp(id)"), "a call in a comment was matched")
+        assertTrue(!calls("fun f(stepUp: FreshStepUp): Unit = Unit"), "the type's name was matched")
+        val proveNow = "/modules/admin/src/main/kotlin/com/moyi/admin/web/ModerationPages.kt"
+        val allowed = setOf("/modules/admin/src/main/kotlin/com/moyi/admin/service/FreshStepUp.kt", proveNow)
+        val adminMain = project.files.filter { it.normalisedProjectPath.startsWith("/modules/admin/src/main/") }
+        assertTrue(adminMain.any { it.normalisedProjectPath == proveNow && calls(it.text) }, "proveNow's call was not seen")
+        val violations =
+            adminMain
+                .filter { it.normalisedProjectPath !in allowed && calls(it.text) }
+                .map { it.normalisedProjectPath }
+
+        assertTrue(
+            violations.isEmpty(),
+            "Within modules/admin only SecondFactor.proveNow (web/ModerationPages.kt) may make a FreshStepUp (A5 spec §5). " +
+                "Found: $violations",
+        )
+    }
+
+    @Test
     fun `no event consumer subscribes to a streak breaking or going on`() {
         // ADR-0034 decision 11 (the ruling at :240), ADR-0046: nothing is ever pushed, or done,
         // because a streak ended or went on. A consumer subscribes by naming the event type in

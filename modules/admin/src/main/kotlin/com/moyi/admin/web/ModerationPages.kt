@@ -2,6 +2,7 @@ package com.moyi.admin.web
 
 import com.moyi.admin.service.AdminSignIn
 import com.moyi.admin.service.ConditionalOnAdminConsole
+import com.moyi.admin.service.FreshStepUp
 import com.moyi.admin.service.ModerationNote
 import com.moyi.admin.service.StepUp
 import com.moyi.admin.service.TotpStep
@@ -80,6 +81,26 @@ internal class SecondFactor(
         }
     }
 
+    /**
+     * A code proved for one read of an entry's words (A5 spec §5 step 3), with no window. A blank
+     * code is [Fresh.Missing], whatever the session's window says: the session is not read. Any
+     * other is `AdminSignIn.stepUp`'s to decide (its row lock, lockout, replay check and its own
+     * `ADMIN_STEP_UP` row, committed before the read begins): accepted, it is [Fresh.Proved], and
+     * [AdminAuthorities.SECOND_FACTOR_AT] is **not** written, so the read opens no window for the
+     * acts [prove] gates; refused, [Fresh.Refused]. The one place a [FreshStepUp] is made.
+     */
+    fun proveNow(
+        adminId: UUID,
+        code: String,
+        from: ClientAddress?,
+    ): Fresh {
+        if (code.isBlank()) return Fresh.Missing
+        return when (signIn.stepUp(adminId, code.trim(), from)) {
+            is TotpStep.Accepted -> Fresh.Proved(FreshStepUp(adminId, clock.instant()))
+            TotpStep.Refused -> Fresh.Refused
+        }
+    }
+
     /** Whether a gated form needs its code field shown up front. Display only: the console decides. */
     fun asksForCode(session: HttpSession?): Boolean =
         !StepUp.isFresh(session?.getAttribute(AdminAuthorities.SECOND_FACTOR_AT) as? Instant, clock.instant())
@@ -94,6 +115,17 @@ internal class SecondFactor(
         ) : Proof
 
         data object Refused : Proof
+    }
+
+    /** What [proveNow] answers: no code typed, a code refused, or a code proved in this request. */
+    sealed interface Fresh {
+        data object Missing : Fresh
+
+        data object Refused : Fresh
+
+        class Proved(
+            val stepUp: FreshStepUp,
+        ) : Fresh
     }
 }
 
