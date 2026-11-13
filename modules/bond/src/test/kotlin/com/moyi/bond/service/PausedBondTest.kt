@@ -102,7 +102,10 @@ internal class PausedBondTest(
         pausedFor(bea, ended) shouldBe false
 
         // A pending bond: the creator alone is the active member; once they leave nobody is.
-        val solo = create.create(draft(users.verified("Cy"))).bond.id.value
+        val solo =
+            create
+                .create(draft(users.verified("Cy")))
+                .bond.id.value
         val cy = jdbc.queryForObject("SELECT user_id FROM bond_members WHERE bond_id = ?", UUID::class.java, solo)!!
         spans.suspend(cy, NOW)
         pausedFor(cy, solo) shouldBe true
@@ -175,7 +178,12 @@ internal class PausedBondTest(
         val (_, cal, dee) = pairedBond("Cal" to "Dee")
         jdbc.update("""UPDATE bond_members SET notification_prefs = '{"onThisDay":true}'::jsonb""")
         // 20:00 in Lagos is 19:00Z, tomorrow's: the default reminder, and the on-this-day time below.
-        val windowEnd = Instant.now().truncatedTo(ChronoUnit.DAYS).plus(Duration.ofDays(1)).plus(Duration.ofHours(19))
+        val windowEnd =
+            Instant
+                .now()
+                .truncatedTo(ChronoUnit.DAYS)
+                .plus(Duration.ofDays(1))
+                .plus(Duration.ofHours(19))
         val after = windowEnd.minusSeconds(300)
         roster.remindersDueBetween(after, windowEnd).map { it.userId } shouldContainExactlyInAnyOrder users.ids(paused, cal, dee)
 
@@ -184,7 +192,8 @@ internal class PausedBondTest(
         // Ada and Bea's bond is paused: neither is reminded. Cal and Dee still are.
         roster.remindersDueBetween(after, windowEnd).map { it.userId } shouldContainExactlyInAnyOrder listOf(cal, dee)
         // The on-this-day push is not the reminder: both of the paused bond's members still have it.
-        audiences.onThisDayDueBetween(LocalTime.of(20, 0), after, windowEnd).map { it.userId } shouldContainExactlyInAnyOrder users.ids(paused, cal, dee)
+        audiences.onThisDayDueBetween(LocalTime.of(20, 0), after, windowEnd).map { it.userId } shouldContainExactlyInAnyOrder
+            users.ids(paused, cal, dee)
 
         spans.lift(bea, NOW.plusSeconds(60))
         roster.remindersDueBetween(after, windowEnd).size shouldBe 4
