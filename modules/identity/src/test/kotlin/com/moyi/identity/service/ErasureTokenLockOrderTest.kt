@@ -8,6 +8,7 @@ import com.moyi.identity.domain.PasswordResetTokenExpiredException
 import com.moyi.identity.domain.UserId
 import com.moyi.identity.domain.VerificationCode
 import com.moyi.identity.domain.VerificationCodeRejectedException
+import com.moyi.identity.domain.VerificationRequested
 import com.moyi.identity.domain.VerificationSecret
 import com.moyi.identity.domain.VerificationTokenExpiredException
 import com.moyi.identity.infra.IdentityTestApplication
@@ -16,6 +17,7 @@ import com.moyi.identity.web.LoginEndpointTest
 import com.moyi.identity.web.RecordingEmailSender
 import com.moyi.identity.web.SessionsEndpointTest
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.awaitility.Awaitility.await
@@ -24,8 +26,11 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
+import org.springframework.context.event.EventListener
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
@@ -35,6 +40,7 @@ import org.springframework.test.web.servlet.post
 import java.sql.Connection
 import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -61,8 +67,12 @@ import javax.sql.DataSource
  */
 @SpringBootTest(classes = [IdentityTestApplication::class])
 @AutoConfigureMockMvc
-@Import(LoginEndpointTest.RecordingConfiguration::class, SessionsEndpointTest.TimeConfiguration::class)
-@Suppress("LongParameterList") // The job, the request, the three other sides, HTTP and the database: each named.
+@Import(
+    LoginEndpointTest.RecordingConfiguration::class,
+    SessionsEndpointTest.TimeConfiguration::class,
+    ErasureTokenLockOrderTest.RequestsConfiguration::class,
+)
+@Suppress("LongParameterList") // The job, the request, the three other sides, HTTP, the database and the events: each named.
 internal class ErasureTokenLockOrderTest(
     @Autowired private val deletions: AccountDeletions,
     @Autowired private val deletion: AccountDeletion,
@@ -72,6 +82,7 @@ internal class ErasureTokenLockOrderTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val emails: RecordingEmailSender,
     @Autowired private val dataSource: DataSource,
+    @Autowired private val requested: RecordedVerificationRequests,
 ) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
     private lateinit var pool: ExecutorService
@@ -126,15 +137,21 @@ internal class ErasureTokenLockOrderTest(
     }
 
     @Test
-    fun `a forgotten password asked for again as the erasure runs waits for it, rather than retiring a code first`() {
+    fun `a forgotten password asked for again as the erasure runs waits for it, and then issues nothing`() {
         val ada = signUp()
         forgotPassword(ada) // a code for the second request to retire
         val address = Email(emailOf(ada))
+        requested.clear()
 
         val outcome = againstTheErasure(ada) { forgotten.request(address) }
 
+        // Answered as every forgot-password is (no exception: the edge's 202), and nothing issued:
+        // the account read before the lock is read again under it, and is erased (ADR-0058 decision 5).
         outcome shouldBe null
         status(ada) shouldBe "DELETED"
+        jdbc.queryForObject("SELECT count(*) FROM verification_tokens WHERE user_id = ?", Int::class.java, ada) shouldBe 0
+        // Published in the request's own thread, before its commit: none means no email was asked for.
+        requested.shouldBeEmpty()
     }
 
     // --- the interleaving ---
@@ -250,6 +267,12 @@ internal class ErasureTokenLockOrderTest(
 
     private fun status(userId: UUID): String? = jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String::class.java, userId)
 
+    @TestConfiguration
+    class RequestsConfiguration {
+        @Bean
+        fun recordedVerificationRequests(): RecordedVerificationRequests = RecordedVerificationRequests()
+    }
+
     private companion object {
         const val PASSWORD = "correct horse battery"
         const val NEW_PASSWORD = "a different good password"
@@ -259,5 +282,13 @@ internal class ErasureTokenLockOrderTest(
         @JvmStatic
         @DynamicPropertySource
         fun breachCorpus(registry: DynamicPropertyRegistry) = TestBreachCorpus.register(registry)
+    }
+}
+
+/** Every [VerificationRequested] published, as it is published: the event the email is sent from, after the commit. */
+internal class RecordedVerificationRequests : CopyOnWriteArrayList<VerificationRequested>() {
+    @EventListener
+    fun on(event: VerificationRequested) {
+        add(event)
     }
 }

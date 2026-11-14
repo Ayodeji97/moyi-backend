@@ -92,6 +92,9 @@ The owner's request, from the iPhone smoke test: a person should type a short co
 Both forms of verification, and issuing a code, now take the account's sessions lock before any
 `verification_tokens` row, the order the deletion job takes (ADR-0066, amendment of 2026-11-14,
 which found the deadlock). For decision 5's equal work: `VerificationCodeCheck` takes the lock in
-every branch, on an id no row has when nobody has the address, so the count is one lookup, the
-lock, one locking `SELECT`, one HMAC and one `UPDATE` (`VerificationCodeCheckTest` counts four
-statements, was three).
+every branch, so the count is one lookup, the lock, one locking `SELECT`, one HMAC and one `UPDATE`
+(`VerificationCodeCheckTest` counts four statements, was three). When nobody has the address the key
+is the address's own (a name-based UUID of it), so probes of different unknown addresses never wait
+on each other, and an unknown address does not answer slower than a known one. Issuing a code reads
+the account again under the lock and issues nothing to one that was erased, suspended or (for this
+purpose) verified meanwhile; the request is still answered 202.

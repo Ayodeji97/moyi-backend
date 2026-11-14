@@ -40,6 +40,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.Callable
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -151,6 +152,52 @@ internal class VerificationCodeCheckTest(
         work.distinct() shouldBe listOf(1 to 4L)
     }
 
+    /**
+     * The sessions lock an unknown address takes is its own (review of #198): a key made from the
+     * address, so two probes of one address queue as two attempts on one account would, and probes
+     * of two addresses never meet. One shared key would make every unknown address wait behind
+     * every other, holding a connection each, and answer slower than a known one.
+     */
+    @Test
+    fun `checks of two unknown addresses do not wait on each other, and two of one address do`() {
+        val held = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val others = Executors.newFixedThreadPool(2)
+        try {
+            val first =
+                pool.submit {
+                    transactions.execute {
+                        check.check(Email("nobody-a@example.com"), VerificationPurpose.EMAIL_VERIFICATION, CODE, NOW)
+                        held.countDown()
+                        release.await(WAIT.seconds, TimeUnit.SECONDS)
+                    }
+                }
+            held.await(WAIT.seconds, TimeUnit.SECONDS) shouldBe true
+
+            // Another unknown address finishes while the first still holds what it locked.
+            others
+                .submit<AcceptedCode?> {
+                    transactions.execute { check.check(Email("nobody-b@example.com"), VerificationPurpose.EMAIL_VERIFICATION, CODE, NOW) }
+                }.get(WAIT.seconds, TimeUnit.SECONDS)
+                .shouldBeNull()
+
+            // The same address waits for it: Postgres shows an advisory lock not granted.
+            val same =
+                others.submit<AcceptedCode?> {
+                    transactions.execute { check.check(Email("nobody-a@example.com"), VerificationPurpose.EMAIL_VERIFICATION, CODE, NOW) }
+                }
+            await().atMost(WAIT).until {
+                jdbc.queryForObject("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted", Int::class.java)!! > 0
+            }
+            release.countDown()
+            first.get(WAIT.seconds, TimeUnit.SECONDS)
+            same.get(WAIT.seconds, TimeUnit.SECONDS).shouldBeNull()
+        } finally {
+            release.countDown()
+            others.shutdownNow()
+        }
+    }
+
     private fun insertUser(email: String = "ada@example.com"): User {
         val user =
             User(
@@ -215,6 +262,7 @@ internal class VerificationCodeCheckTest(
     private companion object {
         val NOW: Instant = Instant.parse("2026-11-08T12:00:00Z")
         val CODE = VerificationCode("424242")
+        val WAIT: Duration = Duration.ofSeconds(10)
 
         @JvmStatic
         @DynamicPropertySource

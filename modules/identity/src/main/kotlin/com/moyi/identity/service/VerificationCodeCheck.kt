@@ -33,8 +33,8 @@ import java.util.UUID
  * rollback would un-count it, and an attacker would have unlimited tries).
  *
  * **Every path does the same work.** An unknown address, an account holding no code, a
- * dead code and a wrong one each run one lookup of the address, the sessions lock (on an id no row has
- * when nobody has the address), one locking `SELECT`, one HMAC, one constant-time
+ * dead code and a wrong one each run one lookup of the address, the sessions lock (on a key made from
+ * the address when nobody has it), one locking `SELECT`, one HMAC, one constant-time
  * comparison and one `UPDATE` (against an id that names no row when there is nothing to
  * count); only the accepted code differs, by what it is accepted for. That is the
  * timing half of the one answer, the dummy hash login runs (ADR-0020 decision 2) in the
@@ -87,9 +87,12 @@ internal class VerificationCodeCheck(
     ): AcceptedCode? {
         val user = accounts.findByEmail(email)
         // The account's sessions lock before the code's row, the order the deletion job takes
-        // (ADR-0066, amended 2026-11-14); for an unknown address, the lock on an id no row has, so
-        // the work is the same either way.
-        sessions.lockSessionsOf(user?.id ?: NOBODY)
+        // (ADR-0066, amended 2026-11-14). An unknown address takes one too, so the work is the same
+        // either way: on a key of its own, made from the address, so that probes of one address
+        // queue as attempts on one account do and probes of two addresses never meet. One shared
+        // key would queue every unknown address behind every other, a connection held by each,
+        // and make it answer slower than a known one (review of #198).
+        sessions.lockSessionsOf(user?.id ?: unknownAccount(email))
         val held = tokens.lockHeldCode(user?.id ?: NOBODY, purpose)
         val presented = hasher.hash(held?.id ?: NO_TOKEN, purpose, code)
         if (user != null && VerificationToken.acceptsCode(held, presented, now)) return AcceptedCode(user, held!!)
@@ -106,6 +109,12 @@ internal class VerificationCodeCheck(
     ): AcceptedCode? = transactions.execute { check(email, purpose, code, now) }
 
     private companion object {
+        /**
+         * The sessions-lock key for an address no account has: a name-based (v3) UUID of the
+         * address, which no time-ordered id of a real account can equal.
+         */
+        fun unknownAccount(email: Email): UserId = UserId(UUID.nameUUIDFromBytes("unknown:${email.value.lowercase()}".toByteArray()))
+
         /** Ids no row has: ids here are time-ordered (`IdGenerator.timeOrdered`), and the nil UUID is not one. */
         val NOBODY = UserId(UUID(0L, 0L))
         val NO_TOKEN = UUID(0L, 0L)

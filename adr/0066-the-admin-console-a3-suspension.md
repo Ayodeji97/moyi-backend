@@ -240,26 +240,38 @@ The fourth was not in the owed line; it was found reading the paths, and the tes
 **The rule: every transaction that writes a person's `verification_tokens` and then waits on their
 `users` row or sessions takes their sessions lock first.** The four now do. Two transactions that
 both take it first are serialised by it, so the order of what each takes after it no longer matters
-between them. `VerificationCodeCheck` takes it for an unknown address too, on an id no row has, so a
-refusal's work stays the same whatever its reason (ADR-0018 decision 5): one more statement in every
-branch. The one write that does not take it, `checkAlone`'s count of a wrong code, holds one row and
-waits on nothing after it, so it cannot close a cycle; it takes the lock anyway, being `check`.
+between them. `VerificationCodeCheck` takes it for an unknown address too, so a refusal's work stays
+the same whatever its reason (ADR-0018 decision 5): one more statement in every branch. For an
+unknown address the key is its own, a name-based (v3) UUID of the address, which no account's
+time-ordered id can equal: two probes of one address queue as two attempts on one account do, and
+probes of two addresses never meet. (A single shared key, as first built, queued every unknown
+address behind every other, a connection held by each, and so answered slower than a known one:
+found in review.) `checkAlone`, the reset check's committed count of a wrong code, is `check` and so
+takes the lock too, though it would not need it: it holds one row and waits on nothing after it.
 
 **Behaviour.** No answer changes. A reset, verification or code request that meets the erasure now
 waits for it and finds the account erased (the reset's 410 or 422, the verification's 410 or 422)
 instead of one of the two failing with `deadlock detected`. A suspension can no longer commit in the
 middle of a typed-code verification; it waits for it (`VerifyEmailSuspensionRaceTest` now pins that;
-the conditional `UPDATE` in `markEmailVerified` stays as the second guard). The cost is that these
-paths queue behind a sign-in or refresh of the same person, for the few milliseconds those hold it.
+the conditional `UPDATE` in `markEmailVerified` stays as the second guard). A forgot-password or
+resend reads the account again under the lock and issues nothing (no token, no event, so no email)
+unless it still can sign in and, for a verification, is still unverified: an erasure or a suspension
+that committed while it waited is honoured, still with the caller's 202. The cost is that these paths
+queue behind a sign-in, refresh, suspension or erasure of the same person (or, for an unknown
+address, behind another probe of that address) for the few milliseconds those hold the lock.
 
 **Test.** `ErasureTokenLockOrderTest`: a connection holds the account's `credentials` row so the job
 stops at `DELETE FROM credentials` holding the sessions lock and `users`; the other side starts and
 is waited for until `pg_blocking_pids` shows it blocked by the job; the connection commits. Before the
 change all four tests failed with `deadlock detected`; after it, each passes. With the lock removed
-from `VerificationCodeCheck` alone, its test and `VerifyEmailSuspensionRaceTest` go red.
+from `VerificationCodeCheck` alone, its test and `VerifyEmailSuspensionRaceTest` go red. The
+forgot-password case also asserts that nothing was issued after the erasure (no token row, no
+`VerificationRequested`): red before the re-read, green after. `VerificationCodeCheckTest` shows two
+unknown addresses not waiting on each other and two checks of one address waiting: red with the
+shared key, green with the per-address one.
 
-**Found, not changed:** a forgot-password or resend that read the account just before the erasure
-commits still inserts its token after it, on the anonymised row, and its email goes to the old
-address. Before this change the same could happen without a deadlock; the lock does not close it,
-because the account was read before the lock. Re-reading under the lock would; that is a behaviour
-change for the owner.
+**Fixed with it (review of #198):** a forgot-password or resend that read the account just before
+the erasure committed used to insert its token after it, on the anonymised row, and email the address
+the account had had, which ADR-0058 decision 5 and `AccountErasure` say never happens. The lock
+alone did not close it, the account having been read before the lock; `RequestVerification` now reads
+it again under the lock (`CurrentAccounts.reread`, past Hibernate's identity map) and sends from that.
