@@ -198,4 +198,59 @@ internal class CloseTransitionTest {
             .resumeJoiningDay(opened)
             .isWithheldBy(opened, LocalTime.of(20, 0)) shouldBe true
     }
+
+    // --- admin A3, spec §4: a day that overlaps a suspension (rulings 16 and 17) ---
+
+    @Test
+    fun `a paused day nobody wrote on closes SUSPENDED, not EMPTY`() {
+        val closed = day.close(end, paused = true)
+
+        closed.status shouldBe BondDayStatus.SUSPENDED
+        closed.closedAt shouldBe end
+        closed.revealedAt shouldBe null
+        closed.isSettled shouldBe true
+    }
+
+    @Test
+    fun `a paused day one member wrote on closes SUSPENDED, not SOLO`() {
+        val closed = day.withEntry().close(end, paused = true)
+
+        closed.status shouldBe BondDayStatus.SUSPENDED
+        closed.entryCount shouldBe 1
+        closed.closedAt shouldBe end
+        closed.revealedAt shouldBe null
+    }
+
+    @Test
+    fun `a paused day both wrote on and read together stays REVEALED`() {
+        val revealed = day.withEntry().withEntry().revealWhenDue(null, opened)
+
+        revealed.close(end, paused = true) shouldBe revealed.copy(closedAt = end)
+    }
+
+    @Test
+    fun `a paused pending day is left to the withheld rule`() {
+        val pending = day.withEntry().withEntry().revealWhenDue(LocalTime.of(20, 0), opened)
+
+        // Paused alone does not hold back a reveal that fell due before the span began.
+        pending.close(end, paused = true).status shouldBe BondDayStatus.REVEALED
+        pending.close(end, withheld = true, paused = true) shouldBe pending.copy(closedAt = end)
+    }
+
+    @Test
+    fun `a reveal is withheld when a suspension held at the instant it fell due, and only then`() {
+        val pending = day.withEntry().withEntry().revealWhenDue(LocalTime.of(20, 0), opened)
+        val due = Instant.parse("2026-09-15T19:00:00Z")
+
+        pending.isWithheldBy(null, LocalTime.of(20, 0)) { it == due } shouldBe true
+        // A span that began only after the reveal fell due.
+        pending.isWithheldBy(null, LocalTime.of(20, 0)) { it.isAfter(due) } shouldBe false
+        // Read together already, or one wrote: nothing to withhold.
+        day
+            .withEntry()
+            .withEntry()
+            .revealWhenDue(null, opened)
+            .isWithheldBy(null, LocalTime.of(20, 0)) { true } shouldBe false
+        day.withEntry().isWithheldBy(null, LocalTime.of(20, 0)) { true } shouldBe false
+    }
 }

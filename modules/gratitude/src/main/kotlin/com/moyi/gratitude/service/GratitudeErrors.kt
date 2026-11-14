@@ -36,6 +36,18 @@ internal class BondArchivedException :
     )
 
 /**
+ * Spec §9 (admin A3): a new entry, an edit or a reaction while the bond is paused. It names no cause,
+ * no date and no member. Thrown right after [BondArchivedException]'s check on each refused path,
+ * so a bond that has ended answers that instead.
+ */
+internal class BondPausedException :
+    ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.BOND_PAUSED,
+        "This bond is paused. Everything in it can still be read; new entries wait until it resumes.",
+    )
+
+/**
  * 422: `imageMediaId` names no photo, or `voiceMediaId` no voice note, `media` will attach
  * to this entry (FR-044a, spec §4 D2 and D3): not the caller's, not yet processed, failed or
  * deleted, attached to another entry already, of the other kind, or nothing at all. One held

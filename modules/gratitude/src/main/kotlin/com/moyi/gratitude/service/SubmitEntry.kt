@@ -351,6 +351,8 @@ internal class SubmitEntry(
                             // `isOpen` would let this commit after the bond ended.
                             val membership = access.lockMembershipOf(userId, bondId)
                             if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()
+                            // Inside `once`, so a submit accepted before the pause and replayed after it answers as it did.
+                            if (membership.paused) throw BondPausedException()
                             // Named or not, decided only for a member of an open bond: a stranger has had
                             // the bond's 404 and an ended bond its 409 by now (ADR-0038 decision 9). Any prompt
                             // the library holds, retired or not: an offline draft names the one it cached.

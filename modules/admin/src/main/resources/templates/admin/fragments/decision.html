@@ -15,14 +15,14 @@
         </select>
     </div>
     <div class="field">
-        <label th:for="${f.id + '-note'}">Note</label>
+        <label th:for="${f.id + '-note'}" th:text="${f.wording.noteLabel}">Note</label>
         <p th:id="${f.id + '-note-hint'}" class="hint" th:text="${f.noteHint}">Required.</p>
-        <textarea th:id="${f.id + '-note'}" name="note" rows="3" required
+        <textarea th:id="${f.id + '-note'}" th:name="${f.wording.noteField}" rows="3" required
                   th:attr="aria-describedby=${f.id + '-note-hint'}" th:text="${f.note}"></textarea>
     </div>
     <div class="field" th:if="${f.askCode}">
         <label th:for="${f.id + '-code'}">Code from your authenticator app</label>
-        <p th:id="${f.id + '-code-hint'}" class="hint">This cannot be undone, so it needs a code proven in the last five minutes.</p>
+        <p th:id="${f.id + '-code-hint'}" class="hint" th:text="${f.wording.codeHint}">A code proven in the last five minutes.</p>
         <input th:id="${f.id + '-code'}" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
                autocomplete="one-time-code" required th:attr="aria-describedby=${f.id + '-code-hint'}">
     </div>

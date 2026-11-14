@@ -22,6 +22,8 @@ data class BondAdminView(
     val endedAt: Instant?,
     /** The other member, or `null` while the bond waits for one. */
     val partnerUserId: UUID?,
+    /** A3: the bond is paused, because a member who has not left is suspended. */
+    val paused: Boolean,
 ) {
     override fun toString(): String = "BondAdminView(bondId=$bondId)"
 }

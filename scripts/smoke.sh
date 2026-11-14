@@ -339,6 +339,24 @@
 # a code per read and an open report about words; EntryTextControllerTest holds it). Last run on
 # 2026-11-13, on feat/admin-console-a5, against a compose project of its own: 1804 passed, 0 failed,
 # 0 skipped.
+# Since the admin console A3 (FR-113, FR-116, ADR-0066) a third admin section has an invited ADMIN
+# suspend a member through the lookup page and lift it: POST …/suspend from a refused address the API's
+# own 401, byte for byte an unknown path's; a SAFETY lookup showing Status and the suspend form; the
+# suspend (a justification and a code) a 303 to the lookup with its line and no note in the Location
+# or the page; the account SUSPENDED with one open span and no live refresh token; the member's old
+# access token 401, refresh 401 REFRESH_TOKEN_INVALID, the right password 401 byte for byte a wrong
+# one's; the partner's entry 409 BOND_PAUSED with its copy and nothing written, the bond and today
+# paused (today's prompt null); the lift with a new code, ACTIVE again with no session back; the
+# member signing in, the partner's entry 201; both audit rows SUCCEEDED with their result and the note
+# as justification; the member's export listing neither; the note in no log line. Last run on
+# 2026-11-13, on feat/admin-console-a3 (eecb1be2 plus Task 8's tree), from a jar of that tree, on a
+# fresh database that applied 60 migrations to V66, against its own compose project (moyi-a3s:
+# Postgres 55733, Valkey 56733, MinIO 57733), the jar booted by hand (local profile, the five crons
+# at */5, ports 18733/18734) and --attach: 1849 passed, 0 failed, 0 skipped, 38 "admin A3" checks
+# among them. Run again on 2026-11-14 after the final review's fix wave (refresh mints under the
+# sessions lock; a reset link or code from before a suspension refused; no resend mail; the V65
+# guard), from a jar of 64630af3's tree, on a fresh database that applied 60 migrations to V66,
+# the same compose project and ports: 1849 passed, 0 failed, 0 skipped, the same 38 "admin A3".
 # The late-entries probe "the job has run since" (the ShedLock floor named under #126, and failed in
 # four recorded runs) now waits up to 60 s for the close job's next run, not 30: the lock's 30 s floor
 # plus the five-second cron put that run up to 35 s away, and the 30 one-second polls ran out first.
@@ -687,9 +705,16 @@ m2_cleanup() {
   done
   return 0
 }
+# a3_cleanup: disables the admin A3 section's ADMIN account, which may be unset when the section died early.
+A3_CLEANUP=0
+a3_cleanup() {
+  [ -n "${M2_EMAIL_a3:-}" ] && { sql "SELECT admin_disable('$M2_EMAIL_a3')" >/dev/null || true; }
+  return 0
+}
 on_exit() {
   if [ "$PR_TRANSLATIONS_IN" = 1 ]; then sql "DELETE FROM prompt_texts WHERE text LIKE 'PT~ %'" >/dev/null || true; fi
   if [ "$M2_CLEANUP" = 1 ]; then m2_cleanup; fi
+  if [ "$A3_CLEANUP" = 1 ]; then a3_cleanup; fi
   if [ -n "$APP_PID" ]; then kill "$APP_PID" 2>/dev/null || true; wait "$APP_PID" 2>/dev/null || true; fi
 }
 trap on_exit EXIT
@@ -4401,6 +4426,100 @@ print(a['logKept'], ','.join(x['action'] for x in a['accesses']) or '-', all(x.g
   m2_cleanup
   M2_CLEANUP=0
   rm -rf "$M2_DIR"
+fi
+
+echo; echo "admin console A3 — an ADMIN suspends a member and lifts it; the partner's bond pauses and resumes (FR-113, FR-116, ADR-0066)"
+# Spec §12 of docs/superpowers/specs/2026-11-13-admin-console-a3-design.md. It reuses the A2 section's
+# m2_code, m2_admin, m2_sign_in and m2_follow, so it runs only where that section did. Each act needs a
+# code of its own (proveNow, no window), so the lift waits for the next unspent 30-second step. The
+# partner's leave is not run: it would end the bond, and an ended bond answers BOND_ARCHIVED, not
+# BOND_PAUSED (PausedBondWritesTest holds that order).
+if ! command -v oathtool >/dev/null; then
+  skip "admin A3: the whole section (oathtool not installed: brew install oath-toolkit)"
+elif [ "$PSQL_OK" != 1 ]; then
+  skip "admin A3: the whole section (psql not reachable through docker compose)"
+elif [ "$ADM_ON" != 200 ] || ! declare -F m2_admin >/dev/null; then
+  skip "admin A3: the whole section (this server has the console off, or the A2 section did not run)"
+else
+  flush_buckets
+  A3_CLEANUP=1 # from here, however the run ends, on_exit disables the section's admin account
+  # The suspend route from a refused address: the API's own 401, as every other console path (A1, A5).
+  expect "admin A3: POST an unknown path from a refused address gets the API's 401" 401 '"status":401' -- -X POST "$ADM/users/00000000-0000-7000-8000-000000000000/no-such-path" -H 'X-Forwarded-For: 203.0.113.9'
+  A3_UNKNOWN_POST="$(no_instance)"
+  expect "admin A3: POST …/suspend from a refused address gets the API's 401 too" 401 '"status":401' -- -X POST "$ADM/users/00000000-0000-7000-8000-000000000000/suspend" -H 'X-Forwarded-For: 203.0.113.9'
+  is "admin A3: …byte for byte what an unknown path answers (but its instance)" "$(no_instance)" "$A3_UNKNOWN_POST"
+
+  A3_NOTE="smoke-a3-justification-$RANDOM$RANDOM"
+  verified_account "a3-member" "203.0.113.250"; A3_EMAIL="$ACCOUNT_EMAIL"
+  verified_account "a3-partner" "203.0.113.251"; A3_B="$ACCOUNT_ACCESS"
+  expect "admin A3: the member signs in again, keeping both tokens" 200 '"refreshToken"' -- -X POST "$API/auth/login" -d "$(login_body "$A3_EMAIL" "$PASSWORD")"
+  A3_A="$(printf '%s' "$LAST_BODY" | jget accessToken)"; A3_REFRESH="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+  expect "admin A3: the member makes a bond" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $A3_A" -d "$(bond_body "Us")"
+  A3_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+  A3_INV="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+  expect "admin A3: …the partner joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$A3_INV/accept" -H "Authorization: Bearer $A3_B"
+  expect "admin A3: …and before anything, the bond is not paused" 200 '"paused":false' -- "$API/bonds/$A3_BOND" -H "Authorization: Bearer $A3_B"
+  A3_USER="$(sql "SELECT id FROM users WHERE email = '$A3_EMAIL'")"
+
+  m2_admin a3 ADMIN
+  A3_ADMIN="$M2_ID_a3"
+  A3_J="$ADM_DIR/a3-admin"
+  m2_sign_in a3 "$A3_J"
+  adm_is "admin A3: the ADMIN signs in" 302 "/admin"
+  adm_code "$A3_J" "$ADM/users?q=$A3_USER"; AD_CSRF="$(adm_csrf)"
+  adm_code "$A3_J" -X POST "$ADM/users" --data-urlencode "q=$A3_USER" --data-urlencode "purpose=SAFETY" --data-urlencode "note=smoke: FAKE-SMOKE-A3 lookup" --data-urlencode "_csrf=$AD_CSRF"
+  adm_is "admin A3: the ADMIN looks the member up, for SAFETY with a note" 200
+  if [[ "$ADM_BODY" == *"Suspend this account"* && "$ADM_BODY" == *">ACTIVE<"* ]]; then pass "admin A3: …the page shows Status ACTIVE and the suspend form"; else fail "admin A3: the lookup's status and suspend form" "${ADM_BODY:0:300}"; fi
+
+  AD_CSRF="$(adm_csrf)"; m2_code a3
+  adm_code "$A3_J" -X POST "$ADM/users/$A3_USER/suspend" --data-urlencode "justification=$A3_NOTE" --data-urlencode "code=$M2_CODE" --data-urlencode "_csrf=$AD_CSRF"
+  adm_is "admin A3: suspend, with a justification and a code, is a 303 to the lookup" 303 "/admin/users?q=$A3_USER"
+  if [[ "$(adm_location)" == *"$A3_NOTE"* ]]; then fail "admin A3: …the note is not in the Location" "it is"; else pass "admin A3: …the note is not in the Location"; fi
+  m2_follow "$A3_J"
+  if [[ "$ADM_BODY" == *"Suspended. They are signed out everywhere and cannot sign in. Their bonds are paused."* ]]; then pass "admin A3: …the page it leads to says Suspended"; else fail "admin A3: the suspend flash" "${ADM_BODY:0:300}"; fi
+  if [[ "$ADM_BODY" == *"$A3_NOTE"* ]]; then fail "admin A3: …and never the note" "the note is on the page"; else pass "admin A3: …and never the note"; fi
+  db_is "admin A3: the account is SUSPENDED, with one open span and its sessions revoked" \
+    "$(sql "SELECT u.status || '|' || (SELECT count(*) FROM account_suspensions WHERE user_id = u.id AND lifted_at IS NULL) || '|' || (SELECT count(*) FROM refresh_tokens WHERE user_id = u.id AND revoked_at IS NULL) FROM users u WHERE id = '$A3_USER'")" "SUSPENDED|1|0"
+
+  flush_buckets
+  expect "admin A3: the member's old access token is 401" 401 '"code":"UNAUTHENTICATED"' -- "$API/me" -H "Authorization: Bearer $A3_A"
+  expect "admin A3: the member's refresh is 401 REFRESH_TOKEN_INVALID" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$A3_REFRESH\"}"
+  expect "admin A3: a wrong password for the member is 401 INVALID_CREDENTIALS" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$A3_EMAIL" "not the password")"
+  A3_WRONG="$(no_instance)"
+  expect "admin A3: the member's right password is 401 INVALID_CREDENTIALS" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$A3_EMAIL" "$PASSWORD")"
+  is "admin A3: …byte for byte a wrong password's (but its instance)" "$(no_instance)" "$A3_WRONG"
+  header_is "admin A3: …and, as a wrong password, without WWW-Authenticate" "WWW-Authenticate" ""
+
+  expect "admin A3: the partner's new entry is 409 BOND_PAUSED" 409 '"code":"BOND_PAUSED"' -- -X POST "$API/bonds/$A3_BOND/entries" -H "Authorization: Bearer $A3_B" -H "Idempotency-Key: $(new_key)" -d '{"text":"a3 words while paused"}'
+  [[ "$LAST_BODY" == *"This bond is paused. Everything in it can still be read; new entries wait until it resumes."* ]] && pass "admin A3: …with the copy that names no cause" || fail "admin A3: the BOND_PAUSED copy" "${LAST_BODY:0:300}"
+  db_is "admin A3: …and nothing was written" "$(sql "SELECT count(*) FROM entries e JOIN bond_days d ON d.id = e.bond_day_id WHERE d.bond_id = '$A3_BOND'")" "0"
+  expect "admin A3: the partner's GET of the bond says paused" 200 '"paused":true' -- "$API/bonds/$A3_BOND" -H "Authorization: Bearer $A3_B"
+  expect "admin A3: …and so does today, with no prompt" 200 '"paused":true' -- "$API/bonds/$A3_BOND/today" -H "Authorization: Bearer $A3_B"
+  [[ "$LAST_BODY" == *'"prompt":null'* ]] && pass "admin A3: …today's prompt is null" || fail "admin A3: today's prompt while paused" "${LAST_BODY:0:300}"
+
+  adm_code "$A3_J" "$ADM/users?q=$A3_USER"; AD_CSRF="$(adm_csrf)"; m2_code a3
+  adm_code "$A3_J" -X POST "$ADM/users/$A3_USER/unsuspend" --data-urlencode "justification=$A3_NOTE" --data-urlencode "code=$M2_CODE" --data-urlencode "_csrf=$AD_CSRF"
+  adm_is "admin A3: lift, with a new code, is a 303 to the lookup" 303 "/admin/users?q=$A3_USER"
+  m2_follow "$A3_J"
+  if [[ "$ADM_BODY" == *"Suspension lifted. They can sign in again; their bonds take entries again now."* ]]; then pass "admin A3: …the page it leads to says Suspension lifted"; else fail "admin A3: the lift flash" "${ADM_BODY:0:300}"; fi
+  db_is "admin A3: the account is ACTIVE again, its span closed, and no session came back" \
+    "$(sql "SELECT u.status || '|' || (SELECT count(*) FROM account_suspensions WHERE user_id = u.id AND lifted_at IS NOT NULL) || '|' || (SELECT count(*) FROM refresh_tokens WHERE user_id = u.id AND revoked_at IS NULL) FROM users u WHERE id = '$A3_USER'")" "ACTIVE|1|0"
+
+  flush_buckets
+  expect "admin A3: after the lift the member signs in: 200" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$A3_EMAIL" "$PASSWORD")"
+  A3_A="$(printf '%s' "$LAST_BODY" | jget accessToken)"
+  expect "admin A3: …the bond is not paused" 200 '"paused":false' -- "$API/bonds/$A3_BOND" -H "Authorization: Bearer $A3_B"
+  expect "admin A3: …and the partner's entry is 201" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$A3_BOND/entries" -H "Authorization: Bearer $A3_B" -H "Idempotency-Key: $(new_key)" -d '{"text":"a3 words after the lift"}'
+
+  db_is "admin A3: audit_log has the suspension and the lift, SUCCEEDED, each with its result and the note as justification" \
+    "$(sql "SELECT string_agg(action || ':' || outcome || ':' || (metadata->>'result') || ':' || (justification = '$A3_NOTE'), ',' ORDER BY occurred_at) FROM audit_log WHERE actor_id = '$A3_ADMIN' AND target_id = '$A3_USER' AND action IN ('ACCOUNT_SUSPENDED', 'ACCOUNT_UNSUSPENDED')")" \
+    "ACCOUNT_SUSPENDED:SUCCEEDED:SUSPENDED:true,ACCOUNT_UNSUSPENDED:SUCCEEDED:LIFTED:true"
+  db_is "admin A3: …each act's code an ADMIN_STEP_UP row of its own" "$(sql "SELECT count(*) >= 2 FROM audit_log WHERE actor_id = '$A3_ADMIN' AND action = 'ADMIN_STEP_UP' AND outcome = 'SUCCEEDED'")" "t"
+  is "admin A3: the member's export lists neither act, nor the SAFETY lookup" "$(m2_export "$A3_A")" "True - True"
+  if grep -q "$A3_NOTE" "$MOYI_LOG"; then fail "admin A3: the justification is in no log line" "it is in $MOYI_LOG"; else pass "admin A3: the justification is in no log line"; fi
+  if grep -qE "suspension admin=$A3_ADMIN user=$A3_USER result=SUSPENDED" "$MOYI_LOG"; then pass "admin A3: …and the act's own log line names ids and the result"; else fail "admin A3: the suspension's log line" "no 'suspension admin=… user=… result=SUSPENDED' in $MOYI_LOG"; fi
+  a3_cleanup
+  A3_CLEANUP=0
 fi
 rm -rf "$ADM_DIR"
 

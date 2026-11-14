@@ -137,6 +137,7 @@ internal class ChangeEntry(
                 transactions.execute {
                     val (initial, membership) = authorOf(userId, entryId, lock = true)
                     if (replacement != null && (membership.hasLeft || !membership.isOpen)) throw BondArchivedException()
+                    if (replacement != null && membership.paused) throw BondPausedException()
                     val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
                     val day = lockDays(membership, initial.bondDayId, now)
                     val (changed, nextDay) =

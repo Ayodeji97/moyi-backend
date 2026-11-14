@@ -2,11 +2,13 @@ package com.moyi.bond.infra.database
 
 import com.moyi.bond.domain.BondId
 import com.moyi.bond.infra.BondTestApplication
+import com.moyi.bond.infra.FakeAccountStanding
 import com.moyi.bond.infra.FakeUserDirectory
 import com.moyi.common.events.EventConsumer
 import com.moyi.common.security.TokenRevocation
 import com.moyi.common.security.TokenRevocations
 import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.identity.api.AccountStanding
 import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -208,6 +210,9 @@ internal class AnchorIntervalBackfillTest(
     internal class BeforeTheOutbox {
         @Bean
         fun userDirectory(): UserDirectory = FakeUserDirectory()
+
+        @Bean
+        fun accountStanding(): AccountStanding = FakeAccountStanding()
 
         @Bean
         fun tokenRevocations(): TokenRevocations = TokenRevocations { TokenRevocation(invalidBefore = null) }

@@ -47,7 +47,9 @@ internal data class SessionTokens(
  *
  * The refresh half joins the caller's transaction and opens none of its own,
  * like `RequestVerification`. The access half ([accessTokenFor]) touches no
- * database and is called after the commit.
+ * database; sign-in calls it inside its transaction, under the sessions lock,
+ * so that a suspension waiting on that lock is stamped after the token's `iat`
+ * (admin console A3, ruling 7).
  */
 @Component
 internal class IssueSessionTokens(

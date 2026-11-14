@@ -4,6 +4,7 @@ import com.moyi.common.security.TokenRevocation
 import com.moyi.common.security.TokenRevocations
 import com.moyi.common.security.VerifiedEmails
 import com.moyi.common.web.idempotency.IdempotencyConfiguration
+import com.moyi.identity.api.AccountStanding
 import com.moyi.identity.api.UserDirectory
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -106,6 +107,10 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories
 internal class GratitudeTestApplication {
     @Bean
     fun userDirectory(): UserDirectory = FakeUserDirectory()
+
+    /** identity's standing port (A3): spans a test sets, so a bond's pause can be driven without identity. */
+    @Bean
+    fun accountStanding(): AccountStanding = FakeAccountStanding()
 
     /** `media`'s claim asks identity's other port (ADR-0049); here it reads the same fake directory. */
     @Bean

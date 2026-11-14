@@ -7,6 +7,7 @@ import com.moyi.common.events.EventPublisher
 import com.moyi.common.events.OutboxEvent
 import com.moyi.gratitude.domain.DayOutcome
 import com.moyi.gratitude.domain.Evaluation
+import com.moyi.gratitude.domain.LateEntryGrace
 import com.moyi.gratitude.domain.Milestones
 import com.moyi.gratitude.domain.StreakChange
 import com.moyi.gratitude.domain.StreakRules
@@ -65,6 +66,7 @@ internal class EvaluateStreaks(
     private val ids: IdGenerator,
     private val transactions: TransactionTemplate,
     private val clock: Clock,
+    private val grace: LateEntryGrace,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -170,7 +172,8 @@ internal class EvaluateStreaks(
      * What [day] is to the streak. Its status says, with two exceptions no
      * status carries, both for a **missed** day only. One that ended while a
      * deletion since called off was counting down is suspended (ADR-0034,
-     * Rulings 1). And one missed after the bond stopped taking writes
+     * Rulings 1), or that a member's suspension overlapped (admin A3), is
+     * suspended. And one missed after the bond stopped taking writes
      * does not end the run (doc 04 §8.3 — the streak "is preserved at its
      * value"). Only a missed day: a day both wrote on before one of them
      * left that afternoon is a complete day like any other, and §8.3
@@ -191,6 +194,11 @@ internal class EvaluateStreaks(
             // A deletion that counted down and was called off: this day ended
             // while the bond took no writes. Not a day anybody missed.
             view.wasPausedAt(day.endsAt) -> DayOutcome.SUSPENDED
+
+            // Any part of its writable window, late-entry grace included, fell
+            // inside a member's suspension (admin A3 ruling 16), as CloseDay asks. The close already writes such a day SUSPENDED; this
+            // is the same belt and braces as the line above.
+            view.wasSuspendedDuring(day.startsAt, grace.settlesAt(day.endsAt)) -> DayOutcome.SUSPENDED
 
             else -> DayOutcome.MISSED
         }

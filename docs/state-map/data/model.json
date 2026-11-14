@@ -28,8 +28,7 @@
             },
             {
               "id": "SUSPENDED",
-              "label": "SUSPENDED",
-              "built": false
+              "label": "SUSPENDED by an ADMIN: signed out everywhere, cannot sign in"
             },
             {
               "id": "PENDING_DELETION",
@@ -403,6 +402,29 @@
               "label": "decided: dismissed or upheld"
             }
           ]
+        },
+        {
+          "id": "admin.suspension",
+          "label": "An account, as an ADMIN suspending it or lifting its suspension finds it (the console, A3, ADR-0066)",
+          "states": [
+            {
+              "id": "NO_ACCOUNT",
+              "label": "no account has this id",
+              "initial": true
+            },
+            {
+              "id": "LIVE",
+              "label": "ACTIVE or PENDING_VERIFICATION, not suspended"
+            },
+            {
+              "id": "SUSPENDED",
+              "label": "SUSPENDED, its span open"
+            },
+            {
+              "id": "GONE",
+              "label": "DELETED (or PENDING_DELETION, which nothing writes)"
+            }
+          ]
         }
       ]
     }
@@ -621,6 +643,16 @@
     {
       "id": "event:admin-reads-words",
       "label": "an ADMIN asks to read the reported entry's words, with a justification and a code proved in that request",
+      "actor": "admin"
+    },
+    {
+      "id": "event:admin-suspends",
+      "label": "an ADMIN suspends the account, with a justification and a code proved in that request (A3)",
+      "actor": "admin"
+    },
+    {
+      "id": "event:admin-lifts",
+      "label": "an ADMIN lifts the account's suspension, with a justification and a new code (A3)",
       "actor": "admin"
     }
   ],

@@ -167,6 +167,7 @@ class OpenApiConfiguration {
             documentMediaRemoval(api)
             documentEndingDefaults(api)
             documentBondNamePattern(api)
+            documentPausedBond(api)
             documentDisplayName(api)
             documentEmailCodes(api)
             documentResetCodeCheck(api)
@@ -174,6 +175,8 @@ class OpenApiConfiguration {
             documentRevalidation(api)
             documentFavourites(api)
             documentReactions(api)
+            // After `documentReactions`: it sets `reactToEntry`'s description and this adds to it.
+            documentPausedWrites(api)
             documentEntryImage(api)
             documentPrompts(api)
             documentSearch(api)
@@ -685,6 +688,47 @@ private fun documentBondNamePattern(api: OpenAPI) {
             ?.get(BOND_NAME_PROPERTY) ?: return
     name.pattern = NOT_ONLY_SPACE_DOCUMENTED_PATTERN
 }
+
+/**
+ * Says what `paused` means on `getBond` (admin console A3). The flag is on the one bond shape
+ * every route returns, so the sentence is said once, on the route a client reads a bond by.
+ * It names no cause, as the field does not.
+ */
+private fun documentPausedBond(api: OpenAPI) {
+    api.paths.values
+        .flatMap { it.readOperations() }
+        .filter { it.operationId == GET_BOND_OPERATION }
+        .forEach { it.description = PAUSED_DESCRIPTION }
+}
+
+/**
+ * Admin A3 (spec §9): the three writes a paused bond refuses say so, and `today` says what `paused` is.
+ * Appended, since two of them already carry a description. None names a cause.
+ */
+private fun documentPausedWrites(api: OpenAPI) {
+    api.paths.values.flatMap { it.readOperations() }.forEach { operation ->
+        val added =
+            when (operation.operationId) {
+                "submitEntry", "patchEntry", "reactToEntry" -> PAUSED_WRITE_DESCRIPTION
+                "today" -> PAUSED_TODAY_DESCRIPTION
+                else -> null
+            }
+        if (added != null) operation.description = listOfNotNull(operation.description, added).joinToString(" ")
+    }
+}
+
+private const val PAUSED_WRITE_DESCRIPTION =
+    "`409 BOND_PAUSED` while the bond is paused: nothing is written, and the same request succeeds once it resumes."
+
+private const val PAUSED_TODAY_DESCRIPTION =
+    "`paused` is true while the bond takes no new entries, edits or reactions; `prompt` is null while it is true. " +
+        "It says nothing of why."
+
+private const val GET_BOND_OPERATION = "getBond"
+
+private const val PAUSED_DESCRIPTION =
+    "`paused` is true while the bond takes no new entries, edits or reactions; everything in it can still be read. " +
+        "It says nothing of why."
 
 /**
  * Says, on each of the two routes that end a bond, what an absent

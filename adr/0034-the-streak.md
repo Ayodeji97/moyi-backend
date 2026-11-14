@@ -4,7 +4,8 @@
 **Amended:** 2026-10-09 (the status; "Owed — C5, the archive" discharged — ADR-0036);
 2026-10-22 ("Owed — C6" discharged — ADR-0041); 2026-11-08 (the ended run and the rest day's
 reason, issue #141: see "Amendment — 2026-11-08"); 2026-11-08 (decision 8, the undecided days
-of the late-entry grace, issue #132 — ADR-0033 decision 15)
+of the late-entry grace, issue #132 — ADR-0033 decision 15); 2026-11-13 (a second kind of pause,
+the suspension, judged by overlap: see "Amendment — 2026-11-13")
 
 *(2026-10-09: the status read "Proposed" until this date, though the slice merged as #55, and its rulings as #56, on 2026-10-06. Brought to the convention of ADR-0026 to ADR-0031, which say "Accepted"; noted in ADR-0036's slice.)*
 
@@ -403,3 +404,15 @@ documentation removed — was seen to fail a named test, listed on the pull requ
   takes the bond first too, and no request takes a streak row.
   The CLI was run end to end against the jar; **the Bruno collection was not opened in
   Bruno.**
+
+## Amendment — 2026-11-13: a second kind of pause, judged by overlap (ADR-0066)
+
+A day can now be `SUSPENDED` for a second reason: some part of its writable window, from its start
+to its end plus the twelve-hour late-entry grace, fell inside a member's account suspension
+(ADR-0066 decision 16). It is judged by **overlap**, not at the day's end as the called-off
+deletion's `wasPausedAt` is: that rule stops a member buying a rest day with a request-and-cancel,
+and nobody but an `ADMIN` makes a suspension, so the day of the suspension and the day of its lift
+both count. The close job (`CloseDay`), the gap writer (`CreateMissingDays`) and the evaluation
+(`EvaluateStreaks.outcomeOf`, a `MISSED` day that overlaps evaluated `SUSPENDED`) ask the same
+question through `BondClosingView.wasSuspendedDuring`. Such a day breaks no run and spends no
+freeze; the run is where it was when the bond resumes. `wasPausedAt` is unchanged.

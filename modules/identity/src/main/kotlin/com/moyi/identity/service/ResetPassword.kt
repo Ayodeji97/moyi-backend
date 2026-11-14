@@ -8,6 +8,7 @@ import com.moyi.identity.domain.PasswordResetCodeRejectedException
 import com.moyi.identity.domain.PasswordResetTokenExpiredException
 import com.moyi.identity.domain.PasswordResetTokenInvalidException
 import com.moyi.identity.domain.SecurityNotice
+import com.moyi.identity.domain.User
 import com.moyi.identity.domain.VerificationCode
 import com.moyi.identity.domain.VerificationPurpose
 import com.moyi.identity.domain.VerificationSecret
@@ -125,7 +126,8 @@ internal class ApplyPasswordReset(
 ) {
     /**
      * @return `false` when [token] was spent first, by a concurrent presentation of its link
-     *   or its code; nothing has changed, and the caller answers with its own path's refusal
+     *   or its code, or its account can no longer sign in (suspended); the password is unchanged,
+     *   and the caller answers with its own path's refusal
      */
     @Transactional
     fun apply(
@@ -135,7 +137,28 @@ internal class ApplyPasswordReset(
     ): Boolean {
         // The single race winner. A second presentation finds the row consumed.
         if (!tokens.consume(token.id, now)) return false
+        // The sessions lock before anything of the account is read or written: the order sign-in,
+        // logout-all and suspension take (spec A3 §8), so what is read below is read after any of
+        // them that held it has committed.
+        refreshTokens.lockSessionsOf(token.userId)
         val user = accounts.findById(token.userId) ?: throw PasswordResetTokenInvalidException()
+        // A link or code issued before a suspension (admin console A3): re-read under the lock, so
+        // a suspension that committed after the link was sent is seen here. The refusal is the
+        // caller's own for a spent link or code, the same bytes. Not the same work: a link that was
+        // used or ran out is refused before the password hash, this one a hash later, so it is
+        // slower by one hash, as a lost race is. That tells the link's holder nothing a 410 on an
+        // unused link does not already: who can present it knows it was never used. The row stays
+        // consumed, so the answer itself does not tell a suspended account from a spent link.
+        if (user.canAuthenticate) replacePassword(user, newPasswordHash, now)
+        return user.canAuthenticate
+    }
+
+    /** The reset itself, for an account that may still sign in: the hash, every session, the notice. */
+    private fun replacePassword(
+        user: User,
+        newPasswordHash: PasswordHash,
+        now: Instant,
+    ) {
         val credentials = accounts.findCredentials(user.id) ?: throw PasswordResetTokenInvalidException()
 
         accounts.updateCredentials(
@@ -146,7 +169,6 @@ internal class ApplyPasswordReset(
                 lockedUntil = null,
             ),
         )
-        refreshTokens.lockSessionsOf(user.id)
         refreshTokens.revokeAllForUser(user.id, now)
         accounts.revokeAllSessions(user.id, now)
         // Every device was signed out, so none is told anything more (ADR-0044).
@@ -156,6 +178,5 @@ internal class ApplyPasswordReset(
         events.publishEvent(SecurityNotice.PasswordChanged(user.id, user.email, user.displayName, changedAt = now))
         // A code from a later reset email is moot now that the password has changed (#135).
         tokens.retireCodes(user.id, VerificationPurpose.PASSWORD_RESET)
-        return true
     }
 }

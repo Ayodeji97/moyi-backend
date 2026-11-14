@@ -2,6 +2,7 @@ package com.moyi.bond.infra
 
 import com.moyi.common.security.TokenRevocation
 import com.moyi.common.security.TokenRevocations
+import com.moyi.identity.api.AccountStanding
 import com.moyi.identity.api.UserDirectory
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.SpringBootApplication
@@ -54,6 +55,10 @@ internal class BondTestApplication {
 
     @Bean
     fun userDirectory(): UserDirectory = FakeUserDirectory()
+
+    /** identity's standing port (A3): spans a test sets, so a bond's pause can be driven without identity. */
+    @Bean
+    fun accountStanding(): AccountStanding = FakeAccountStanding()
 
     @Bean
     fun tokenRevocations(): TokenRevocations = TokenRevocations { TokenRevocation(invalidBefore = null) }

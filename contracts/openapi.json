@@ -1191,6 +1191,7 @@
     },
     "/api/v1/bonds/{bondId}" : {
       "get" : {
+        "description" : "`paused` is true while the bond takes no new entries, edits or reactions; everything in it can still be read. It says nothing of why.",
         "operationId" : "getBond",
         "parameters" : [ {
           "in" : "path",
@@ -1991,6 +1992,7 @@
     },
     "/api/v1/bonds/{bondId}/entries" : {
       "post" : {
+        "description" : "`409 BOND_PAUSED` while the bond is paused: nothing is written, and the same request succeeds once it resumes.",
         "operationId" : "submitEntry",
         "parameters" : [ {
           "in" : "path",
@@ -3967,6 +3969,7 @@
     },
     "/api/v1/bonds/{bondId}/today" : {
       "get" : {
+        "description" : "`paused` is true while the bond takes no new entries, edits or reactions; `prompt` is null while it is true. It says nothing of why.",
         "operationId" : "today",
         "parameters" : [ {
           "in" : "path",
@@ -4110,6 +4113,7 @@
         "tags" : [ "entry-changes-controller" ]
       },
       "patch" : {
+        "description" : "`409 BOND_PAUSED` while the bond is paused: nothing is written, and the same request succeeds once it resumes.",
         "operationId" : "patchEntry",
         "parameters" : [ {
           "in" : "path",
@@ -4501,7 +4505,7 @@
         "tags" : [ "reactions-controller" ]
       },
       "put" : {
-        "description" : "Leaves the caller's reaction on their partner's entry: one per member per entry, so a second one replaces the first. The other member is shown it, as the entry's `reaction`, and is not shown when it was left. Repeatable. Only the partner's entry that the caller is shown with `status: REVEALED` takes one. `409 REACTION_ON_OWN_ENTRY` is an entry the caller wrote. `409 ENTRY_IMMUTABLE` is an entry that has been erased, or is being erased: a tombstone. `409 BOND_ARCHIVED` is a bond that has ended. `404` is every entry the caller was never shown, the same as for an id that does not exist. A `type` that is absent, null or not one of the listed names, exactly, is `422`. A body with any other key, or with `type` twice, is `400`; nothing is ignored. A body with no `Content-Type`, or one that is not JSON, is `415`. A body is judged before the entry is looked at.",
+        "description" : "Leaves the caller's reaction on their partner's entry: one per member per entry, so a second one replaces the first. The other member is shown it, as the entry's `reaction`, and is not shown when it was left. Repeatable. Only the partner's entry that the caller is shown with `status: REVEALED` takes one. `409 REACTION_ON_OWN_ENTRY` is an entry the caller wrote. `409 ENTRY_IMMUTABLE` is an entry that has been erased, or is being erased: a tombstone. `409 BOND_ARCHIVED` is a bond that has ended. `404` is every entry the caller was never shown, the same as for an id that does not exist. A `type` that is absent, null or not one of the listed names, exactly, is `422`. A body with any other key, or with `type` twice, is `400`; nothing is ignored. A body with no `Content-Type`, or one that is not JSON, is `415`. A body is judged before the entry is looked at. `409 BOND_PAUSED` while the bond is paused: nothing is written, and the same request succeeds once it resumes.",
         "operationId" : "reactToEntry",
         "parameters" : [ {
           "in" : "path",
@@ -6335,6 +6339,9 @@
           "name" : {
             "type" : "string"
           },
+          "paused" : {
+            "type" : "boolean"
+          },
           "pendingDeletionRequest" : {
             "oneOf" : [ {
               "$ref" : "#/components/schemas/PendingDeletionRequestResponse"
@@ -6381,7 +6388,7 @@
             "enum" : [ "COUPLE", "FRIENDS", "FAMILY", "PARENT_CHILD" ]
           }
         },
-        "required" : [ "anchorTimezone", "archivedAt", "createdAt", "deletionScheduledFor", "id", "invite", "maxMembers", "me", "members", "name", "pendingDeletionRequest", "pendingSemanticSearchRequest", "pendingTimezoneChange", "revealTimeLocal", "semanticSearchEnabled", "status", "strictMode", "timezoneChangeAllowedFrom", "type" ]
+        "required" : [ "anchorTimezone", "archivedAt", "createdAt", "deletionScheduledFor", "id", "invite", "maxMembers", "me", "members", "name", "paused", "pendingDeletionRequest", "pendingSemanticSearchRequest", "pendingTimezoneChange", "revealTimeLocal", "semanticSearchEnabled", "status", "strictMode", "timezoneChangeAllowedFrom", "type" ]
       },
       "BondsResponse" : {
         "type" : "object",
@@ -7399,7 +7406,7 @@
           },
           "code" : {
             "type" : "string",
-            "enum" : [ "FAVOURITE_BUSY", "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "CODE_CHECK_UNAVAILABLE", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "ENTRY_NOT_REVEALED", "REACTION_ON_OWN_ENTRY", "REACTION_BUSY", "REPORT_ON_OWN_ENTRY", "DAY_CLOSED", "MEDIA_QUOTA_EXCEEDED", "MEDIA_TYPE_UNSUPPORTED", "MEDIA_NOT_UPLOADED", "MEDIA_STORAGE_UNAVAILABLE", "MEDIA_BUSY", "MEDIA_ATTACHED", "DAY_NOT_FOUND", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
+            "enum" : [ "FAVOURITE_BUSY", "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "CODE_CHECK_UNAVAILABLE", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "BOND_PAUSED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "ENTRY_NOT_REVEALED", "REACTION_ON_OWN_ENTRY", "REACTION_BUSY", "REPORT_ON_OWN_ENTRY", "DAY_CLOSED", "MEDIA_QUOTA_EXCEEDED", "MEDIA_TYPE_UNSUPPORTED", "MEDIA_NOT_UPLOADED", "MEDIA_STORAGE_UNAVAILABLE", "MEDIA_BUSY", "MEDIA_ATTACHED", "DAY_NOT_FOUND", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
           },
           "detail" : {
             "type" : "string"
@@ -7985,8 +7992,11 @@
               "type" : "null"
             } ]
           },
+          "paused" : {
+            "type" : "boolean"
+          },
           "prompt" : {
-            "description" : "The bond's prompt of the day: the same prompt for both members, each in their own language. Null when the bond takes no writes from the caller (it has ended, is counting down to deletion, or the caller has left), and when the library holds nothing for this bond. Optional to answer; dismissing it is the client's alone.",
+            "description" : "The bond's prompt of the day: the same prompt for both members, each in their own language. Null when the bond takes no writes from the caller (it has ended, is counting down to deletion, or the caller has left), while it is paused (`paused` is true), and when the library holds nothing for this bond. Optional to answer; dismissing it is the client's alone.",
             "oneOf" : [ {
               "$ref" : "#/components/schemas/TodayPromptResponse"
             }, {
@@ -7997,7 +8007,7 @@
             "$ref" : "#/components/schemas/TodayStreakResponse"
           }
         },
-        "required" : [ "bondDay", "myEntry", "partnerEntry", "prompt", "streak" ]
+        "required" : [ "bondDay", "myEntry", "partnerEntry", "paused", "prompt", "streak" ]
       },
       "TodayStreakResponse" : {
         "type" : "object",
