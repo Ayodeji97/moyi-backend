@@ -5,7 +5,7 @@
 **Goal:** the jobs page (status, run the close job now, the date check, a bond's streak rebuilt), three
 feature flags switched at runtime, and the support inbox, in the admin console.
 
-**Architecture:** `scheduling` gains an `api` (`JobConsole`) over a registry of its twelve locked jobs,
+**Architecture:** `scheduling` gains an `api` (`JobConsole`) over a registry of its eleven locked jobs,
 ShedLock's `LockingTaskExecutor` and `job_runs`; `gratitude` exposes `StreakRecalculation` (over
 `RecalculateStreak`) and `DaySettlement`; `support` exposes `SupportInbox` over ADR-0057's functions;
 `common:core` holds the `FeatureFlags` read port, which `admin.infra.FeatureFlagStore` implements over
@@ -50,14 +50,14 @@ passes; `DisclosureTest` gains "no A4 action is ever shown"; `V67MigrationTest` 
 **Files:** create `scheduling/api/JobConsole.kt` (`interface JobConsole { fun jobs(): List<JobStatus>;
 fun timerOn(): Boolean; fun runCloseNow(beforeRun: () -> Unit): CloseRun }`; `JobStatus(name, purpose,
 schedule, lastStartedAt, lockedUntil, lastFinishedAt, running)`; `sealed interface CloseRun { Ran(...counts);
-Busy }`); `service/ScheduledJobsConsole.kt` (the registry of twelve: lock, purpose, cron property and
+Busy }`); `service/ScheduledJobsConsole.kt` (the registry of eleven: lock, purpose, cron property and
 default; `DefaultLockingTaskExecutor` with `LockConfiguration(now, CloseJob.LOCK, 14 min, ZERO)`);
 `infra/LockRows.kt` (reads `shedlock`, UTC); `JobRuns.all()`. Six jobs gain `runs.succeeded(LOCK, now)`.
 `ReminderJob`, `OnThisDayJob`, `EmbeddingJob` read their `FeatureFlag` at the start of the one-run
 method and skip (still stamping their gauge and `job_runs`: a pause is not a failure).
 `SchedulingTestApplication` gains a `SettableFlags` bean. `build.gradle.kts`: `implementation(libs.shedlock...)` already there.
 
-**Tests:** `JobConsoleTest`: twelve jobs listed with their lock names; a `shedlock` row and a
+**Tests:** `JobConsoleTest`: eleven jobs listed with their lock names; a `shedlock` row and a
 `job_runs` row are shown; `running` only when started after the last finish and still locked;
 `runCloseNow` calls `beforeRun` then the closer once and answers `Ran` with its counts; with a
 held lock (row `lock_until` in the future) answers `Busy`, `beforeRun` and the closer uncalled; a

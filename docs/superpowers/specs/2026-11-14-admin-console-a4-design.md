@@ -62,11 +62,11 @@ Each: the decision; why; what it costs if wrong. ✱ marks a departure from the 
 **The jobs (FR-114)**
 
 1. **One registry of the jobs, in `scheduling`**, exposed by a new admin-only port
-   `scheduling.api.JobConsole`: the twelve ShedLock-guarded jobs (each lock name, what it does in
+   `scheduling.api.JobConsole`: the eleven ShedLock-guarded jobs (each lock name, what it does in
    one line, the cron it runs on as configured). The page reads `shedlock` (last start, locked
    until) and `job_runs` (last finish) for them. `SUPPORT` and above may view it, and the view writes
    **no audit row**: it names nobody, as the home page's queue counts do not (A2). *Cost:* none.
-2. **Every locked job records its finish in `job_runs`** (ADR-0050's table; six of the twelve
+2. **Every locked job records its finish in `job_runs`** (ADR-0050's table; five of the eleven
    already do: the media, deletion and export jobs). The close, reminder, on-this-day, held-push,
    embedding and idempotency-key jobs gain the one upsert, so "last finished" exists for all. The
    **outbox poller is not listed**: it holds no lock (ADR-0035), runs every two seconds on every
@@ -194,7 +194,7 @@ Each: the decision; why; what it costs if wrong. ✱ marks a departure from the 
 **Feature flags** (display only: the routes decide). The home page adds "Open support tickets" for
 every role.
 
-**`GET /admin/jobs`** (`SUPPORT`): a table of the twelve jobs (name, what it does, schedule, last
+**`GET /admin/jobs`** (`SUPPORT`): a table of the eleven jobs (name, what it does, schedule, last
 started, locked until, last finished, "running" when it started after its last finish and still
 holds its lock); whether the timer is on on this instance; with `?date=YYYY-MM-DD`, the date check
 (ruling 3; a value that is not a date is the page with "Not a date", `400`). For an `ADMIN`, two
@@ -299,7 +299,7 @@ Metrics: `moyi.admin.job.run{job,result}`, `moyi.admin.streak.rebuild{result}`,
 
 ## 9. Tests and mutation targets
 
-- **Jobs:** the page lists the twelve with their lock names, a `shedlock` row's start and a
+- **Jobs:** the page lists the eleven with their lock names, a `shedlock` row's start and a
   `job_runs` finish; each of the six newly recording jobs writes its row; a `SUPPORT` session sees no
   run form, and its POST is `403` with no row and no run; a held `close-days` lock (a row with
   `lock_until` in the future) makes the manual run `BUSY`, the closer uncalled, a `REFUSED` row; a run

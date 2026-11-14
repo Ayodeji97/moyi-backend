@@ -2,6 +2,7 @@ package com.moyi.scheduling.service
 
 import com.moyi.gratitude.api.CloseResult
 import com.moyi.gratitude.api.DayCloser
+import com.moyi.scheduling.infra.JobRuns
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
@@ -40,6 +41,7 @@ import java.util.concurrent.atomic.AtomicLong
 @Component
 internal class CloseJob(
     private val closer: DayCloser,
+    private val runs: JobRuns,
     private val clock: Clock,
     meters: MeterRegistry,
 ) {
@@ -76,6 +78,8 @@ internal class CloseJob(
         settled.increment((result.created + result.closed + result.revealed).toDouble())
         failed.increment(result.failed.toDouble())
         lastSuccess.set(now.epochSecond)
+        // The finish the admin console's jobs page shows (ADR-0067 decision 2), as the media jobs record theirs.
+        runs.succeeded(LOCK, now)
         // More days than one run takes is a backlog, and a backlog is
         // something to be told about (spec §6.4: "alert on a large backlog
         // but keep draining it"); so is a day that would not close.

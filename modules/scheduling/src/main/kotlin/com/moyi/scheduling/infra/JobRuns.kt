@@ -31,4 +31,10 @@ internal class JobRuns(
         jdbc
             .query("SELECT last_success_at FROM job_runs WHERE name = ?", { rs, _ -> rs.getTimestamp(1).toInstant() }, job)
             .firstOrNull()
+
+    /** Every job's last finish, by name: the jobs page's "last finished" (ADR-0067 decision 2). */
+    fun all(): Map<String, Instant> =
+        jdbc
+            .query("SELECT name, last_success_at FROM job_runs") { rs, _ -> rs.getString(1) to rs.getTimestamp(2).toInstant() }
+            .toMap()
 }

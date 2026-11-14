@@ -1,5 +1,7 @@
 package com.moyi.scheduling.infra
 
+import com.moyi.common.core.FeatureFlag
+import com.moyi.common.core.FeatureFlags
 import com.moyi.common.core.IdGenerator
 import com.moyi.common.core.SystemIdGenerator
 import com.moyi.common.events.EventConsumer
@@ -86,6 +88,29 @@ internal class SchedulingTestApplication {
 
     @Bean
     fun dataExports(): RecordingDataExports = RecordingDataExports()
+
+    @Bean
+    fun flags(): SettableFlags = SettableFlags()
+}
+
+/**
+ * The flags as a test sets them: `admin` owns the table and is not in this context. Every flag is
+ * its default until [off] is called; [reset] puts them back.
+ */
+internal class SettableFlags : FeatureFlags {
+    private val off =
+        java.util.concurrent.ConcurrentHashMap
+            .newKeySet<FeatureFlag>()
+
+    override fun isOn(flag: FeatureFlag): Boolean = flag !in off && flag.defaultOn
+
+    fun off(flag: FeatureFlag) {
+        off += flag
+    }
+
+    fun reset() {
+        off.clear()
+    }
 }
 
 internal class RecordingDataExports : DataExportJobs {

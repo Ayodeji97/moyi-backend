@@ -1,6 +1,7 @@
 package com.moyi.scheduling.service
 
 import com.moyi.notification.api.HeldPushes
+import com.moyi.scheduling.infra.JobRuns
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock
@@ -26,6 +27,7 @@ import java.util.concurrent.atomic.AtomicLong
 @Component
 internal class HeldPushJob(
     private val held: HeldPushes,
+    private val runs: JobRuns,
     private val clock: Clock,
     meters: MeterRegistry,
 ) {
@@ -50,6 +52,7 @@ internal class HeldPushJob(
         val now = clock.instant()
         val released = held.releaseDue(now, LIMIT)
         lastSuccess.set(now.epochSecond)
+        runs.succeeded(LOCK, now)
         if (released >= LIMIT) log.warn("held pushes: released {}, and more are waiting", released)
         return released
     }
