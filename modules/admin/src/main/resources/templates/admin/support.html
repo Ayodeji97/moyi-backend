@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/* The open support tickets (A4 spec §4, ADR-0057), oldest first: ids, lengths and ages. Never the
+       words: a ticket's page shows them, and logs that it did. */-->
+<head th:replace="~{admin/layout :: head('Support inbox')}"></head>
+<body>
+<header th:replace="~{admin/layout :: masthead}"></header>
+<nav th:replace="~{admin/layout :: nav(${moderator == true})}"></nav>
+<main class="wide">
+    <h1>Support inbox</h1>
+    <p th:if="${#lists.isEmpty(rows)}">No open tickets.</p>
+    <table th:unless="${#lists.isEmpty(rows)}" id="tickets">
+        <thead>
+        <tr><th>Received</th><th>Ticket</th><th>Sender</th><th>Subject length</th><th>Message length</th><th>Age (days)</th></tr>
+        </thead>
+        <tbody>
+        <tr th:each="item : ${rows}" th:attr="data-ticket=${item.row.ticketId}">
+            <td th:text="${item.row.receivedAt}"></td>
+            <td><a th:href="@{/admin/support/{id}(id=${item.row.ticketId})}" th:text="${item.row.ticketId}"></a></td>
+            <td><a th:href="@{/admin/users(q=${item.row.userId})}" th:text="${item.row.userId}"></a></td>
+            <td th:text="${item.row.subjectLength}"></td>
+            <td th:text="${item.row.bodyLength}"></td>
+            <td th:text="${item.ageDays}"></td>
+        </tr>
+        </tbody>
+    </table>
+</main>
+</body>
+</html>

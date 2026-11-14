@@ -186,6 +186,14 @@ internal class DecisionForm(
             "Each suspension, and each lift, needs a new code.",
             "Write a justification of 1 to ${ModerationNote.MAX_CODE_POINTS} characters saying why.",
         ),
+
+        /** A4's acts that ask no code (ADR-0067 decisions 4, 6, 10): the close run, a rebuild, a flag. */
+        JUSTIFICATION(
+            "justification",
+            "Justification",
+            "",
+            "Write a justification of 1 to ${ModerationNote.MAX_CODE_POINTS} characters saying why.",
+        ),
     }
 
     override fun toString(): String = "DecisionForm($action)"

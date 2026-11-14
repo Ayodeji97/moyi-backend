@@ -16,6 +16,14 @@
             <dd id="open-quarantine" th:text="${counts.quarantine}">0</dd>
         </dl>
     </section>
+    <!--/* Every role (A4 spec §4): a count, which names nobody and writes no row. */-->
+    <section th:if="${openTickets != null}" aria-labelledby="support">
+        <h2 id="support">Support</h2>
+        <dl>
+            <dt><a th:href="@{/admin/support}">Open support tickets</a></dt>
+            <dd id="open-tickets" th:text="${openTickets}">0</dd>
+        </dl>
+    </section>
     <form method="post" th:action="@{/admin/logout}">
         <button type="submit">Sign out</button>
     </form>

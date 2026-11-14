@@ -1,6 +1,7 @@
 package com.moyi.tools.embeddingeval
 
 import com.moyi.ai.api.EmbeddingPort
+import com.moyi.common.core.FeatureFlags
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.springframework.context.annotation.AnnotationConfigApplicationContext
@@ -50,6 +51,9 @@ internal class Providers private constructor(
                 environment.propertySources.addFirst(MapPropertySource("embedding-eval", properties))
                 registerBean(MeterRegistry::class.java, Supplier<MeterRegistry> { SimpleMeterRegistry() })
                 registerBean(RestClient.Builder::class.java, Supplier { RestClient.builder() })
+                // The port is wrapped by the AI_EMBEDDINGS switch (ADR-0067 decision 7); this tool has no
+                // `feature_flags` table to read, and is run on purpose, so the switch is always on here.
+                registerBean(FeatureFlags::class.java, Supplier<FeatureFlags> { FeatureFlags { true } })
                 scan(AI_PACKAGE)
                 refresh()
             }
