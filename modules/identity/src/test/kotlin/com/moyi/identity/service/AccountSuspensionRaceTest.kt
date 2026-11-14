@@ -1,5 +1,6 @@
 package com.moyi.identity.service
 
+import com.moyi.common.security.CurrentUser
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
 import com.moyi.identity.api.AccountDeletions
@@ -63,6 +64,7 @@ internal class AccountSuspensionRaceTest(
     @Autowired private val deletion: AccountDeletion,
     @Autowired private val deletions: AccountDeletions,
     @Autowired private val resets: ResetPassword,
+    @Autowired private val logout: LogoutUser,
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val clock: MutableClock,
     @Autowired private val emails: RecordingEmailSender,
@@ -250,6 +252,26 @@ internal class AccountSuspensionRaceTest(
         passwordHash(ada) shouldBe hashBefore
         status(ada) shouldBe "SUSPENDED"
         openSpans(ada) shouldBe 1
+        val suspendedAt =
+            jdbc.queryForObject("SELECT suspended_at FROM account_suspensions WHERE user_id = ?", Timestamp::class.java, ada)!!
+        tokensInvalidBefore(ada) shouldBe suspendedAt.toInstant().truncatedTo(ChronoUnit.SECONDS).plusSeconds(1)
+    }
+
+    @Test
+    fun `a logout-all that read its instant before a suspension and writes after it does not pull the cutoff back`() {
+        val ada = signUp()
+
+        val suspended = holding { suspension.suspend(ada) }
+        // Logout-all reads `now` before it takes the sessions lock, so its instant (this clock's)
+        // is earlier than the suspension's mark, the second after it. It waits on the lock, then
+        // writes: a plain assignment would set the cutoff back to that earlier instant and make
+        // valid again a token minted just before the suspension; GREATEST keeps the later mark.
+        val loggedOut = pool.submit { logout.logoutAll(CurrentUser(ada)) }
+        awaitAdvisoryWaiter(ada)
+        release.countDown()
+
+        suspended.get(WAIT.seconds, TimeUnit.SECONDS).outcome shouldBe SuspensionOutcome.SUSPENDED
+        loggedOut.get(WAIT.seconds, TimeUnit.SECONDS)
         val suspendedAt =
             jdbc.queryForObject("SELECT suspended_at FROM account_suspensions WHERE user_id = ?", Timestamp::class.java, ada)!!
         tokensInvalidBefore(ada) shouldBe suspendedAt.toInstant().truncatedTo(ChronoUnit.SECONDS).plusSeconds(1)

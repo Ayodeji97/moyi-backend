@@ -144,7 +144,8 @@ reach back over a window that has ended.
   `tokens_invalid_before`) over a suspension that committed in between. `VerifyEmail` now flips the
   status in one conditional `UPDATE … WHERE status = 'PENDING_VERIFICATION'` and never writes
   `tokens_invalid_before`; `ApplyPasswordReset` takes the sessions lock before its read and keeps
-  `tokens_invalid_before` with `GREATEST`. Each has a race test.
+  `tokens_invalid_before` with `GREATEST`, which `LogoutUser.logoutAll` also relies on (it reads its
+  instant before the lock). Each has a race test, the `GREATEST` guard's in `AccountSuspensionRaceTest`.
 - **The overlap window includes the late-entry grace** (decision 16's amendment).
 - **Fixed after the final review (2026-11-13):**
   - **A refresh mints its access token under the sessions lock** (`RotateRefreshToken`), as decision 7
