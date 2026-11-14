@@ -1,6 +1,6 @@
 # ADR-0066 — The admin console (A3): an ADMIN suspends an account, and every bond it is in pauses for the partner
 
-**Status:** Accepted, provisional where marked · **Date:** 2026-11-13 · **Deciders:** the owner asked
+**Status:** Accepted; decisions 12, 15 and 17 accepted by the owner 2026-11-14 · **Date:** 2026-11-13 · **Deciders:** the owner asked
 for A3 to be built without stopping for questions, so every decision the corpus did not already make
 is a ruling made by the lead for the owner and **his to overrule**; each says what it costs if wrong
 (spec §3). · **Amends:** ADR-0055 (`ADMIN` gains a second act `MODERATOR` lacks), ADR-0058 (spans
@@ -200,14 +200,24 @@ carries `breaking-api-change`) and two required booleans.
   member who was never told. Rejected for overlap (decision 16).
 - **An operator command.** A second copy of decision 6. Rejected (decision 14).
 
+## Accepted by the owner, 2026-11-14
+
+The owner merged #195 (b7d51ff) with these rulings listed in its description for his review. He
+accepted them by merging; none was ruled separately, and each stays his to overrule by a new
+amendment.
+
+- **The member is told nothing** by Moyi when suspended (decision 12), subject to
+  the DSA Art. 17 legal check below.
+- **Decision 15:** a suspended person's pending deletion runs when it falls due; it does not wait.
+- **Decision 17:** a reveal that fell due inside a span stays withheld for good; a lift does not
+  release it. A mistaken suspension may cost a couple that exchange.
+
 ## Owed (the owner decides)
 
-- **The DSA Art. 17 notice:** whether a statement of reasons must be sent to the suspended member.
-  It joins the legal checks the console already waits on (ADR-0063); if it must, that slice adds an
-  email.
-- **Decision 17's withheld reveal:** whether a mistaken suspension may cost a couple that exchange,
-  or whether a lift should release reveals withheld by a span.
-- **Decision 15:** whether a suspended person's pending deletion should run, or wait for a decision.
+- **The DSA Art. 17 legal check:** whether the law requires a statement of reasons to the suspended
+  member. The product ruling (tell the member nothing) is accepted (see "Accepted by the owner"); the
+  legal check joins those the console already waits on (ADR-0063), and if it says yes, that slice
+  adds an email.
 - **Doc 04 §8.2** (a pending deletion pauses the bond): now cheap (decision 13); the owner's call.
 - **Corpus amendments** in the documents repository: doc 04 §8.1 (the sub-state is a derived
   `paused`; overlap; withheld reveals), doc 06 (`BOND_PAUSED`, `paused`), doc 07
