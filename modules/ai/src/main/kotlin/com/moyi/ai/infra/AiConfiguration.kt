@@ -2,6 +2,7 @@ package com.moyi.ai.infra
 
 import com.moyi.ai.api.EmbeddingPort
 import com.moyi.ai.api.EmbeddingSpace
+import com.moyi.common.core.FeatureFlags
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.ai.openai.OpenAiEmbeddingModel
@@ -23,8 +24,20 @@ import org.springframework.web.client.RestClient
 internal class AiConfiguration {
     private val log = LoggerFactory.getLogger(javaClass)
 
+    /**
+     * The configured provider behind the `AI_EMBEDDINGS` flag (ADR-0067 decision 7): the only
+     * [EmbeddingPort] in the context, so nothing reaches a provider without passing the flag.
+     */
     @Bean
     fun embeddingPort(
+        properties: AiProperties,
+        meters: MeterRegistry,
+        rest: RestClient.Builder,
+        flags: FeatureFlags,
+    ): EmbeddingPort = SwitchedEmbeddingPort(provider(properties, meters, rest), flags)
+
+    /** The provider the properties name; not a bean, so that it is reached only through the switch. */
+    fun provider(
         properties: AiProperties,
         meters: MeterRegistry,
         rest: RestClient.Builder,

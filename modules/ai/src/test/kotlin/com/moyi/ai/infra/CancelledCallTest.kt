@@ -63,7 +63,7 @@ internal class CancelledCallTest {
         StubHttpServer("/v1/embeddings").use { stub ->
             repeat(2) { stub.responses += 503 to "{}" }
             val port =
-                AiConfiguration().embeddingPort(
+                AiConfiguration().provider(
                     AiProperties(
                         provider = AiProperties.Provider.VOYAGE,
                         voyage = AiProperties.Voyage(apiKey = "pa-test", baseUrl = stub.baseUrl),
@@ -84,7 +84,7 @@ internal class CancelledCallTest {
         properties: AiProperties,
     ): EmbeddingPort {
         stub.stall = true
-        return AiConfiguration().embeddingPort(properties, SimpleMeterRegistry(), RestClient.builder())
+        return AiConfiguration().provider(properties, SimpleMeterRegistry(), RestClient.builder())
     }
 
     /** Starts a call, interrupts its thread once the request has arrived, and waits for the thread to end. */
