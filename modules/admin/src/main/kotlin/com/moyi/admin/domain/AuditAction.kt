@@ -2,7 +2,7 @@ package com.moyi.admin.domain
 
 /**
  * What an audit row says was done. A closed set, and this is the one place it
- * is written: the `CHECK` on `audit_log.action` (V60, widened by V61, V64 and V66) repeats it
+ * is written: the `CHECK` on `audit_log.action` (V60, widened by V61, V64, V66 and V67) repeats it
  * for the database, and `AuditActionCheckTest` holds the SQL to this list, so
  * adding a value here without a migration fails a test and not a production insert.
  *
@@ -17,6 +17,10 @@ package com.moyi.admin.domain
  *
  * A3 (V66): `ACCOUNT_SUSPENDED` and `ACCOUNT_UNSUSPENDED`, an administrator's suspension of a member's
  * account and the lifting of it.
+ *
+ * A4 (V67, ADR-0067): `JOB_RUN` (the close job run by hand, written before the run), `STREAK_RECALCULATED`
+ * (a bond's streak rebuilt from its days, FR-074), `FEATURE_FLAG_CHANGED` (FR-115), and the support inbox's
+ * three: `SUPPORT_INBOX_VIEWED`, `SUPPORT_TICKET_READ`, `SUPPORT_TICKET_CLOSED`.
  */
 internal enum class AuditAction {
     ADMIN_INVITED,
@@ -39,4 +43,10 @@ internal enum class AuditAction {
     ENTRY_TEXT_READ,
     ACCOUNT_SUSPENDED,
     ACCOUNT_UNSUSPENDED,
+    JOB_RUN,
+    STREAK_RECALCULATED,
+    FEATURE_FLAG_CHANGED,
+    SUPPORT_INBOX_VIEWED,
+    SUPPORT_TICKET_READ,
+    SUPPORT_TICKET_CLOSED,
 }
