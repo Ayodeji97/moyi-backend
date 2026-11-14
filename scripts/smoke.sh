@@ -381,6 +381,9 @@
 # ports: 1917 passed, 1 failed (this section's own BUSY match, written with the apostrophe the page
 # escapes); the match fixed, on a fresh database again: 1917 passed, 0 failed, 1 skipped (the tag
 # across the erasure, the poller having won the race), 64 "admin A4".
+# After review wave 2 (an empty window after a late switch-on is an empty run; one read of a flag),
+# from a jar of bb559a68's tree, on a fresh database at V67, the same project and ports: 1918
+# passed, 0 failed, 0 skipped, 64 "admin A4".
 # The late-entries probe "the job has run since" (the ShedLock floor named under #126, and failed in
 # four recorded runs) now waits up to 60 s for the close job's next run, not 30: the lock's 30 s floor
 # plus the five-second cron put that run up to 35 s away, and the 30 one-second polls ran out first.
