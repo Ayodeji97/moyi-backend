@@ -357,6 +357,25 @@
 # sessions lock; a reset link or code from before a suspension refused; no resend mail; the V65
 # guard), from a jar of 64630af3's tree, on a fresh database that applied 60 migrations to V66,
 # the same compose project and ports: 1849 passed, 0 failed, 0 skipped, the same 38 "admin A3".
+# Since the admin console A4 (FR-114, FR-115, FR-074, ADR-0067) a fourth admin section has an invited
+# ADMIN and SUPPORT use the jobs page, the flags and the support inbox: every new POST from a refused
+# address the API's own 401, byte for byte an unknown path's; the jobs page listing the eleven locked
+# jobs with close-days' finish in job_runs; today's date check, and a value that is not a date 400; the
+# close job run by hand (its lock freed by an UPDATE first, never a DELETE) a 303 saying what it did
+# with one JOB_RUN STARTED row, and while another holds the lock BUSY with a REFUSED row; a blank
+# justification 422; a bond's streak rebuilt NO_DAYS (no day of a smoke run is counted) and a bad bond
+# id 422; DAILY_REMINDERS off, off again (UNCHANGED, REFUSED) and on, three rows with from and to, an
+# unknown flag 404; a ticket filed through the API listed without its words, read with them, closed
+# inside the step-up window (302, its words, body and reference null) and closed again "Already
+# closed"; support_ticket_log under admin:<id>; SUPPORT seeing the jobs page and the inbox but no run
+# form, its run 403 with no row, the flags 403; the member's export listing none of it; no note,
+# subject or message in a log line. Last run on 2026-11-14, on feat/admin-console-a4, from a jar of
+# 1dd5822d's tree, on a fresh database that applied 61 migrations to V67, against its own compose
+# project (moyi-a4: Postgres 55481, Valkey 56401, MinIO 59481), the jar booted by hand (local profile,
+# the five crons at */5, ports 8099/9099) and --attach: 1914 passed, 4 failed (four faults in the new
+# section's own probes: a column named job, not name; a job count read from the wrong markup; a CSRF
+# token taken from a closed ticket's page, which has no form; READ rows from the pages after a close
+# left out). Fixed, and run again on the same stack: 1918 passed, 0 failed, 0 skipped, 64 "admin A4".
 # The late-entries probe "the job has run since" (the ShedLock floor named under #126, and failed in
 # four recorded runs) now waits up to 60 s for the close job's next run, not 30: the lock's 30 s floor
 # plus the five-second cron put that run up to 35 s away, and the 30 one-second polls ran out first.
@@ -4568,8 +4587,8 @@ else
   # The jobs page: eleven jobs, close-days with a finish recorded by the timer's runs (*/5 here).
   adm_code "$A4_J" "$ADM/jobs"
   adm_is "admin A4: the jobs page is 200" 200
-  is "admin A4: …it lists the eleven locked jobs" "$(printf '%s' "$ADM_BODY" | python3 -c 'import re,sys; t=re.search(r"<table id=\"jobs\">(.*?)</table>", sys.stdin.read(), re.S); print(len(re.findall(r"<tr>\s*<td>", t.group(1))) if t else -1)')" "11"
-  is "admin A4: …close-days with a last finish recorded" "$(sql "SELECT count(*) FROM job_runs WHERE job = 'close-days'")" "1"
+  is "admin A4: …it lists the eleven locked jobs" "$(printf '%s' "$ADM_BODY" | grep -o 'data-job="[^"]*"' | sort -u | wc -l | tr -d ' ')" "11"
+  is "admin A4: …close-days with a last finish recorded" "$(sql "SELECT count(*) FROM job_runs WHERE name = 'close-days'")" "1"
   if [[ "$ADM_BODY" == *"The timer runs these jobs on this instance."* ]]; then pass "admin A4: …and says the timer runs here"; else fail "admin A4: the timer line" "${ADM_BODY:0:300}"; fi
   adm_code "$A4_J" "$ADM/jobs?date=$(date -u +%Y-%m-%d)"
   if [ "$ADM_CODE" = 200 ] && [[ "$ADM_BODY" == *'id="settlement"'* && "$ADM_BODY" == *'id="past-due"'* ]]; then pass "admin A4: the date check for today answers its three counts (200)"; else fail "admin A4: the date check" "$ADM_CODE ${ADM_BODY:0:300}"; fi
@@ -4662,13 +4681,15 @@ else
   if [[ "$ADM_BODY" == *"Closed. Its words are gone."* ]]; then pass "admin A4: …saying its words are gone"; else fail "admin A4: the closed line" "${ADM_BODY:0:300}"; fi
   db_is "admin A4: …the ticket is CLOSED with no subject, body or reference" "$(sql "SELECT status || '|' || (subject IS NULL) || '|' || (body IS NULL) || '|' || (reference IS NULL) FROM support_tickets WHERE id = '$A4_T'")" "CLOSED|true|true|true"
   db_is "admin A4: …support_ticket_log has LISTED, READ and CLOSED under admin:<id>" "$(sql "SELECT string_agg(DISTINCT action, ',' ORDER BY action) FROM support_ticket_log WHERE actor = 'admin:$A4_ADMIN'")" "CLOSED,LISTED,READ"
-  adm_code "$A4_J" "$ADM/support/$A4_T"; AD_CSRF="$(adm_csrf)"
+  # A closed ticket's page has no close form (so no CSRF token): take one from the jobs page.
+  adm_code "$A4_J" "$ADM/jobs"; AD_CSRF="$(adm_csrf)"
   adm_code "$A4_J" -X POST "$ADM/support/$A4_T/close" --data-urlencode "note=$A4_NOTE" --data-urlencode "_csrf=$AD_CSRF"
   m2_follow "$A4_J"
   if [[ "$ADM_BODY" == *"Already closed. Nothing changed."* ]]; then pass "admin A4: closing it again says Already closed"; else fail "admin A4: the already-closed line" "${ADM_BODY:0:300}"; fi
-  db_is "admin A4: the inbox's audit rows: viewed, read (and one REFUSED for the unknown id), closed and refused" \
-    "$(sql "SELECT string_agg(action || ':' || outcome, ',' ORDER BY occurred_at) FROM audit_log WHERE actor_id = '$A4_ADMIN' AND action IN ('SUPPORT_INBOX_VIEWED', 'SUPPORT_TICKET_READ', 'SUPPORT_TICKET_CLOSED')")" \
-    "SUPPORT_INBOX_VIEWED:SUCCEEDED,SUPPORT_TICKET_READ:SUCCEEDED,SUPPORT_TICKET_READ:REFUSED,SUPPORT_TICKET_READ:SUCCEEDED,SUPPORT_TICKET_CLOSED:SUCCEEDED,SUPPORT_TICKET_READ:SUCCEEDED,SUPPORT_TICKET_CLOSED:REFUSED"
+  # Every page of the ticket is a READ, a closed one's too: two before the close, one after each close.
+  db_is "admin A4: the inbox's audit rows: one view, four reads and one REFUSED (the unknown id), a close and a refused close" \
+    "$(sql "SELECT string_agg(action || ':' || outcome || ':' || n, ',' ORDER BY action, outcome) FROM (SELECT action, outcome, count(*) AS n FROM audit_log WHERE actor_id = '$A4_ADMIN' AND action IN ('SUPPORT_INBOX_VIEWED', 'SUPPORT_TICKET_READ', 'SUPPORT_TICKET_CLOSED') GROUP BY 1, 2) c")" \
+    "SUPPORT_INBOX_VIEWED:SUCCEEDED:1,SUPPORT_TICKET_CLOSED:REFUSED:1,SUPPORT_TICKET_CLOSED:SUCCEEDED:1,SUPPORT_TICKET_READ:REFUSED:1,SUPPORT_TICKET_READ:SUCCEEDED:4"
 
   # SUPPORT: the jobs page and the inbox, no forms, no runs, no flags.
   m2_sign_in a4s "$A4_SJ"
