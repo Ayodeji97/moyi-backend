@@ -147,8 +147,8 @@ internal class VerificationCodeCheckTest(
                 hasher.calls.get() to statistics.prepareStatementCount
             }
 
-        // One lookup of the address, one locking SELECT, one UPDATE; one HMAC.
-        work.distinct() shouldBe listOf(1 to 3L)
+        // One lookup of the address, the sessions lock, one locking SELECT, one UPDATE; one HMAC.
+        work.distinct() shouldBe listOf(1 to 4L)
     }
 
     private fun insertUser(email: String = "ada@example.com"): User {

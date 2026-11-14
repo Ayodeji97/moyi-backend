@@ -214,14 +214,52 @@ carries `breaking-api-change`) and two required booleans.
   (`account_suspensions`).
 - **moyi-app:** the paused state's screen and copy, `BOND_PAUSED` on a queued draft (keep the draft
   and say why nothing sent), and `paused` in the generated client.
-- **A lock-order inversion between erasure and reset/verify, not A3's.** Erasure takes the sessions
-  lock, then `users`, then deletes `verification_tokens`; a reset or verification takes its token row
-  (the consume) first, then the sessions lock or `users`. A3 did not create the cycle (it moved reset's
-  sessions lock earlier, after the consume). Postgres's deadlock detector breaks it, failing one side
-  with a retryable error. Owed: one order for all three, or an issue.
+- ~~**A lock-order inversion between erasure and reset/verify, not A3's.**~~ Closed by the amendment
+  of 2026-11-14 below: one order, the sessions lock first.
 - **The release review** of withheld audit rows (A2, A5, and now A3).
 
 ## Revisit when
 
 A suspension needs an end date or a reason taxonomy; a second operator joins (a second pair of eyes
 on a suspension); the legal check answers; doc 04 §8.2 is ruled on.
+
+## Amendment — 2026-11-14: one lock order for the erasure and every verification token
+
+The owed inversion, closed. Erasure takes the account's sessions lock, then the `users` row, then
+deletes `verification_tokens`. Four paths took a token row first and then a lock the erasure held:
+
+| Path | Before | Waited for |
+|---|---|---|
+| `ApplyPasswordReset` (link and code) | the consume | the sessions lock |
+| `VerifyEmail` by link | the consume | `users` (`markEmailVerified`) |
+| `VerifyEmail` by code (`VerificationCodeCheck.check`) | the code's `FOR UPDATE` | `users` |
+| `RequestVerification` (forgot-password, resend; a code retired) | the retired code's row | `users`, as `FOR KEY SHARE` for the new row's foreign key |
+
+The fourth was not in the owed line; it was found reading the paths, and the test shows it.
+
+**The rule: every transaction that writes a person's `verification_tokens` and then waits on their
+`users` row or sessions takes their sessions lock first.** The four now do. Two transactions that
+both take it first are serialised by it, so the order of what each takes after it no longer matters
+between them. `VerificationCodeCheck` takes it for an unknown address too, on an id no row has, so a
+refusal's work stays the same whatever its reason (ADR-0018 decision 5): one more statement in every
+branch. The one write that does not take it, `checkAlone`'s count of a wrong code, holds one row and
+waits on nothing after it, so it cannot close a cycle; it takes the lock anyway, being `check`.
+
+**Behaviour.** No answer changes. A reset, verification or code request that meets the erasure now
+waits for it and finds the account erased (the reset's 410 or 422, the verification's 410 or 422)
+instead of one of the two failing with `deadlock detected`. A suspension can no longer commit in the
+middle of a typed-code verification; it waits for it (`VerifyEmailSuspensionRaceTest` now pins that;
+the conditional `UPDATE` in `markEmailVerified` stays as the second guard). The cost is that these
+paths queue behind a sign-in or refresh of the same person, for the few milliseconds those hold it.
+
+**Test.** `ErasureTokenLockOrderTest`: a connection holds the account's `credentials` row so the job
+stops at `DELETE FROM credentials` holding the sessions lock and `users`; the other side starts and
+is waited for until `pg_blocking_pids` shows it blocked by the job; the connection commits. Before the
+change all four tests failed with `deadlock detected`; after it, each passes. With the lock removed
+from `VerificationCodeCheck` alone, its test and `VerifyEmailSuspensionRaceTest` go red.
+
+**Found, not changed:** a forgot-password or resend that read the account just before the erasure
+commits still inserts its token after it, on the anonymised row, and its email goes to the old
+address. Before this change the same could happen without a deadlock; the lock does not close it,
+because the account was read before the lock. Re-reading under the lock would; that is a behaviour
+change for the owner.

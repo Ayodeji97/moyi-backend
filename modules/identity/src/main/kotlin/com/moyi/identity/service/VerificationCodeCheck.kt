@@ -14,6 +14,7 @@ import com.moyi.identity.domain.VerificationCodeHasher
 import com.moyi.identity.domain.VerificationPurpose
 import com.moyi.identity.domain.VerificationToken
 import com.moyi.identity.infra.database.AccountStore
+import com.moyi.identity.infra.database.RefreshTokenStore
 import com.moyi.identity.infra.database.VerificationTokenStore
 import com.moyi.identity.infra.security.VerificationProperties
 import org.springframework.stereotype.Component
@@ -32,7 +33,8 @@ import java.util.UUID
  * rollback would un-count it, and an attacker would have unlimited tries).
  *
  * **Every path does the same work.** An unknown address, an account holding no code, a
- * dead code and a wrong one each run one lookup of the address, one locking `SELECT`, one HMAC, one constant-time
+ * dead code and a wrong one each run one lookup of the address, the sessions lock (on an id no row has
+ * when nobody has the address), one locking `SELECT`, one HMAC, one constant-time
  * comparison and one `UPDATE` (against an id that names no row when there is nothing to
  * count); only the accepted code differs, by what it is accepted for. That is the
  * timing half of the one answer, the dummy hash login runs (ADR-0020 decision 2) in the
@@ -45,6 +47,7 @@ internal class VerificationCodeCheck(
     private val rateLimiter: RateLimiter,
     private val accounts: AccountStore,
     private val transactions: TransactionTemplate,
+    private val sessions: RefreshTokenStore,
 ) {
     /**
      * FR-012 in #135's shape (ADR-0023, amended 2026-11-08): ten codes a day per address,
@@ -83,6 +86,10 @@ internal class VerificationCodeCheck(
         now: Instant,
     ): AcceptedCode? {
         val user = accounts.findByEmail(email)
+        // The account's sessions lock before the code's row, the order the deletion job takes
+        // (ADR-0066, amended 2026-11-14); for an unknown address, the lock on an id no row has, so
+        // the work is the same either way.
+        sessions.lockSessionsOf(user?.id ?: NOBODY)
         val held = tokens.lockHeldCode(user?.id ?: NOBODY, purpose)
         val presented = hasher.hash(held?.id ?: NO_TOKEN, purpose, code)
         if (user != null && VerificationToken.acceptsCode(held, presented, now)) return AcceptedCode(user, held!!)

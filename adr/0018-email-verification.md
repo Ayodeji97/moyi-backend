@@ -87,3 +87,11 @@ The owner's request, from the iPhone smoke test: a person should type a short co
 
 *Amended 2026-11-09:* with Redis unreachable, `{email, code}` is answered `503 CODE_CHECK_UNAVAILABLE` (`Retry-After: 60`) before any lookup, the same bytes for every address, and the code is neither counted nor spent; `{token}` is unaffected (ADR-0023, amendment of 2026-11-09).
 
+## Amendment — 2026-11-14: the sessions lock before the token
+
+Both forms of verification, and issuing a code, now take the account's sessions lock before any
+`verification_tokens` row, the order the deletion job takes (ADR-0066, amendment of 2026-11-14,
+which found the deadlock). For decision 5's equal work: `VerificationCodeCheck` takes the lock in
+every branch, on an id no row has when nobody has the address, so the count is one lookup, the
+lock, one locking `SELECT`, one HMAC and one `UPDATE` (`VerificationCodeCheckTest` counts four
+statements, was three).

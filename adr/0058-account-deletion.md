@@ -87,7 +87,8 @@ the thing being erased; sending one would mean keeping it past the erasure. *Own
 (`scheduling.AccountDeletionJob`, `0 41 * * * *`, batches of 50, 1,000 a run) calls
 `identity.api.AccountDeletions.executeDue`. For each due request, under the account's sessions lock
 (the advisory lock sign-in, refresh and reset take, so no refresh token or device committed by a
-sign-in in flight is left behind the erasure) and then the user's row lock, the request is read
+sign-in in flight is left behind the erasure; since 2026-11-14 also the lock every spender and
+issuer of a verification token takes first, ADR-0066's amendment) and then the user's row lock, the request is read
 again and skipped unless it is still pending and due (a cancel that committed meanwhile wins), and
 then, in one commit:
 

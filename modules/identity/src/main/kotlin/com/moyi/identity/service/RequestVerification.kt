@@ -6,6 +6,7 @@ import com.moyi.identity.domain.User
 import com.moyi.identity.domain.VerificationPurpose
 import com.moyi.identity.domain.VerificationRequested
 import com.moyi.identity.domain.VerificationToken
+import com.moyi.identity.infra.database.RefreshTokenStore
 import com.moyi.identity.infra.database.VerificationTokenStore
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Component
@@ -28,6 +29,7 @@ import java.time.Clock
  * seven tests fail (docs/learning-log.md, 2026-09-23).
  */
 @Component
+@Suppress("LongParameterList") // The stores, the minting, the clock, the events and the sessions lock: each named.
 internal class RequestVerification(
     private val tokens: VerificationTokenStore,
     private val generator: TokenGenerator,
@@ -35,6 +37,7 @@ internal class RequestVerification(
     private val clock: Clock,
     private val events: ApplicationEventPublisher,
     private val codes: VerificationCodeIssuer,
+    private val sessions: RefreshTokenStore,
 ) {
     fun request(
         user: User,
@@ -44,6 +47,10 @@ internal class RequestVerification(
         // A new email retires the code in the last one (#135); its link stays live
         // (ADR-0018 decision 6, amended 2026-11-08). Under a per-person lock, so two
         // emails asked for at once cannot both hold a code.
+        // The account's sessions lock first: retiring a code holds that row, and the insert then
+        // waits on the `users` row the deletion job holds while it waits to delete the row this
+        // holds (ADR-0066, amended 2026-11-14). Re-entrant for a reset, which holds it already.
+        sessions.lockSessionsOf(user.id)
         tokens.retireCodes(user.id, purpose)
         // The secret and the code exist here, in the event, and in the email. Never in a row.
         val secret = generator.verificationSecret()
