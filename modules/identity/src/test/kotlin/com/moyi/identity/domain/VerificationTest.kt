@@ -31,13 +31,14 @@ internal class VerificationTest {
         val printed = VerificationSecret("s3cret-value").toString()
 
         printed shouldNotContain "s3cret"
+        // Fixed ids: the event prints them, and a random one could hold the six digits looked for.
         VerificationRequested(
-            userId = UserId(UUID.randomUUID()),
+            userId = UserId(UUID.fromString("00000000-0000-7000-8000-000000000001")),
             email = Email("ada@example.com"),
             displayName = "Ada",
             locale = "en",
             purpose = VerificationPurpose.EMAIL_VERIFICATION,
-            tokenId = UUID.randomUUID(),
+            tokenId = UUID.fromString("00000000-0000-7000-8000-000000000002"),
             secret = VerificationSecret("s3cret-value"),
             expiresAt = NOW,
             code = VerificationCode("024680"),

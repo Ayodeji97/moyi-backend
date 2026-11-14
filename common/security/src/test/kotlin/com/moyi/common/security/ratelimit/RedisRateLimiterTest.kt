@@ -1,5 +1,6 @@
 package com.moyi.common.security.ratelimit
 
+import com.moyi.common.security.PersonalDataHasher
 import com.moyi.common.security.SecurityTestApplication
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.testing.RedisIntegrationTest
@@ -7,7 +8,6 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.longs.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotContain
-import io.kotest.matchers.string.shouldStartWith
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -35,6 +35,7 @@ class RedisRateLimiterTest(
     @Autowired private val clock: MutableClock,
     @Autowired private val redis: StringRedisTemplate,
     @Autowired private val factory: LettuceConnectionFactory,
+    @Autowired private val hasher: PersonalDataHasher,
 ) : RedisIntegrationTest() {
     @AfterEach
     fun flush() {
@@ -100,9 +101,10 @@ class RedisRateLimiterTest(
 
         val keys = redis.keys("*")!!.toList()
         keys shouldHaveSize 1
-        keys.single() shouldStartWith "rl:auth:login:email:"
-        keys.single() shouldNotContain "ada"
-        keys.single() shouldNotContain "example"
+        // The key is the prefix and the keyed hash, whole: no part of the address. Not "does not contain
+        // `ada`": the hash is random base64url per context, and may.
+        keys.single() shouldBe "rl:auth:login:email:${hasher.hash("ada@example.com")}"
+        keys.single() shouldNotContain "ada@example.com"
         // Doc 07 §5: "rolling" TTL — an idle bucket leaves no key behind.
         redis.getExpire(keys.single(), TimeUnit.SECONDS) shouldBeGreaterThan 0
     }

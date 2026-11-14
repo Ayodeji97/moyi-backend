@@ -295,8 +295,10 @@ internal class AccountDeletionEndpointTest(
 
         val row = jdbc.queryForMap("SELECT * FROM users WHERE id = ?", ada.id)
         row["status"] shouldBe "DELETED"
-        row["email"].toString() shouldNotContain "ada"
-        row["display_name"].toString() shouldNotContain "Ada"
+        // Nothing of the old address, and not a hash of it: the id alone (ADR-0058 decision 6). Compared
+        // whole, because a random id can itself contain "ada" (a, d and a are hex digits), and did: a flake.
+        row["email"].toString() shouldBe "deleted-${ada.id}@deleted.invalid"
+        row["display_name"].toString() shouldBe "Deleted account"
         row["email_verified_at"].shouldBeNull()
         row["deleted_at"].toString().isNotBlank() shouldBe true
         for (table in listOf("credentials", "refresh_tokens", "devices", "verification_tokens", "consent_records", "push_tokens")) {
