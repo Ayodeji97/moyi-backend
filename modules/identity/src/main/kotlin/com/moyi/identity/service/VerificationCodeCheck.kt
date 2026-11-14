@@ -111,7 +111,8 @@ internal class VerificationCodeCheck(
     private companion object {
         /**
          * The sessions-lock key for an address no account has: a name-based (v3) UUID of the
-         * address, which no time-ordered id of a real account can equal.
+         * address, which no time-ordered id of a real account can equal. The lock is a 32-bit hash of
+         * the id, so it shares a key with an account only by a hash collision, as two accounts can.
          */
         fun unknownAccount(email: Email): UserId = UserId(UUID.nameUUIDFromBytes("unknown:${email.value.lowercase()}".toByteArray()))
 

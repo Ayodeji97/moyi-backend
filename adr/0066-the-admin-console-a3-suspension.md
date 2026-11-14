@@ -243,7 +243,8 @@ both take it first are serialised by it, so the order of what each takes after i
 between them. `VerificationCodeCheck` takes it for an unknown address too, so a refusal's work stays
 the same whatever its reason (ADR-0018 decision 5): one more statement in every branch. For an
 unknown address the key is its own, a name-based (v3) UUID of the address, which no account's
-time-ordered id can equal: two probes of one address queue as two attempts on one account do, and
+time-ordered id can equal (the lock is a 32-bit hash of the id, so it can share a key with an
+account only by a hash collision, as two accounts already can): two probes of one address queue as two attempts on one account do, and
 probes of two addresses never meet. (A single shared key, as first built, queued every unknown
 address behind every other, a connection held by each, and so answered slower than a known one:
 found in review.) `checkAlone`, the reset check's committed count of a wrong code, is `check` and so
