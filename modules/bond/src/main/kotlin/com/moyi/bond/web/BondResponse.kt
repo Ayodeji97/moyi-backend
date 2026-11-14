@@ -60,6 +60,12 @@ internal data class BondResponse(
     val pendingDeletionRequest: PendingDeletionRequestResponse?,
     /** FR-204: a request to turn semantic search back on, waiting for the other member. */
     val pendingSemanticSearchRequest: PendingSemanticSearchRequestResponse?,
+    /**
+     * A3: true while the bond takes no new entries, edits or reactions; everything in it can
+     * still be read. **It says nothing of why**: no cause, no date, no member, the same for
+     * both of them.
+     */
+    val paused: Boolean,
 ) {
     companion object {
         private val HH_MM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
@@ -87,6 +93,7 @@ internal data class BondResponse(
                 timezoneChangeAllowedFrom = view.timezoneChangeAllowedFrom,
                 pendingDeletionRequest = view.deletion?.let(PendingDeletionRequestResponse::from),
                 pendingSemanticSearchRequest = view.semanticSearchOn?.let(PendingSemanticSearchRequestResponse::from),
+                paused = view.paused,
             )
 
         /** The `ETag` for a bond: an opaque validator of this caller’s public representation. */

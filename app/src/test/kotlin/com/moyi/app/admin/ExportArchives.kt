@@ -95,6 +95,38 @@ class ExportArchives {
                 userId,
                 Timestamp.from(clock.instant()),
             )
+            return prepare(jobs, jdbc, id)
+        }
+
+        /**
+         * The export [userId] asked for through `POST /me/export`, built: their one `PREPARING` row
+         * (a person has at most one) moved ahead of every other waiting, then the job run for one,
+         * as [build] does. The answer is the archive's `moyi-export.json`.
+         */
+        fun buildRequested(
+            jobs: DataExportJobs,
+            jdbc: JdbcTemplate,
+            userId: UUID,
+        ): ByteArray {
+            val id =
+                jdbc.queryForObject(
+                    "SELECT id FROM data_exports WHERE user_id = ? AND status = 'PREPARING'",
+                    UUID::class.java,
+                    userId,
+                )!!
+            jdbc.update(
+                "UPDATE data_exports SET requested_at = (SELECT min(requested_at) - interval '1 second' FROM data_exports " +
+                    "WHERE status = 'PREPARING') WHERE id = ?",
+                id,
+            )
+            return prepare(jobs, jdbc, id)
+        }
+
+        private fun prepare(
+            jobs: DataExportJobs,
+            jdbc: JdbcTemplate,
+            id: UUID,
+        ): ByteArray {
             jobs.prepareDue(1) shouldBe 1
             jdbc.queryForObject("SELECT status FROM data_exports WHERE id = ?", String::class.java, id) shouldBe "READY"
             val key = jdbc.queryForObject("SELECT storage_key FROM data_exports WHERE id = ?", String::class.java, id)!!

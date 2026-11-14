@@ -2,7 +2,7 @@ package com.moyi.admin.domain
 
 /**
  * What an audit row says was done. A closed set, and this is the one place it
- * is written: the `CHECK` on `audit_log.action` (V60, widened by V61 and V64) repeats it
+ * is written: the `CHECK` on `audit_log.action` (V60, widened by V61, V64 and V66) repeats it
  * for the database, and `AuditActionCheckTest` holds the SQL to this list, so
  * adding a value here without a migration fails a test and not a production insert.
  *
@@ -14,6 +14,9 @@ package com.moyi.admin.domain
  * `ADMIN_STEP_UP`, the second factor proven again before an irreversible act.
  *
  * A5 (V64): `ENTRY_TEXT_READ`, an administrator's read of one reported entry's words.
+ *
+ * A3 (V66): `ACCOUNT_SUSPENDED` and `ACCOUNT_UNSUSPENDED`, an administrator's suspension of a member's
+ * account and the lifting of it.
  */
 internal enum class AuditAction {
     ADMIN_INVITED,
@@ -34,4 +37,6 @@ internal enum class AuditAction {
     MEDIA_DELETED,
     ADMIN_STEP_UP,
     ENTRY_TEXT_READ,
+    ACCOUNT_SUSPENDED,
+    ACCOUNT_UNSUSPENDED,
 }

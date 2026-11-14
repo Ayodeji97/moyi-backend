@@ -45,8 +45,8 @@ import java.util.UUID
  * to catch.
  *
  * **[prompt] is the bond's prompt of the day** (FR-047, ADR-0038): the same prompt for
- * both members, each in their own language, and `null` when the bond takes no writes or
- * the library has nothing for it. One `null` for every cause, so it tells a block from a
+ * both members, each in their own language, and `null` when the bond takes no writes, while
+ * it is [paused], or when the library has nothing for it. One `null` for every cause, so it tells a block from a
  * leave no more than anything else here does. Whether the caller answers it is theirs;
  * dismissing it is the client's alone, with no call (the owner's Q-P2).
  *
@@ -73,6 +73,8 @@ internal data class TodayResponse(
     /** Doc 06 §3.4. About the bond, never about either member: see [StreakResponse]. */
     val streak: TodayStreakResponse,
     val prompt: TodayPromptResponse?,
+    /** The bond takes no new entries, edits or reactions; `prompt` is `null` while this is true. It says nothing of why. */
+    val paused: Boolean,
 ) {
     companion object {
         fun from(view: TodayView): TodayResponse =
@@ -95,6 +97,7 @@ internal data class TodayResponse(
                     },
                 streak = TodayStreakResponse.from(view.streak),
                 prompt = view.prompt?.let(TodayPromptResponse::from),
+                paused = view.paused,
             )
     }
 }

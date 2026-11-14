@@ -25,7 +25,7 @@ internal data class PromptView(
  * is never read, so the prompt tells neither member the other's language (c6-corpus H-P7,
  * ADR-0038).
  * **Whether there is one** is the bond's and the caller's own state: none once the bond
- * takes no writes from them (ruling 6), whoever ended it and however.
+ * takes no writes from them (ruling 6), whoever ended it and however, and none while it is paused.
  *
  * Reads no entry, no day, no mark, no reaction, no streak and no withdrawal: what either
  * member has done cannot reach this (FR-064). `ArchitectureTest` holds this file's imports
@@ -40,7 +40,7 @@ internal class DailyPrompt(
         membership: BondMembership,
         date: LocalDate,
     ): PromptView? {
-        if (!membership.takesWrites) return null
+        if (!membership.takesWrites || membership.paused) return null
         val id = PromptOfTheDay.choose(membership.bondId, date, overlayOf(membership.type), library.active())
         return id?.let { PromptView(it, textOf(it, membership)) }
     }

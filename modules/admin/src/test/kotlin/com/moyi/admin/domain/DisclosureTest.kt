@@ -103,6 +103,18 @@ internal class DisclosureTest {
     }
 
     @Test
+    fun `a suspension and its lifting are withheld whatever their outcome, target, purpose or report-drivenness`() {
+        val suspensions = setOf(AuditAction.ACCOUNT_SUSPENDED, AuditAction.ACCOUNT_UNSUSPENDED)
+        everyRow().filter { it.action in suspensions }.also { it.isNotEmpty() shouldBe true }.forEach { row ->
+            withClue(row) { Disclosure.shows(row.action, row.outcome, row.targetType, row.purpose, row.reportDriven).shouldBeNull() }
+        }
+        // The case a future widening would be tempted by: a successful act on a USER row, as a lookup is shown.
+        suspensions.forEach { action ->
+            Disclosure.shows(action, AuditOutcome.SUCCEEDED, USER, LookupPurpose.MEMBER_REQUEST, false).shouldBeNull()
+        }
+    }
+
+    @Test
     fun `a lookup is shown only on a USER row and a removal only on a MEDIA row`() {
         (TARGETS - USER).forEach { target ->
             withClue(target) {

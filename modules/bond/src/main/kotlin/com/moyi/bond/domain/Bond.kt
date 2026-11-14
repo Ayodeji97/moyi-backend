@@ -209,6 +209,14 @@ internal data class Bond(
     val isOpen: Boolean get() = status.isOpen
 
     /**
+     * The one rule of a bond's pause (A3 spec §6): it takes no new entry, edit or reaction while
+     * it is open and a member who has **not left** is in [suspended]. Derived on every read from
+     * identity's standing and never stored, so a lift resumes it with nothing to undo. A member
+     * who left no longer holds a seat; a bond that has ended is not paused, it is ended.
+     */
+    fun isPausedFor(suspended: Set<UserId>): Boolean = isOpen && members.any { it.isActive && it.userId in suspended }
+
+    /**
      * Can still be left or blocked out of.
      *
      * Wider than [isOpen] by exactly one state, and the extra state is the whole

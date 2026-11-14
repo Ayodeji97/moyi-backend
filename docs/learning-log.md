@@ -3450,3 +3450,20 @@ Reality: Docker assigns that address, and on a network created without a subnet 
 Wrong about: a trusted-proxy entry being a fact about the proxy. It is a fact about whoever holds
          that address now. The container's name is the fact; the address is a cache of it, so it
          is resolved again every few seconds and dropped, not kept, when it stops resolving.
+
+## 2026-11-13 · Admin console A3 · a new status is overwritten by every path that saves the row it read
+Expected: suspending an account was one write in one place: the port takes the sessions lock and
+         the row lock, sets `SUSPENDED`, and every other identity path, already ordered on the same
+         locks (ADR-0058 decision 6), would wait behind it.
+Reality: two paths read the user before taking any lock and then saved the whole entity back.
+         Verifying an email wrote `ACTIVE` (and the old `tokens_invalid_before`) over a suspension
+         that committed in between; applying a password reset did the same. Neither was found by a
+         test: both were found by reading, by the implementers of two successive tasks, and each
+         then got a race test synchronised on `pg_locks`. The fix in both is the same: never write a
+         column the path does not own (a conditional `UPDATE … WHERE status = 'PENDING_VERIFICATION'`;
+         `GREATEST` for `tokens_invalid_before`, read after the lock).
+Wrong about: lock order being enough. An ordered lock protects the writes made under it, not a value
+         read before it. Adding a status means asking, of every path that saves the row, whether it
+         writes back what it read. Separately, the spec's first overlap window left out the day's
+         late-entry grace, which the paused bond also refuses; the review caught it, and the window
+         is now the day's whole writable window (ADR-0066 decision 16).

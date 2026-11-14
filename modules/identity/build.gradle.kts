@@ -72,6 +72,9 @@ dependencies {
     testRuntimeOnly("org.springframework.boot:spring-boot-starter-flyway")
     testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
     testRuntimeOnly("org.postgresql:postgresql")
+    // Flyway's own API, at compile time, for one test: V65MigrationTest builds a database of its
+    // own to V65 and tests what the schema refuses, with no Spring context in between.
+    testImplementation("org.flywaydb:flyway-core")
 }
 
 // --- The breached-password corpus -----------------------------------------

@@ -8,8 +8,10 @@ import com.moyi.identity.domain.Credentials
 import com.moyi.identity.domain.DeviceDescription
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
+import com.moyi.identity.domain.PasswordHash
 import com.moyi.identity.domain.PasswordHasher
 import com.moyi.identity.domain.User
+import com.moyi.identity.domain.UserId
 import com.moyi.identity.infra.database.AccountStore
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -47,6 +49,17 @@ import java.time.Instant
  * are real. It sits before the verify so that a refused attempt costs the
  * server nothing, and it sits *here*, not in the interceptor, because the
  * address is in the body. The per-IP bucket is on the controller.
+ *
+ * **The account is judged again under the sessions lock** (admin console A3, ruling 7). The
+ * password and the status are judged before any lock, so a suspension or a password reset can
+ * commit while the hash is being checked. Inside the transaction, after the lock, the user and
+ * the credentials are read again: an account that can no longer sign in, or whose password hash
+ * is no longer the one just verified, is refused with the same exception and the same log line,
+ * and nothing is written. The access token is minted inside that transaction too, so a
+ * suspension waiting on the lock takes effect only after this sign-in commits, and its
+ * `tokens_invalid_before` (read after the lock) then falls after this token's `iat`. Minted
+ * after the commit, the token could be stamped later than a suspension that ran in between,
+ * and outlive it. The cost is one indexed read of each row per sign-in.
  *
  * FR-002: an unverified account signs in. What it may not do is create or join
  * a Bond, and that is the Bond module's rule, not this class's.
@@ -86,33 +99,52 @@ internal class LoginUser(
             }
 
         val authenticated = user?.takeIf { credentials != null && it.admits(credentials, passwordMatches, now) }
-        if (authenticated == null) {
+        // `credentials` is non-null whenever `authenticated` is; said again for the compiler.
+        if (authenticated == null || credentials == null) {
             // Counted only for a real, sign-in-able account with a wrong
             // password. The store refuses to count during a lock, so a lock
             // cannot be extended by hammering it.
             val countable = user?.takeIf { credentials != null && it.canAuthenticate && !passwordMatches }
             countable?.let { failed -> transactions.executeWithoutResult { accounts.recordFailedLogin(failed.id, now) } }
-            // The user id, when there is one, is not personal data and is what
-            // a rate graph needs. Nothing about *why* is logged at INFO — the
-            // reasons are exactly the distinctions the response withholds.
-            log.info("Login refused{}", user?.let { " for user ${it.id.value}" } ?: "")
-            throw InvalidCredentialsException()
+            refuse(user)
         }
 
-        val family =
+        val tokens =
             transactions.execute {
-                // Serialised with logout-all and reset, so a sign-in that
-                // started before a "sign everything out" cannot survive it.
+                // Serialised with logout-all, reset and suspension, so a sign-in that started
+                // before a "sign everything out" cannot survive it.
                 sessions.lockSessionsOf(authenticated.id)
+                if (!stillAdmits(authenticated.id, credentials.passwordHash)) refuse(authenticated)
                 accounts.clearFailedLogins(authenticated.id, now)
-                sessions.newFamily(authenticated.id, command.device, now)
+                val family = sessions.newFamily(authenticated.id, command.device, now)
+                SessionTokens(sessions.accessTokenFor(authenticated.id, family.familyId), family.refreshToken)
             }!!
         log.info("Login succeeded for user {}", authenticated.id.value)
 
-        return LoginResult(
-            user = authenticated,
-            tokens = SessionTokens(sessions.accessTokenFor(authenticated.id, family.familyId), family.refreshToken),
-        )
+        return LoginResult(user = authenticated, tokens = tokens)
+    }
+
+    /**
+     * Ruling 7's re-read, under the sessions lock: the account may still sign in, and its hash is
+     * the one [verified] was checked against. A reset changes the hash and a suspension the status,
+     * and both take the same lock, so neither can commit between this read and the commit.
+     */
+    private fun stillAdmits(
+        id: UserId,
+        verified: PasswordHash,
+    ): Boolean {
+        val current = accounts.findById(id) ?: return false
+        return current.canAuthenticate && accounts.findCredentials(id)?.passwordHash == verified
+    }
+
+    /**
+     * The one refusal. The user id, when there is one, is not personal data and is what a rate
+     * graph needs. Nothing about *why* is logged at INFO: the reasons are exactly the
+     * distinctions the response withholds.
+     */
+    private fun refuse(user: User?): Nothing {
+        log.info("Login refused{}", user?.let { " for user ${it.id.value}" } ?: "")
+        throw InvalidCredentialsException()
     }
 
     /** Right password, a status that may sign in (FR-002), and no lock in force. */

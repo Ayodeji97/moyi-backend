@@ -65,25 +65,25 @@ internal class AccountStore(
     fun findAllById(ids: Collection<UserId>): List<User> = users.findAllById(ids.map { it.value }).map { it.toDomain() }
 
     /**
-     * Carries a changed [User] onto its existing row. Loads the managed entity
-     * and applies the change to *it*, rather than saving a fresh entity that
-     * claims to be new — see [applyTo] for the lost-update that would cause.
+     * See [UserRepository.markEmailVerified]: the whole of the rule, and why it is one statement.
+     * @return `true` when the address was newly verified; `false` when it already was (or there is
+     *   no such user), which is legitimate: the row is then left exactly as it was
      */
-    fun update(user: User) {
-        val entity =
-            users.findById(user.id.value).orElseThrow {
-                IllegalStateException("cannot update a user that does not exist")
-            }
-        user.applyTo(entity)
-        users.save(entity)
-    }
+    fun markEmailVerified(
+        userId: UserId,
+        now: Instant,
+    ): Boolean = users.markEmailVerified(userId.value, now) == 1
 
+    /**
+     * Invalidates every access token issued before [now]; see [UserRepository.revokeAccessTokensBefore]
+     * for why it is one statement that never lowers the mark. No row is written when there is no
+     * such user, which, as before, leaves nothing to revoke.
+     */
     fun revokeAllSessions(
         userId: UserId,
         now: Instant,
     ) {
-        val user = findById(userId) ?: return
-        update(user.revokeAllSessions(now))
+        users.revokeAccessTokensBefore(userId.value, now)
     }
 
     fun updateCredentials(credentials: Credentials) {

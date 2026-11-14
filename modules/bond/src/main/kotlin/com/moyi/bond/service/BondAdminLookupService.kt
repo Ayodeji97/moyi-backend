@@ -15,10 +15,13 @@ import java.util.UUID
 @Service
 internal class BondAdminLookupService(
     private val bonds: BondStore,
+    private val pause: BondPause,
 ) : BondAdminLookup {
     @Transactional(readOnly = true)
-    override fun bondsOf(userId: UUID): List<BondAdminView> =
-        bonds.findAllByMember(UserId(userId)).map { bond ->
+    override fun bondsOf(userId: UUID): List<BondAdminView> {
+        val found = bonds.findAllByMember(UserId(userId))
+        val paused = pause.pausedAmong(found)
+        return found.map { bond ->
             BondAdminView(
                 bondId = bond.id.value,
                 status = bond.status.name,
@@ -29,6 +32,8 @@ internal class BondAdminLookupService(
                         .firstOrNull { it.userId.value != userId }
                         ?.userId
                         ?.value,
+                paused = paused.getValue(bond.id.value),
             )
         }
+    }
 }

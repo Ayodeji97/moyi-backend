@@ -27,6 +27,8 @@ internal fun BondView.entityTag(): String {
                     bond.deletionScheduledFor,
                     // #170: leaves with the passing of time, the row's version unmoved.
                     timezoneChangeAllowedFrom,
+                    // A3: a suspension and its lift move no bond row; the pause is read, not stored.
+                    paused,
                 ),
             )
             members.forEach { view ->

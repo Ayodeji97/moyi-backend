@@ -7,6 +7,8 @@ import com.moyi.admin.service.LookupResult
 import com.moyi.admin.service.ModerationNote
 import com.moyi.admin.service.UserLookup
 import com.moyi.common.security.ClientAddressResolver
+import com.moyi.identity.api.AccountStatus
+import com.moyi.identity.api.UserAdminView
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
@@ -29,11 +31,16 @@ import java.util.UUID
  * parameters in the URL, which a proxy's request log and the browser's history keep; the note may
  * be written only to the audit row's `justification`. A form with no purpose, an unknown one, no
  * query, or a note the console's rule refuses is the form again, `400`, and nothing is audited.
+ *
+ * The result shows the account's status and each bond's pause to every role, and the suspension's
+ * forms to an `ADMIN` (A3 spec §5). The `GET` shows the one line a suspension's `303` left in the
+ * flash (`admin/layout :: result`), and still looks nothing up.
  */
 @Controller
 @ConditionalOnAdminConsole
 internal class UserLookupController(
     private val lookup: UserLookup,
+    private val secondFactor: SecondFactor,
     private val addresses: ClientAddressResolver,
 ) {
     @GetMapping("/admin/users")
@@ -89,6 +96,7 @@ internal class UserLookupController(
                 is LookupResult.Found -> {
                     model.addAttribute("user", result.user)
                     model.addAttribute("bonds", result.bonds)
+                    suspension(result.user, authentication, model)
                 }
 
                 LookupResult.NotFound -> {
@@ -99,6 +107,37 @@ internal class UserLookupController(
         } catch (_: InvalidModerationNote) {
             NOTE_NEEDED
         }
+
+    /**
+     * A3 spec §5: an `ADMIN` is offered the act the account's status allows (suspend an `ACTIVE` or
+     * `PENDING_VERIFICATION` one, lift a `SUSPENDED` one, nothing for the others) and told of a
+     * pending deletion request; anyone else is told only an `ADMIN` can. Display only: the console
+     * and the port decide.
+     */
+    private fun suspension(
+        user: UserAdminView,
+        authentication: Authentication,
+        model: Model,
+    ) {
+        if (!secondFactor.isAdmin(authentication)) {
+            model.addAttribute("onlyAdmin", SuspensionController.ONLY_ADMIN)
+            return
+        }
+        when (user.status) {
+            AccountStatus.ACTIVE, AccountStatus.PENDING_VERIFICATION -> {
+                model.addAttribute("suspendForm", SuspensionController.suspendForm(user.id))
+            }
+
+            AccountStatus.SUSPENDED -> {
+                model.addAttribute("liftForm", SuspensionController.liftForm(user.id))
+            }
+
+            AccountStatus.PENDING_DELETION, AccountStatus.DELETED -> {
+                Unit
+            }
+        }
+        user.deletionDueAt?.let { model.addAttribute("deletionLine", SuspensionController.deletionLine(it)) }
+    }
 
     private fun form(model: Model): String {
         model.addAttribute("purposes", LookupPurpose.entries.map { it.name })

@@ -31,6 +31,12 @@ data class UserAdminView(
     /** Live refresh-token families, the count FR-007 lists. */
     val liveSessions: Int,
     val tokensInvalidBefore: Instant?,
+    /** Admin console A3: the account's lifecycle status. */
+    val status: AccountStatus,
+    /** When the open suspension began; `null` unless the account is suspended now. */
+    val suspendedSince: Instant?,
+    /** When a pending deletion request will be carried out (its window's end); `null` when none is pending. */
+    val deletionDueAt: Instant?,
 ) {
     override fun toString(): String = "UserAdminView(id=$id)"
 }

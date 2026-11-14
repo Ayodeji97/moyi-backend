@@ -5,6 +5,7 @@
 <header th:replace="~{admin/layout :: masthead}"></header>
 <main>
     <h1>User lookup</h1>
+    <p th:replace="~{admin/layout :: result}"></p>
     <!--/* A POST (A2 spec §9.3, owner ruling 6): the note never goes into a URL. th:text and th:value
            only: what the admin typed is shown back escaped. */-->
     <form method="post" th:action="@{/admin/users}">
@@ -42,6 +43,8 @@
             <dt>Display name</dt><dd th:text="${user.displayName}"></dd>
             <dt>Locale</dt><dd th:text="${user.locale}"></dd>
             <dt>Created</dt><dd th:text="${user.createdAt}"></dd>
+            <dt>Status</dt>
+            <dd th:text="${user.suspendedSince != null} ? |${user.status} since ${user.suspendedSince}| : ${user.status}">ACTIVE</dd>
             <dt>Email verified</dt><dd th:text="${user.emailVerified} ? 'yes' : 'no'"></dd>
             <dt>Locked until</dt><dd th:text="${user.lockedUntil != null} ? ${user.lockedUntil} : 'not locked'"></dd>
             <dt>Live sessions</dt><dd th:text="${user.liveSessions}"></dd>
@@ -57,7 +60,7 @@
             <tbody>
             <tr th:each="bond : ${bonds}">
                 <td th:text="${bond.bondId}"></td>
-                <td th:text="${bond.status}"></td>
+                <td th:text="${bond.paused} ? |${bond.status}, paused| : ${bond.status}">ACTIVE</td>
                 <td th:text="${bond.createdAt}"></td>
                 <td th:text="${bond.endedAt != null} ? ${bond.endedAt} : '-'"></td>
                 <td>
@@ -68,6 +71,13 @@
             </tr>
             </tbody>
         </table>
+
+        <!--/* A3 spec §5: the suspension's forms, for an ADMIN only (display only: the console decides). */-->
+        <h2>Suspension</h2>
+        <p th:if="${onlyAdmin != null}" th:text="${onlyAdmin}">Only an ADMIN can suspend an account.</p>
+        <p th:if="${deletionLine != null}" th:text="${deletionLine}">A deletion this person asked for runs on …</p>
+        <th:block th:if="${suspendForm != null}"><form th:replace="~{admin/fragments/decision :: form(${suspendForm})}"></form></th:block>
+        <th:block th:if="${liftForm != null}"><form th:replace="~{admin/fragments/decision :: form(${liftForm})}"></form></th:block>
     </section>
     <p><a th:href="@{/admin}">Back to the console</a></p>
 </main>

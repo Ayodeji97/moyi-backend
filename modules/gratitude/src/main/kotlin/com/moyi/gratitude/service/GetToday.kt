@@ -67,6 +67,8 @@ internal data class TodayView(
      * for both members; never anything about either.
      */
     val prompt: PromptView?,
+    /** The bond is paused ([BondMembership.paused]): it names no cause, no date and no member. */
+    val paused: Boolean,
 )
 
 /**
@@ -200,6 +202,7 @@ internal class GetToday(
                 reactions = emptyMap(),
                 media = emptyMap(),
                 prompt = prompt,
+                paused = membership.paused,
             )
         }
 
@@ -221,6 +224,7 @@ internal class GetToday(
             reactions = reactions.on(readInFull),
             media = media.of(membership.userId, listOfNotNull(shown.mine, shown.partners)),
             prompt = prompt,
+            paused = membership.paused,
         )
     }
 }

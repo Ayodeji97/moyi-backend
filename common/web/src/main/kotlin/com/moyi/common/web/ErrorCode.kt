@@ -155,6 +155,14 @@ enum class ErrorCode {
     BOND_ARCHIVED,
 
     /**
+     * A new entry, an edit or a reaction in a bond that is paused (admin A3, spec §9): 409.
+     * Everything in the bond can still be read, and the same request succeeds once it resumes.
+     * It names no cause, no date and no member, so any reason a bond could be paused for may later
+     * answer the same. Checked right after [BOND_ARCHIVED], so an ended bond says that.
+     */
+    BOND_PAUSED,
+
+    /**
      * `POST /invites/{code}/accept` by someone already in that bond — the
      * creator scanning their own code, most often. A fact about the caller's
      * own memberships, which they can already list, so naming it discloses

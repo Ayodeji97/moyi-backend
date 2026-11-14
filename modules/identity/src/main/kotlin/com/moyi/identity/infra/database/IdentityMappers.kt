@@ -22,7 +22,12 @@ import com.moyi.identity.domain.VerificationToken
  * The direction matters. [toDomain] is total — anything in the table can be
  * expressed. [toEntity] is **insert-only**: it builds a brand-new object
  * whose `isNew` flag is true, so handing its result to `save()` asks for an
- * `INSERT`. Use [applyTo] to carry changes onto a row that already exists.
+ * `INSERT`. An existing `users` row is changed only by a targeted statement on
+ * `UserRepository`, never by loading a user and saving it back: a load-and-save
+ * writes every column it read, and twice in admin console A3 that wrote a stale
+ * `status` and `tokens_invalid_before` over a suspension that committed in
+ * between (verify, reset). There is deliberately no `User.applyTo`. Credentials
+ * keep [Credentials.applyTo], which writes no status.
  */
 internal fun UserEntity.toDomain(): User =
     User(
@@ -54,30 +59,6 @@ internal fun User.toEntity(): UserEntity =
         deletedAt = deletedAt,
         tokensInvalidBefore = tokensInvalidBefore,
     )
-
-/**
- * Carries a changed [User] onto the managed entity it came from.
- *
- * This is the update path, and it exists because the obvious alternative is
- * wrong in a way that does not fail: `save(user.toEntity())` on an existing
- * user hands Hibernate a *detached* object claiming to be new, and the
- * `isNew` flag means it will be persisted rather than merged.
- *
- * `id` and `createdAt` are not copied. They are not the caller's to change,
- * and the column is `updatable = false` so the database would refuse anyway.
- */
-internal fun User.applyTo(entity: UserEntity) {
-    require(entity.getId() == id.value) { "cannot apply a user onto a different user's row" }
-    entity.email = email.value
-    entity.emailVerifiedAt = emailVerifiedAt
-    entity.displayName = displayName
-    entity.avatarMediaId = avatarMediaId
-    entity.locale = locale
-    entity.status = status
-    entity.updatedAt = updatedAt
-    entity.deletedAt = deletedAt
-    entity.tokensInvalidBefore = tokensInvalidBefore
-}
 
 internal fun CredentialsEntity.toDomain(): Credentials =
     Credentials(

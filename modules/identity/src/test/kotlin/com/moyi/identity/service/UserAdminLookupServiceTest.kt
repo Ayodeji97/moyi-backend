@@ -1,8 +1,13 @@
 package com.moyi.identity.service
 
 import com.moyi.common.testing.IntegrationTest
+import com.moyi.identity.api.AccountStatus
+import com.moyi.identity.api.AccountSuspension
 import com.moyi.identity.api.UserAdminLookup
+import com.moyi.identity.domain.DeletionRequest
+import com.moyi.identity.domain.UserId
 import com.moyi.identity.infra.IdentityTestApplication
+import com.moyi.identity.infra.database.DeletionRequestStore
 import com.moyi.identity.infra.security.TestBreachCorpus
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
@@ -14,6 +19,10 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import org.springframework.transaction.support.TransactionTemplate
+import java.sql.Timestamp
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -21,13 +30,19 @@ import javax.sql.DataSource
 @SpringBootTest(classes = [IdentityTestApplication::class])
 internal class UserAdminLookupServiceTest(
     @Autowired private val lookup: UserAdminLookup,
+    @Autowired private val suspension: AccountSuspension,
+    @Autowired private val requests: DeletionRequestStore,
+    @Autowired private val transactions: TransactionTemplate,
     @Autowired dataSource: DataSource,
 ) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
 
     @AfterEach
     fun clear() {
-        jdbc.execute("TRUNCATE TABLE refresh_tokens, devices, verification_tokens, consent_records, credentials, users CASCADE")
+        jdbc.execute(
+            "TRUNCATE TABLE account_suspensions, deletion_requests, push_tokens, refresh_tokens, devices, verification_tokens, " +
+                "consent_records, credentials, users CASCADE",
+        )
     }
 
     @Test
@@ -72,6 +87,49 @@ internal class UserAdminLookupServiceTest(
         jdbc.update("UPDATE credentials SET locked_until = now() - interval '1 hour'")
 
         lookup.byId(ada)!!.lockedUntil.shouldBeNull()
+    }
+
+    @Test
+    fun `an active account shows ACTIVE with no suspension and no deletion due`() {
+        val ada = insertUser("ada@example.com", "Ada")
+
+        val view = lookup.byId(ada)!!
+
+        view.status shouldBe AccountStatus.ACTIVE
+        view.suspendedSince.shouldBeNull()
+        view.deletionDueAt.shouldBeNull()
+    }
+
+    @Test
+    fun `a suspended account shows since when, and lifted it shows neither`() {
+        val ada = insertUser("ada@example.com", "Ada")
+        transactions.execute { suspension.suspend(ada) }
+        val since = jdbc.queryForObject("SELECT suspended_at FROM account_suspensions WHERE user_id = ?", Timestamp::class.java, ada)!!
+
+        val view = lookup.byId(ada)!!
+
+        view.status shouldBe AccountStatus.SUSPENDED
+        view.suspendedSince shouldBe since.toInstant()
+
+        transactions.execute { suspension.lift(ada) }
+
+        lookup.byId(ada)!!.let {
+            it.status shouldBe AccountStatus.ACTIVE
+            it.suspendedSince.shouldBeNull()
+        }
+    }
+
+    @Test
+    fun `a pending deletion shows the instant the job carries it out, and a cancelled one does not`() {
+        val ada = insertUser("ada@example.com", "Ada")
+        val request = DeletionRequest.open(UUID.randomUUID(), UserId(ada), Instant.now().truncatedTo(ChronoUnit.MICROS))
+        requests.insert(request)
+
+        lookup.byId(ada)!!.deletionDueAt shouldBe request.cancellableUntil
+
+        requests.cancel(request, Instant.now())
+
+        lookup.byId(ada)!!.deletionDueAt.shouldBeNull()
     }
 
     @Test

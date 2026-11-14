@@ -6,6 +6,8 @@ import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.User
 import com.moyi.identity.domain.UserId
 import com.moyi.identity.infra.database.AccountStore
+import com.moyi.identity.infra.database.AccountSuspensionStore
+import com.moyi.identity.infra.database.DeletionRequestStore
 import com.moyi.identity.infra.database.RefreshTokenStore
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -14,12 +16,15 @@ import java.util.UUID
 
 /**
  * The [UserAdminLookup] port. Live sessions are counted with the query behind
- * `GET /auth/sessions` ([ListSessions]): the live tokens are the live families.
+ * `GET /auth/sessions` ([ListSessions]): the live tokens are the live families. A suspension's
+ * start and a pending deletion's due instant are read from their own stores (A3).
  */
 @Service
 internal class UserAdminLookupService(
     private val accounts: AccountStore,
     private val tokens: RefreshTokenStore,
+    private val suspensions: AccountSuspensionStore,
+    private val requests: DeletionRequestStore,
     private val clock: Clock,
 ) : UserAdminLookup {
     @Transactional(readOnly = true)
@@ -43,6 +48,9 @@ internal class UserAdminLookupService(
             lockedUntil = accounts.findCredentials(id)?.lockedUntil?.takeIf { it.isAfter(now) },
             liveSessions = tokens.findLiveOf(id, now).size,
             tokensInvalidBefore = tokensInvalidBefore,
+            status = status.toAccountStatus(),
+            suspendedSince = suspensions.openSpanSince(id),
+            deletionDueAt = requests.findPending(id)?.cancellableUntil,
         )
     }
 }

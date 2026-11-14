@@ -180,11 +180,27 @@ internal class UserPersistenceTest(
         transactions.executeWithoutResult {
             val entity = users.findById(original.id.value).orElseThrow()
             entity.isNew() shouldBe false
-            original.copy(displayName = "Ada Lovelace", updatedAt = NOW).applyTo(entity)
+            entity.displayName = "Ada Lovelace"
         }
 
         users.count() shouldBe 1
         transactions.execute { users.findById(original.id.value).orElseThrow().displayName } shouldBe "Ada Lovelace"
+    }
+
+    @Test
+    fun `verifying an address twice keeps the first time, and the second touches nothing`() {
+        // The idempotence rests on the statement's `email_verified_at IS NULL` alone since verify
+        // stopped loading and saving the user (admin console A3): this is that guard's test.
+        val original = newUser()
+        transactions.executeWithoutResult { users.save(original.toEntity()) }
+
+        transactions.execute { users.markEmailVerified(original.id.value, NOW) } shouldBe 1
+        transactions.execute { users.markEmailVerified(original.id.value, NOW.plus(Duration.ofHours(1))) } shouldBe 0
+
+        val row = jdbc.queryForMap("SELECT email_verified_at, updated_at, status FROM users WHERE id = ?", original.id.value)
+        (row["email_verified_at"] as java.sql.Timestamp).toInstant() shouldBe NOW
+        (row["updated_at"] as java.sql.Timestamp).toInstant() shouldBe NOW
+        row["status"] shouldBe UserStatus.ACTIVE.name
     }
 
     @Test

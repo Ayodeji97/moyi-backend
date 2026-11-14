@@ -15,9 +15,9 @@ import org.springframework.transaction.annotation.Transactional
  * Issues a fresh verification token for an address and asks for it to be
  * emailed — or does nothing, indistinguishably (doc 06 §3.1: `202 always`).
  *
- * **Three cases, one outcome.** An unknown address, an address that is
- * already verified, and an address that is pending all return normally; only
- * the last one does anything. The caller's response is empty in every case,
+ * **Four cases, one outcome.** An unknown address, an address that is
+ * already verified, a suspended account, and an address that is pending all
+ * return normally; only the last one does anything. The caller's response is empty in every case,
  * so the endpoint cannot be asked "does this person have an account here" —
  * the same rule as ADR-0015 for registration. What this method does *not*
  * equalise is time: the pending path does one `INSERT` more than the others.
@@ -50,7 +50,9 @@ internal class ResendVerification(
         if (decision is RateLimitDecision.Rejected) throw RateLimitExceededException(decision)
 
         val user = accounts.findByEmail(email)
-        if (user == null || user.isEmailVerified) {
+        // A suspended account that never verified gets no mail either (admin console A3): it is
+        // the one more address that needs none, answered and logged exactly as the others are.
+        if (user == null || user.isEmailVerified || !user.canAuthenticate) {
             // Counted, not named: the *rate* of resends for addresses that
             // need none is a signal worth graphing (a stuck client, an
             // enumeration attempt); whose they were is not ours to log.

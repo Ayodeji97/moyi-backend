@@ -48,6 +48,7 @@ import java.time.temporal.ChronoUnit
  * they can already discover.
  */
 @Service
+@Suppress("LongParameterList") // Seven collaborators, each one store or port a step above reads; the pause is the seventh.
 internal class AcceptInvite(
     private val invites: InviteStore,
     private val bonds: BondStore,
@@ -55,6 +56,7 @@ internal class AcceptInvite(
     private val users: UserDirectory,
     private val views: BondViews,
     private val support: BondSupport,
+    private val pause: BondPause,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -94,6 +96,8 @@ internal class AcceptInvite(
         bonds.lockBondsOf(caller)
         if (bonds.countOpenBondsOf(caller) >= Bond.MAX_OPEN_BONDS_PER_USER) throw BondLimitReachedException()
         if (!bond.hasRoom) throw InviteNotUsableException()
+        // Under the bond lock this method holds: the pause is the one answer of a dead code (A3).
+        if (pause.isPaused(bond)) throw InviteNotUsableException()
         if (blocks.existsBetween(caller, bond.everyMemberUserId())) throw InviteNotUsableException()
 
         if (!invites.consume(invite.id, caller, joinedAt)) throw InviteNotUsableException()

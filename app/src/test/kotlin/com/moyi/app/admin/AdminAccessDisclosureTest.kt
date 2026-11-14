@@ -229,6 +229,34 @@ class AdminAccessDisclosureTest(
         ExportArchives.adminAccessBytes(after) shouldBe ExportArchives.adminAccessBytes(before)
     }
 
+    @Test
+    fun `a suspension and its lift list nothing, and an export built after them has the bytes of one built before`() {
+        val ada = member()
+        val session = rig.session()
+        // Something listed, so the comparison is of a list and not of two empty ones.
+        lookup(session, ada, "MEMBER_REQUEST").status shouldBe 200
+        val before = ExportArchives.build(jobs, jdbc, clock, ada)
+
+        // As SuspensionConsole writes them: on the member's USER row, the justification apart, the
+        // metadata as the console builds it; a refusal, and a row for an account that was not there.
+        seed("ACCOUNT_SUSPENDED", "USER", ada, """{"result": "SUSPENDED", "statusBefore": "ACTIVE", "deletionPending": false}""")
+        seed("ACCOUNT_UNSUSPENDED", "USER", ada, """{"result": "LIFTED", "statusBefore": "SUSPENDED", "deletionPending": false}""")
+        seed("ACCOUNT_SUSPENDED", "USER", ada, """{"result": "ALREADY_SUSPENDED", "statusBefore": "SUSPENDED"}""")
+        seed("ACCOUNT_UNSUSPENDED", "USER", ada, """{"result": "NOT_SUSPENDED", "statusBefore": "ACTIVE", "deletionPending": false}""")
+        seed("ACCOUNT_SUSPENDED", "USER", ada, """{"reportDriven": false}""")
+        val after = ExportArchives.build(jobs, jdbc, clock, ada)
+
+        // Ada's alone: other classes in this JVM (SuspensionTest) write real suspension rows to the shared database.
+        jdbc.queryForObject(
+            "SELECT count(*) FROM audit_log WHERE action IN ('ACCOUNT_SUSPENDED', 'ACCOUNT_UNSUSPENDED') AND target_id = ?",
+            Int::class.java,
+            ada.toString(),
+        ) shouldBe 5
+        json.readTree(after)["adminAccess"]["accesses"].toList().map { it["action"].asString() } shouldContainExactly
+            listOf("ACCOUNT_LOOKED_UP")
+        ExportArchives.adminAccessBytes(after) shouldBe ExportArchives.adminAccessBytes(before)
+    }
+
     // ---- helpers ----
 
     private fun member(): UUID = ExportArchives.register(mockMvc, jdbc)

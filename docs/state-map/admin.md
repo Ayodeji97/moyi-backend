@@ -35,3 +35,32 @@ stateDiagram-v2
 | `OPEN_WORDS` | a moderator or an admin decides the report | admin | dismissed, reclassified-and-upheld or upheld by a moderator or an admin (A2) | `DECIDED` | From then on no one may read its words: the rule needs an OPEN report. | test |
 | `OPEN_WORDS` | a moderator or an admin reclassifies the report to an image reason | admin | a moderator or an admin picks NON_CONSENSUAL or MINOR_SEXUAL_CONTENT (A2) | `NOT_ABOUT_WORDS` | The reason decides: an image reason is never read as words, whatever its detail. | never-run |
 | `NOT_ABOUT_WORDS` | a moderator or an admin reclassifies the report to a reason about words | admin | a report on an entry, whose detail shows it is about words (A2) | `OPEN_WORDS` | Reclassified first, then read: the one way an image-reason report's entry is ever read. | test |
+
+## An account, as an ADMIN suspending it or lifting its suspension finds it (the console, A3, ADR-0066)
+
+```mermaid
+stateDiagram-v2
+    state "no account has this id" as admin_suspension__NO_ACCOUNT
+    state "ACTIVE or PENDING_VERIFICATION, not suspended" as admin_suspension__LIVE
+    state "SUSPENDED, its span open" as admin_suspension__SUSPENDED
+    state "DELETED (or PENDING_DELETION, which nothing writes)" as admin_suspension__GONE
+    admin_suspension__LIVE --> admin_suspension__SUSPENDED: admin - an ADMIN suspends the account, with a justification and a code proved in that request (A3)
+    admin_suspension__SUSPENDED --> admin_suspension__LIVE: admin - an ADMIN lifts the account's suspension, with a justification and a new code (A3)
+    admin_suspension__SUSPENDED --> admin_suspension__GONE: system - hourly account deletion job runs
+    admin_suspension__LIVE --> admin_suspension__GONE: system - hourly account deletion job runs
+```
+
+### Happens without you
+
+| In | What happens | Who | When | Leads to | Why | Evidence |
+|---|---|---|---|---|---|---|
+| `LIVE` | an ADMIN suspends the account, with a justification and a code proved in that request (A3) | admin | outcome SUSPENDED | `SUSPENDED` | One ACCOUNT_SUSPENDED row, SUCCEEDED, the note as its justification and metadata {result, statusBefore, deletionPending}; committed with the act. The flash: "Suspended. They are signed out everywhere and cannot sign in. Their bonds are paused.", plus when a deletion the person asked for will run. Before the act, in order: the role (a MODERATOR or SUPPORT gets the 403 page and nothing is read), the id (not a UUID: the 404 page), the justification (ModerationNote: refused, the form again with 422 and no code spent) and the code (proved in this request: blank, the form asking for it; wrong or replayed, 401). Each act needs a code of its own. The answer is a 303 to the lookup with one line, never the note. | test |
+| `SUSPENDED` | an ADMIN suspends the account, with a justification and a code proved in that request (A3) | admin | outcome ALREADY_SUSPENDED | `SUSPENDED` | Nothing changes, and the attempt is still one ACCOUNT_SUSPENDED row, REFUSED, result ALREADY_SUSPENDED: a spent code with no act beside it would read as a gap. Two admins at once: the second waits on the locks and gets this. | test |
+| `SUSPENDED` | an ADMIN lifts the account's suspension, with a justification and a new code (A3) | admin | outcome LIFTED | `LIVE` | One ACCOUNT_UNSUSPENDED row, SUCCEEDED. The status the account earned (ACTIVE if verified, else PENDING_VERIFICATION); the span closes; no session comes back. The flash: "Suspension lifted. They can sign in again; their bonds take entries again now." | test |
+| `LIVE` | an ADMIN lifts the account's suspension, with a justification and a new code (A3) | admin | outcome NOT_SUSPENDED | `LIVE` | Nothing changes; one ACCOUNT_UNSUSPENDED row, REFUSED, result NOT_SUSPENDED. "This account is not suspended. Nothing changed." | test |
+| `GONE` | an ADMIN suspends the account, with a justification and a code proved in that request (A3) | admin | outcome GONE | `GONE` | A deleted account (or PENDING_DELETION, which nothing writes) cannot be suspended; one REFUSED row, result GONE. "This account was deleted. There is nothing to suspend." | test |
+| `GONE` | an ADMIN lifts the account's suspension, with a justification and a new code (A3) | admin | outcome GONE | `GONE` | The same answer for a lift: one ACCOUNT_UNSUSPENDED row, REFUSED, result GONE. | test |
+| `NO_ACCOUNT` | an ADMIN suspends the account, with a justification and a code proved in that request (A3) | admin | outcome NO_SUCH_ACCOUNT | `NO_ACCOUNT` | A well-formed id that names nobody: the admin 404 page, not a redirect, after the code has been proved and spent. One ACCOUNT_SUSPENDED row, REFUSED, with no target. | test |
+| `NO_ACCOUNT` | an ADMIN lifts the account's suspension, with a justification and a new code (A3) | admin | outcome NO_SUCH_ACCOUNT | `NO_ACCOUNT` | The same for a lift: the 404 page, one ACCOUNT_UNSUSPENDED row, REFUSED, with no target. | test |
+| `SUSPENDED` | the hourly account deletion job runs | system | a deletion the person asked for before the suspension falls due | `GONE` | A pending deletion is carried out on time, suspended or not: the right to erasure is the person's. The span outlives the erasure (dates and an anonymised id), so the partner's bond stays paused until the outbox ends it. | test |
+| `LIVE` | the hourly account deletion job runs | system | a deletion the person asked for falls due | `GONE` | The account is erased as before A3; every later suspend or lift is GONE. | never-run |

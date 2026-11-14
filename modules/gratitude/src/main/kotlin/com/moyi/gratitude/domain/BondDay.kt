@@ -227,11 +227,21 @@ internal data class BondDay(
      * not decide who reads what. A separation at the very instant it fell
      * due is too late to withhold it. A lone entry is not asked here; that is
      * the close's own rule (ADR-0033 question 1).
+     *
+     * **Or a suspension held at that instant** ([suspendedAt], admin A3 ruling
+     * 17: `BondClosingView.wasSuspendedAt`). Asked of the same instant, for the
+     * same reason: a reveal that fell due inside a span would otherwise hand
+     * the suspended member's words over the moment time passed, or the moment
+     * a run after the lift came to it. A due instant before the span began
+     * reveals as normal; one at its very start is inside it.
      */
     fun isWithheldBy(
         separatedAt: Instant?,
         revealTime: LocalTime?,
-    ): Boolean = awaitsReadingTogether && separatedAt?.isBefore(revealFallsDueAt(revealTime)) == true
+        suspendedAt: (Instant) -> Boolean = { false },
+    ): Boolean =
+        awaitsReadingTogether &&
+            (separatedAt?.isBefore(revealFallsDueAt(revealTime)) == true || suspendedAt(revealFallsDueAt(revealTime)))
 
     /**
      * The day [isWithheldBy] says is withheld, as it waits: `PENDING_REVEAL`,
@@ -279,6 +289,12 @@ internal data class BondDay(
      *   ([isWithheldBy]). Then `PENDING_REVEAL` gains [closedAt] and nothing
      *   else, and the two are never read together. It is still a day both
      *   wrote on, and counts so (`DayOutcome.of`; the owner, 2026-10-22).
+     * - Unless [paused]: some part of the day fell inside a member's
+     *   suspension (admin A3 ruling 16, `BondClosingView.wasSuspendedDuring`).
+     *   Then `OPEN` and `PARTIAL` close `SUSPENDED`, not `EMPTY`/`SOLO`: no
+     *   lone entry is unlocked, and nobody missed the day. A day both wrote on
+     *   is not changed by it: `REVEALED` stays so, and `PENDING_REVEAL` is the
+     *   withheld rule's ([isWithheldBy] with `suspendedAt`).
      * - A day revealed while it was open, and a `SUSPENDED` day, gain
      *   [closedAt] and nothing else. A suspended day is excluded from
      *   evaluation (doc 04 §8.3a), so closing it reveals nothing and counts
@@ -292,6 +308,7 @@ internal data class BondDay(
     fun close(
         now: Instant,
         withheld: Boolean = false,
+        paused: Boolean = false,
     ): BondDay {
         if (closedAt != null) return this
         require(!now.isBefore(endsAt)) { "a bond-day cannot be closed before it has ended" }
@@ -300,6 +317,10 @@ internal data class BondDay(
         ) { "a two-entry day is revealed or pending, never PARTIAL, by the time it closes" }
         val at = now.truncatedTo(ChronoUnit.MICROS)
         return when {
+            paused && (status == BondDayStatus.OPEN || status == BondDayStatus.PARTIAL) -> {
+                copy(status = BondDayStatus.SUSPENDED, closedAt = at)
+            }
+
             status == BondDayStatus.OPEN -> {
                 copy(status = BondDayStatus.EMPTY, closedAt = at)
             }

@@ -513,6 +513,11 @@ class ArchitectureTest {
                 "com.moyi.identity.api.UserAdminLookup" to "identity",
                 "com.moyi.identity.api.UserAdminView" to "identity",
                 "com.moyi.identity.api.PasswordHashing" to "identity",
+                // A3: the suspension's write port and its result types (spec §6).
+                "com.moyi.identity.api.AccountSuspension" to "identity",
+                "com.moyi.identity.api.SuspensionResult" to "identity",
+                "com.moyi.identity.api.SuspensionOutcome" to "identity",
+                "com.moyi.identity.api.AccountStatus" to "identity",
                 "com.moyi.bond.api.BondAdminLookup" to "bond",
                 "com.moyi.bond.api.BondAdminView" to "bond",
             ) + A2_MODERATION_TYPES.associateWith { it.removePrefix("com.moyi.").substringBefore('.') }
@@ -556,6 +561,64 @@ class ArchitectureTest {
             violations.isEmpty(),
             "Only the admin module (and the module declaring them) may import the admin lookups, PasswordHashing and " +
                 "the moderation ports. Found: $violations",
+        )
+    }
+
+    @Test
+    fun `only identity and bond import the account standing port in main code`() {
+        // A3 spec §6 and ruling 8: whether a member is suspended is read by `bond` alone, which
+        // derives a bond's pause from it; every other module learns of a pause from `bond`
+        // (`BondMembership.paused`, `BondClosingView`), never of a person's suspension. Tests
+        // may name the port: they build the cases. A wildcard of identity's api reaches it too.
+        val guarded = setOf("com.moyi.identity.api.AccountStanding", "com.moyi.identity.api.SuspensionSpan")
+        val allowedModules = setOf("identity", "bond")
+
+        fun importsStanding(
+            importName: String,
+            wildcard: Boolean,
+        ): Boolean =
+            if (wildcard) {
+                importName.removeSuffix(".*") == "com.moyi.identity.api"
+            } else {
+                guarded.any { importName == it || importName.startsWith("$it.") }
+            }
+
+        fun violates(
+            path: String,
+            importName: String,
+            wildcard: Boolean,
+        ): Boolean {
+            val main = Regex("^/modules/([^/]+)/src/main/").find(path)?.groupValues?.get(1)
+            val outsideModules = !path.startsWith("/modules/") && "/src/main/" in path
+            val module = main ?: if (outsideModules) "" else return false
+            return module !in allowedModules && importsStanding(importName, wildcard)
+        }
+        // Positive controls: an exact import from gratitude's main code is a violation; one from
+        // bond's main code and one from a test source are not; nor is an unrelated identity type.
+        val port = "com.moyi.identity.api.AccountStanding"
+        val gratitudeMain = "/modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt"
+        val bondMain = "/modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessAdapter.kt"
+        val gratitudeTest = "/modules/gratitude/src/test/kotlin/com/moyi/gratitude/CloseDayTest.kt"
+        assertTrue(violates(gratitudeMain, port, false), "gratitude's import was let through")
+        assertTrue(violates(gratitudeMain, "com.moyi.identity.api.SuspensionSpan", false), "the span type was let through")
+        assertTrue(violates(gratitudeMain, "com.moyi.identity.api.*", true), "a wildcard was let through")
+        assertTrue(violates("/app/src/main/kotlin/com/moyi/app/Wiring.kt", port, false), "app was let through")
+        assertTrue(!violates(bondMain, port, false), "bond's import was refused")
+        assertTrue(!violates(gratitudeTest, port, false), "a test source was refused")
+        assertTrue(!violates(gratitudeMain, "com.moyi.identity.api.UserDirectory", false), "an unrelated identity type was matched")
+        assertTrue(!violates(gratitudeMain, "com.moyi.identity.api.AccountStandingness", false), "a name sharing the prefix was matched")
+        assertTrue(project.files.isNotEmpty(), "the scope saw no files")
+        val violations =
+            project.files.flatMap { file ->
+                val path = file.normalisedProjectPath
+                file.imports
+                    .filter { violates(path, it.name, it.isWildcard) }
+                    .map { "$path: ${it.name}" }
+            }
+
+        assertTrue(
+            violations.isEmpty(),
+            "Only identity and bond may import AccountStanding or SuspensionSpan in main code (A3 spec §6). Found: $violations",
         )
     }
 
@@ -629,6 +692,40 @@ class ArchitectureTest {
         assertTrue(
             violations.isEmpty(),
             "Within modules/admin only service/ContentAccess.kt may import ReportedEntryText (A5 spec §6). Found: $violations",
+        )
+    }
+
+    @Test
+    fun `within the admin module only SuspensionConsole imports the port that suspends an account`() {
+        // A3 spec §6: `AccountSuspension` suspends and lifts an account; inside `admin` one class
+        // may hold it, the service that checks the role, the justification and the second factor
+        // and writes the audit row. A controller or a second service that held the port could
+        // suspend past all three. A wildcard import of identity's api is already refused by the
+        // rules above, so the exact import is what this sees. Tests (AdminTestApplication's fake)
+        // are not scanned.
+        val port = "com.moyi.identity.api.AccountSuspension"
+        val allowed = "/modules/admin/src/main/kotlin/com/moyi/admin/service/SuspensionConsole.kt"
+
+        fun importsPort(importName: String): Boolean = importName == port || importName.startsWith("$port.")
+        // Positive controls: the matcher is not vacuous, and does not catch the port's result types.
+        assertTrue(importsPort(port), "the port's import was not matched")
+        assertTrue(!importsPort("com.moyi.identity.api.SuspensionResult"), "the port's result type was matched")
+        assertTrue(!importsPort("com.moyi.identity.api.AccountSuspensionish"), "a name sharing the prefix was matched")
+        val adminMain = project.files.filter { it.normalisedProjectPath.startsWith("/modules/admin/src/main/") }
+        assertTrue(adminMain.isNotEmpty(), "the scope saw no admin main files")
+        assertTrue(
+            adminMain.any { it.normalisedProjectPath == allowed && it.imports.any { import -> importsPort(import.name) } },
+            "the one allowed import was not seen",
+        )
+        val violations =
+            adminMain
+                .filter { it.normalisedProjectPath != allowed }
+                .filter { file -> file.imports.any { importsPort(it.name) } }
+                .map { it.normalisedProjectPath }
+
+        assertTrue(
+            violations.isEmpty(),
+            "Within modules/admin only service/SuspensionConsole.kt may import AccountSuspension (A3 spec §6). Found: $violations",
         )
     }
 

@@ -61,8 +61,16 @@ internal data class RotatedTokens(
  * rotates it, the second is a grace retry that voids the first's successor,
  * and the family never holds two live tokens.
  *
- * The access token is minted after the commit: a signed token for a rotation
- * that rolled back would be a valid credential for nothing that happened.
+ * **The access token is minted inside the transaction, holding the sessions
+ * lock** (admin console A3, as ruling 7 did for `LoginUser`). Minted after the
+ * commit, a suspension waiting on the lock could run between the commit and
+ * the mint; its `tokens_invalid_before` (the next whole second) could then
+ * fall at or before this token's `iat`, and the suspended member would hold a
+ * valid access token for its whole lifetime. Minted under the lock, the
+ * suspension (and a reset or logout-all, which take the same lock) stamps
+ * after it. The trade-off is the one sign-in already accepts: a rotation that
+ * rolls back after the mint leaves a signed token nobody receives, because it
+ * is returned only after the commit.
  */
 @Service
 @Suppress("LongParameterList") // What a rotation touches, each named: the push tokens since ADR-0044.
@@ -112,10 +120,7 @@ internal class RotateRefreshToken(
 
         return when (outcome) {
             is Outcome.Rotated -> {
-                RotatedTokens(
-                    user = outcome.user,
-                    tokens = SessionTokens(sessions.accessTokenFor(outcome.user.id, outcome.familyId), outcome.refreshToken),
-                )
+                RotatedTokens(user = outcome.user, tokens = outcome.tokens)
             }
 
             Outcome.Reused -> {
@@ -192,7 +197,8 @@ internal class RotateRefreshToken(
                 tokens.insert(successor)
                 // FR-007: a rotation is the device being seen again.
                 previous.deviceId?.let { sessions.deviceSeen(it, now) }
-                Outcome.Rotated(user, previous.familyId, issued)
+                // Minted here, under the sessions lock: see the class KDoc.
+                Outcome.Rotated(user, SessionTokens(sessions.accessTokenFor(user.id, previous.familyId), issued))
             }
         }
     }
@@ -219,8 +225,7 @@ internal class RotateRefreshToken(
     private sealed interface Outcome {
         data class Rotated(
             val user: User,
-            val familyId: UUID,
-            val refreshToken: IssuedRefreshToken,
+            val tokens: SessionTokens,
         ) : Outcome
 
         data object Reused : Outcome

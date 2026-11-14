@@ -253,3 +253,20 @@ client inspect `errors` to tell "you typed nothing" from "you typed the wrong th
 the same reason. This is a **breaking change** for the generated client (a status moves), so the PR
 carries the `breaking-api-change` label. Everything else in decision 1 stands: the wrong password
 is not counted towards the sign-in lock, and it is counted by the five-an-hour limit.
+
+## Amendment 2026-11-13: suspension is built (ADR-0066)
+
+"Revisit when: suspension is built" has arrived. Three things follow, none of which changes a
+decision here:
+
+- **A suspension span outlives the erasure.** `account_suspensions` keeps its dates against the
+  anonymised id, as `blocks` does, and the erasure does not close an open span: closing it would
+  unpause the partner's bond between the erasure's commit and the outbox consumer that ends it
+  (ADR-0066, plan ruling 2).
+- **A pending deletion is carried out on time, suspended or not** (ADR-0066 decision 15):
+  `ExecuteAccountDeletions` does not look at status and is not changed. Whether it should wait is
+  owed to the owner.
+- **Decision 2 and Owed 3 stand: doc 04 §8.2 is still not built, and is now cheap.** A pending
+  deletion request would be a second source for the derived `paused` and for the overlap rule of
+  ADR-0066 decision 16. Pausing the partner of someone still signed in and writing is the owner's
+  product call.
