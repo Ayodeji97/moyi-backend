@@ -64,3 +64,66 @@ stateDiagram-v2
 | `NO_ACCOUNT` | an ADMIN lifts the account's suspension, with a justification and a new code (A3) | admin | outcome NO_SUCH_ACCOUNT | `NO_ACCOUNT` | The same for a lift: the 404 page, one ACCOUNT_UNSUSPENDED row, REFUSED, with no target. | test |
 | `SUSPENDED` | the hourly account deletion job runs | system | a deletion the person asked for before the suspension falls due | `GONE` | A pending deletion is carried out on time, suspended or not: the right to erasure is the person's. The span outlives the erasure (dates and an anonymised id), so the partner's bond stays paused until the outbox ends it. | test |
 | `LIVE` | the hourly account deletion job runs | system | a deletion the person asked for falls due | `GONE` | The account is erased as before A3; every later suspend or lift is GONE. | never-run |
+
+## The close job, as an ADMIN running it by hand finds it (the console, A4, ADR-0067)
+
+```mermaid
+stateDiagram-v2
+    state "its lock is free" as admin_close-run__IDLE
+    state "the timer or another instance holds close-days" as admin_close-run__LOCK_HELD
+    admin_close-run__IDLE --> admin_close-run__LOCK_HELD: system - timer, or another instance, takes the close-days lock
+    admin_close-run__LOCK_HELD --> admin_close-run__IDLE: system - run holding close-days finishes, or its lock lapses
+```
+
+### Happens without you
+
+| In | What happens | Who | When | Leads to | Why | Evidence |
+|---|---|---|---|---|---|---|
+| `IDLE` | an ADMIN runs the close job now, with a justification (A4) | admin | the lock is free | `IDLE` | The close job runs once, now, under close-days (lockAtMostFor 14 minutes, lockAtLeastFor zero), whether or not the timer is on. Before any work, while the lock is held, one JOB_RUN row, SUCCEEDED, {job: close-days, result: STARTED}, the justification as its justification, commits in its own transaction; a row that cannot be written stops the run. The answer is a 303 to /admin/jobs with "Ran: created N, closed N, revealed N, counted N, failed N." (and "More days are waiting: run it again." on a backlog). Before the act: the role (SUPPORT and MODERATOR get the 403 page) and the justification (ModerationNote: refused, the page again with 422 and no row). | test |
+| `LOCK_HELD` | an ADMIN runs the close job now, with a justification (A4) | admin | the timer or another instance holds the lock | `LOCK_HELD` | Nothing runs and no beforeRun is called; one JOB_RUN row, REFUSED, {job: close-days, result: BUSY}. The flash: "The close job is running now (the timer or another instance). Nothing was started; look again in a minute." | test |
+| `IDLE` | the timer, or another instance, takes the close-days lock | system | the quarter-hour, on any instance | `LOCK_HELD` | ShedLock's row for close-days is taken until the run ends (at least thirty seconds for the timer's runs). | test |
+| `LOCK_HELD` | the run holding close-days finishes, or its lock lapses | system | the run finishes, or lockAtMostFor lapses | `IDLE` | The lock is free again. A run by hand releases at once (lockAtLeastFor zero); a ShedLock row is never deleted, only released (ADR-0067 decision 19). | test |
+
+## A feature flag, as an ADMIN switching it finds it (the console, A4, ADR-0067)
+
+```mermaid
+stateDiagram-v2
+    state "no row on by default" as admin_flag__DEFAULT_ON
+    state "a row, enabled" as admin_flag__ON
+    state "a row, disabled its send is paused" as admin_flag__OFF
+    admin_flag__DEFAULT_ON --> admin_flag__OFF: admin - an ADMIN switches a feature flag off, with a justification (A4)
+    admin_flag__OFF --> admin_flag__ON: admin - an ADMIN switches a feature flag on, with a justification (A4)
+    admin_flag__ON --> admin_flag__OFF: admin - an ADMIN switches a feature flag off, with a justification (A4)
+```
+
+### Happens without you
+
+| In | What happens | Who | When | Leads to | Why | Evidence |
+|---|---|---|---|---|---|---|
+| `DEFAULT_ON` | an ADMIN switches a feature flag off, with a justification (A4) | admin | enabled=false | `OFF` | The flag's row is written disabled, under the flag's advisory lock, with one FEATURE_FLAG_CHANGED row, SUCCEEDED, {result: CHANGED, from: true, to: false}. The next run of its job, or the next embedding call, on every instance, sees it: no cache. The flash: "Switched off." Before the act: the role (ADMIN only; others the 403 page), the flag (unknown: the 404 page), enabled (neither true nor false: the 404 page), the justification (422). | test |
+| `DEFAULT_ON` | an ADMIN switches a feature flag on, with a justification (A4) | admin | enabled=true | `DEFAULT_ON` | Nothing is written to the flag; one FEATURE_FLAG_CHANGED row, REFUSED, {result: UNCHANGED, from: true, to: true}. The flash: "Already on. Nothing changed." | test |
+| `OFF` | an ADMIN switches a feature flag on, with a justification (A4) | admin | enabled=true | `ON` | The row is written enabled, FEATURE_FLAG_CHANGED SUCCEEDED {from: false, to: true}; its job asks again from its next run. A reminder or push that fell due while off is not sent later. | test |
+| `OFF` | an ADMIN switches a feature flag off, with a justification (A4) | admin | enabled=false | `OFF` | Nothing is written to the flag; FEATURE_FLAG_CHANGED REFUSED {result: UNCHANGED}. The flash: "Already off. Nothing changed." | test |
+| `ON` | an ADMIN switches a feature flag off, with a justification (A4) | admin | enabled=false | `OFF` | As from DEFAULT_ON: the row is updated disabled, FEATURE_FLAG_CHANGED SUCCEEDED {from: true, to: false}. | test |
+
+## A support ticket, as the support inbox finds it (the console, A4, ADR-0067)
+
+```mermaid
+stateDiagram-v2
+    state "no ticket has this id" as admin_ticket__NO_TICKET
+    state "OPEN, its words kept" as admin_ticket__OPEN
+    state "CLOSED, its words and reference deleted" as admin_ticket__CLOSED
+    admin_ticket__NO_TICKET --> admin_ticket__OPEN: system - a member sends a support message, which files a ticket
+    admin_ticket__OPEN --> admin_ticket__CLOSED: admin - a SUPPORT, MODERATOR or ADMIN closes a ticket, with a note and a code proven in the last five minutes (A4), system - sender's account is erased, which closes their open tickets
+```
+
+### Happens without you
+
+| In | What happens | Who | When | Leads to | Why | Evidence |
+|---|---|---|---|---|---|---|
+| `NO_TICKET` | a SUPPORT, MODERATOR or ADMIN opens a ticket in the support inbox (A4) | admin | the id names no ticket, or is not a UUID | `NO_TICKET` | The admin 404 page, the same bytes as any unknown page. The function writes no READ; one SUPPORT_TICKET_READ row, REFUSED, {result: NOT_FOUND} (a value that is not a UUID writes nothing). | test |
+| `NO_TICKET` | a member sends a support message, which files a ticket | system |  | `OPEN` | A member's support message (POST /api/v1/support/messages, its own rows in account.md) creates the ticket OPEN with its subject, message and reference; the inbox lists it with lengths only, never the words. | test |
+| `OPEN` | a SUPPORT, MODERATOR or ADMIN opens a ticket in the support inbox (A4) | admin |  | `OPEN` | The page shows the words, the reference, the address to answer at as identity holds it now, and whether it was confirmed. The function writes READ under admin:<id>; one SUPPORT_TICKET_READ row, SUCCEEDED. | test |
+| `OPEN` | a SUPPORT, MODERATOR or ADMIN closes a ticket, with a note and a code proven in the last five minutes (A4) | admin | a code proven in the last five minutes, and a note | `CLOSED` | The function closes it and deletes the words and reference, CLOSED log row with the note; one SUPPORT_TICKET_CLOSED row, SUCCEEDED, {result: CLOSED}. The flash: "Closed. Its words are gone." Before the act: the step-up window (stale: the form asking for a code, nothing read or written), then the note (refused: the form again, 400). | test |
+| `CLOSED` | a SUPPORT, MODERATOR or ADMIN closes a ticket, with a note and a code proven in the last five minutes (A4) | admin |  | `CLOSED` | Nothing changes; SUPPORT_TICKET_CLOSED REFUSED {result: NOT_OPEN}. The flash: "Already closed. Nothing changed." (Also the answer for an id that names no ticket: the function cannot tell.) | test |
+| `OPEN` | the sender's account is erased, which closes their open tickets | system | the sender's account deletion runs | `CLOSED` | Erasure closes the sender's open tickets and empties them (ADR-0057 decision 8); a close from the console afterwards is NOT_OPEN. | test |

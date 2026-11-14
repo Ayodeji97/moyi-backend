@@ -223,8 +223,10 @@ id (a link to the lookup form, which asks its own purpose), subject and body len
 Never the words. **`GET /admin/support/{ticketId}`**: the case; for an open ticket, the close form
 (note, and a code when the window is not fresh). **`POST /admin/support/{ticketId}/close`**
 (`SUPPORT`): A2's `Decisions.decideGated` flow (code proved first if typed; refused `401`; stale
-window: the form with the code field; note refused `400`) → `303` to the ticket's page: "Closed. Its
-words are gone." / "Already closed. Nothing changed."
+window: the form with the code field; note refused `400`) → A2's redirect (`302`, the decisions' own
+answer, not restated) to the ticket's page: "Closed. Its words are gone." / "Already closed. Nothing
+changed." An unknown ticket id closes nothing and answers "Already closed" (the function's
+`NOT_OPEN`).
 
 ## 5. Where the code lives
 
