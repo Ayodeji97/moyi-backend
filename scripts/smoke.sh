@@ -376,6 +376,11 @@
 # section's own probes: a column named job, not name; a job count read from the wrong markup; a CSRF
 # token taken from a closed ticket's page, which has no form; READ rows from the pages after a close
 # left out). Fixed, and run again on the same stack: 1918 passed, 0 failed, 0 skipped, 64 "admin A4".
+# After the review wave (a paused send never sent late; job_runs records the finish; BUSY says the
+# lock is held), from a jar of be8c26df's tree, on a fresh database at V67, the same project and
+# ports: 1917 passed, 1 failed (this section's own BUSY match, written with the apostrophe the page
+# escapes); the match fixed, on a fresh database again: 1917 passed, 0 failed, 1 skipped (the tag
+# across the erasure, the poller having won the race), 64 "admin A4".
 # The late-entries probe "the job has run since" (the ShedLock floor named under #126, and failed in
 # four recorded runs) now waits up to 60 s for the close job's next run, not 30: the lock's 30 s floor
 # plus the five-second cron put that run up to 35 s away, and the 30 one-second polls ran out first.
@@ -4617,7 +4622,7 @@ else
   adm_code "$A4_J" -X POST "$ADM/jobs/close-days/run" --data-urlencode "justification=$A4_NOTE" --data-urlencode "_csrf=$AD_CSRF"
   adm_is "admin A4: while another holds the lock, the run is a 303 too" 303 "/admin/jobs"
   m2_follow "$A4_J"
-  if [[ "$ADM_BODY" == *"The close job's lock is held"* ]]; then pass "admin A4: …saying the close job's lock is held"; else fail "admin A4: the BUSY line" "${ADM_BODY:0:300}"; fi
+  if [[ "$ADM_BODY" == *"lock is held: it is running now"* ]]; then pass "admin A4: …saying the close job's lock is held"; else fail "admin A4: the BUSY line" "${ADM_BODY:0:300}"; fi
   db_is "admin A4: …a REFUSED BUSY row" "$(sql "SELECT count(*) FROM audit_log WHERE actor_id = '$A4_ADMIN' AND action = 'JOB_RUN' AND outcome = 'REFUSED' AND metadata->>'result' = 'BUSY'")" "1"
   sql "UPDATE shedlock SET lock_until = timezone('utc', now()) WHERE name = 'close-days' AND locked_by = 'smoke-a4'" >/dev/null
   adm_code "$A4_J" "$ADM/jobs"; AD_CSRF="$(adm_csrf)"
