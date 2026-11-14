@@ -1,5 +1,6 @@
 package com.moyi.gratitude.infra
 
+import com.moyi.common.core.FeatureFlags
 import com.moyi.common.security.TokenRevocation
 import com.moyi.common.security.TokenRevocations
 import com.moyi.common.security.VerifiedEmails
@@ -131,6 +132,10 @@ internal class GratitudeTestApplication {
     /** `ai` is not scanned: the sweep, search and remember reach this stand-in, and no provider (ADR-0054). */
     @Bean
     fun fakeEmbeddingPort(): FakeEmbeddingPort = FakeEmbeddingPort()
+
+    /** `admin` owns `feature_flags` and is not in this context: every flag on (ADR-0067). */
+    @Bean
+    fun featureFlags(): FeatureFlags = FeatureFlags { true }
 
     companion object {
         /**

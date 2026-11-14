@@ -130,7 +130,9 @@ class A4PagesTest(
         val busy = rig.post(session, "/admin/jobs/close-days/run", mapOf("justification" to WHY))
 
         busy.response.status shouldBe 303
-        busy.result() shouldBe "The close job is running now (the timer or another instance). Nothing was started; look again in a minute."
+        busy.result() shouldBe
+            "The close job's lock is held: it is running now, or ran moments ago and holds its lock a little longer " +
+            "(the timer or another instance). Nothing was started; try again in a minute."
         rig.audited(rig.adminOf(session)).map { it.head + " " + it.metadata } shouldContainExactly
             listOf("""JOB_RUN|REFUSED|null {"job": "close-days", "result": "BUSY"}""")
         lastClose() shouldBe finishedBefore

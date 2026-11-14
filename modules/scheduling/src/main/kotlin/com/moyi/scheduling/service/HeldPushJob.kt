@@ -52,7 +52,7 @@ internal class HeldPushJob(
         val now = clock.instant()
         val released = held.releaseDue(now, LIMIT)
         lastSuccess.set(now.epochSecond)
-        runs.succeeded(LOCK, now)
+        runs.succeeded(LOCK)
         if (released >= LIMIT) log.warn("held pushes: released {}, and more are waiting", released)
         return released
     }

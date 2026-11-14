@@ -79,7 +79,7 @@ internal class CloseJob(
         failed.increment(result.failed.toDouble())
         lastSuccess.set(now.epochSecond)
         // The finish the admin console's jobs page shows (ADR-0067 decision 2), as the media jobs record theirs.
-        runs.succeeded(LOCK, now)
+        runs.succeeded(LOCK)
         // More days than one run takes is a backlog, and a backlog is
         // something to be told about (spec §6.4: "alert on a large backlog
         // but keep draining it"); so is a day that would not close.

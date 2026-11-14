@@ -57,7 +57,7 @@ internal class MediaDemotionJob(
         demoted.increment(total.changed.toDouble())
         lastSuccess.set(now.epochSecond)
         // Only a run that finished: what the media alarm reads (ADR-0050), where ShedLock's row says only that it began.
-        runs.succeeded(LOCK, now)
+        runs.succeeded(LOCK)
         if (total.more) log.warn("media demotion: demoted {}, and more are waiting", total.changed)
         return total.changed
     }

@@ -34,8 +34,15 @@ including what changed while it was built.
    without a line fails the build. *Cost:* none.
 2. **Every locked job records its finish in `job_runs`.** Five already did (media, deletion,
    export); the close, reminder, on-this-day, held-push, embedding and idempotency-key jobs gain the
-   one upsert. The **outbox poller is not listed**: it holds no lock and its health is its own
-   gauges. *Cost:* one upsert per run; the page cannot show the outbox's depth (owed).
+   one upsert. **The time written is the finish**, read from the clock when the job reports success
+   (`JobRuns.succeeded`); before this slice it was the run's start, which the page would have shown
+   as "last finished". "Running" is ShedLock's lock held and its `locked_at` after that finish, so a
+   lock's `lockAtLeastFor` tail after a finished run is not shown as running. That compares the
+   database's clock (`locked_at`, `usingDbTime`) with the application's (the finish): acceptable on one
+   host, where Postgres and the JVM read the same kernel clock, and display only; a skew larger than
+   a run's length would misreport the tail. A run that throws records no finish, so its tail shows as
+   running until the lock lapses. The **outbox poller is not listed**: it holds no lock and its
+   health is its own gauges. *Cost:* one upsert per run; the page cannot show the outbox's depth (owed).
 3. ✱ **"Re-run the reveal and streak jobs for a given date" is running the close job now.** The
    close job takes no date and keeps no watermark (ADR-0033): every due day, reveal and uncounted
    streak day is its work on every run, so a run "for a date" would be a second statement of which
@@ -49,7 +56,14 @@ including what changed while it was built.
    (`close-days`, `lockAtMostFor` 14 minutes, `lockAtLeastFor` zero) through ShedLock's
    `LockingTaskExecutor`; when the timer or another instance holds it the answer is `BUSY` and nothing
    runs. It runs with the timer switched off, the case it exists for. *Cost:* the run is synchronous
-   in the request; one longer than the proxy's timeout loses its page, not its work.
+   in the request; one longer than the proxy's timeout loses its page, not its work. A run by hand
+   that outlives `lockAtMostFor` (14 minutes) loses its lock to the timer, and its unlock at the end
+   can then release the timer's lock (ShedLock's unlock does not check `locked_by`), letting a third
+   run start beside the timer's. Bounded, not prevented: a run stops at a budget of days (`CloseElapsedDays`; a count of
+   work, not a time, so not proven inside fourteen minutes), and two runs closing one day meet on its
+   bond and day row locks in `CloseDay`, so a day is still closed once. The
+   answer while the lock is held says the job "is running now, or ran moments ago": a hand run in
+   the timer's thirty-second `lockAtLeastFor` tail is refused as well.
 5. ✱ **The run's audit row is written before the run, in its own transaction, while the lock is
    held** (`JobConsole.runCloseNow`'s `beforeRun`): `JOB_RUN`, `SUCCEEDED`,
    `{"job": "close-days", "result": "STARTED"}`. The run is thousands of transactions of its own, so
@@ -69,11 +83,16 @@ including what changed while it was built.
 7. **Three flags, each pausing an optional send, all on by default:** `DAILY_REMINDERS` (the
    reminder job asks for nothing), `ON_THIS_DAY_PUSHES` (the on-this-day job asks for nothing),
    `AI_EMBEDDINGS` (every call through the `ai` module's `EmbeddingPort` refuses with
-   `EmbeddingUnavailableException("switched off")` before anything leaves the process, so search is
-   keywords only, and the embedding job skips its run; nothing stored is erased, unlike ADR-0054's
-   "turning semantic search off"). A flag that could switch off writing, sign-in or the reveal would
-   be a way to break the product from a browser. *Cost:* a reminder or on-this-day push that falls due
-   while its flag is off is not sent later; a search meanwhile counts as `degraded`.
+   `EmbeddingUnavailableException("switched off")` before anything leaves the process; the search reads
+   the flag on the request's thread first and is keywords only, counted `disabled`; the embedding job
+   skips its run; nothing stored is erased, unlike ADR-0054's "turning semantic search off"). A flag
+   that could switch off writing, sign-in or the reveal would be a way to break the product from a
+   browser. **A send that falls due while its flag is off is never sent.** The reminder job looks back
+   thirty minutes and the on-this-day job an hour, so each starts its window no earlier than the
+   moment its flag was last switched on (`FeatureFlags.onSince`, the row's `updated_at`; no row, no
+   bound): otherwise the first run after a pause would send, late and at once, everything that fell
+   due in its look-back. *Cost:* those sends are lost; the two reads (on, then since when) are not one
+   statement, so a switch made between them is seen by the next run.
 8. **A flag with no row is its default; the table starts empty**, so this slice changes nothing
    until a flag is switched. **No cache**: every job run and every embedding call reads the row, so a
    switch is seen next on every instance. *Cost:* one primary-key read per run and per call.
@@ -87,7 +106,8 @@ including what changed while it was built.
     *Cost:* a hijacked `ADMIN` session can pause reminders without a code; the allowlist and the
     two-factor sign-in bound it.
 11. **The table is `admin`'s (V67), written only by `admin.infra.FeatureFlagStore`** (an
-    `ArchitectureTest` rule); reading goes through `common.core.FeatureFlags` and the closed
+    `ArchitectureTest` rule, which reads Kotlin sources only: a write from a migration, a PL/pgSQL
+    function, a script or a JPA mapping is not seen by it, and none exists); reading goes through `common.core.FeatureFlags` and the closed
     `FeatureFlag` enum, so `scheduling` and `ai` read a flag without depending on `admin`, which now
     depends on `scheduling`. The store is a persistence bean, present with the console off, so the
     media worker and a console-off production read the same table (`FeatureFlagsWiringTest`).
@@ -132,7 +152,8 @@ including what changed while it was built.
     remembers the lock names it has inserted and only `UPDATE`s their rows afterwards, so a deleted
     row is a lock that instance can never take again until it restarts, and the job silently stops
     running. A held lock is released by `UPDATE shedlock SET lock_until = timezone('utc', now())`;
-    the runbook says so. (Every test here releases, never deletes.)
+    the runbook says so. (Every test here releases, never deletes, but one: `JobConsoleTest`'s "never run" case needs a
+    job with no row, and puts the row back in a `finally` while nothing can take that lock.)
 20. **The manual run's lock is configured at ShedLock's clock** (`ClockProvider`), as its annotation
     path is, not at the application's `Clock`. The lock's instants are the database's either way
     (`usingDbTime`).

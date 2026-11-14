@@ -72,15 +72,15 @@ internal class ReminderJob(
     fun remindOnce(): ReminderRun {
         val now = clock.instant()
         // Switched off by an ADMIN (FR-115, ADR-0067 decision 7): nobody is asked about. A reminder that
-        // falls due meanwhile is not sent later, since a run looks back only [LOOKBACK]. Still a run that
-        // finished: a pause is not a stopped job, and the flags page says the flag is off.
+        // falls due meanwhile is never sent: once on, the window starts no earlier than the switch
+        // ([windowStart]). Still a run that finished: a pause is not a stopped job.
         if (!flags.isOn(FeatureFlag.DAILY_REMINDERS)) {
             log.debug("reminders: switched off")
             finished(now)
             return ReminderRun(due = 0, requested = 0, alreadyWritten = 0, failed = 0)
         }
         val upTo = windowEndingBefore(now)
-        val run = reminders.remindDue(upTo.minus(LOOKBACK), upTo)
+        val run = reminders.remindDue(windowStart(upTo, LOOKBACK, flags.onSince(FeatureFlag.DAILY_REMINDERS)), upTo)
         requested.increment(run.requested.toDouble())
         finished(now)
         if (run.failed > 0) {
@@ -94,7 +94,7 @@ internal class ReminderJob(
 
     private fun finished(now: Instant) {
         lastSuccess.set(now.epochSecond)
-        runs.succeeded(LOCK, now)
+        runs.succeeded(LOCK)
     }
 
     internal companion object {

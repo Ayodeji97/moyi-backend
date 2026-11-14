@@ -61,6 +61,10 @@ internal class JobConsoleTest(
 
     @Test
     fun `a job never run shows nothing, and the schedule is the configured one`() {
+        // The one deleted ShedLock row in these tests, against ADR-0067 decision 19, and safe only as
+        // written: "never run" is a state with no row, the timer is off in this context and nothing
+        // takes this lock between the delete and the `finally`, which puts the row back as it was. A
+        // ShedLock that had cached the name then finds its row to UPDATE again.
         val rows = jdbc.queryForList("SELECT * FROM shedlock WHERE name = ?", MediaDemotionJob.LOCK)
         jdbc.update("DELETE FROM shedlock WHERE name = ?", MediaDemotionJob.LOCK)
         try {

@@ -70,6 +70,18 @@ internal class FeatureFlagStoreTest(
     }
 
     @Test
+    fun `onSince is when a flag on now was last switched on, and null with no row or with the flag off`() {
+        store.onSince(FeatureFlag.DAILY_REMINDERS) shouldBe null
+        val off = Instant.parse("2026-11-14T09:00:00Z")
+        val on = Instant.parse("2026-11-14T10:00:00Z")
+        transactions.executeWithoutResult { store.write(FeatureFlag.DAILY_REMINDERS, false, off, admin) }
+        store.onSince(FeatureFlag.DAILY_REMINDERS) shouldBe null
+        transactions.executeWithoutResult { store.write(FeatureFlag.DAILY_REMINDERS, true, on, admin) }
+        store.onSince(FeatureFlag.DAILY_REMINDERS) shouldBe on
+        store.onSince(FeatureFlag.ON_THIS_DAY_PUSHES) shouldBe null
+    }
+
+    @Test
     fun `the lock and the write join a transaction or refuse to run`() {
         shouldThrow<IllegalTransactionStateException> { store.lockAndRead(FeatureFlag.AI_EMBEDDINGS) }
         shouldThrow<IllegalTransactionStateException> { store.write(FeatureFlag.AI_EMBEDDINGS, false, Instant.now(), admin) }

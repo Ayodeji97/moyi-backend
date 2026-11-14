@@ -69,14 +69,15 @@ internal class OnThisDayJob(
     fun pushOnce(): OnThisDayRun {
         val now = clock.instant()
         // Switched off by an ADMIN (FR-115, ADR-0067 decision 7): nobody is asked about, and a push that
-        // falls due meanwhile is not sent later. Still a run that finished: a pause is not a stopped job.
+        // falls due meanwhile is never sent: once on, the window starts no earlier than the switch
+        // ([windowStart]). Still a run that finished: a pause is not a stopped job.
         if (!flags.isOn(FeatureFlag.ON_THIS_DAY_PUSHES)) {
             log.debug("on this day: switched off")
             finished(now)
             return OnThisDayRun(due = 0, requested = 0, nothingToRemember = 0, failed = 0)
         }
         val upTo = windowEndingBefore(now)
-        val run = pushes.pushDue(upTo.minus(LOOKBACK), upTo)
+        val run = pushes.pushDue(windowStart(upTo, LOOKBACK, flags.onSince(FeatureFlag.ON_THIS_DAY_PUSHES)), upTo)
         requested.increment(run.requested.toDouble())
         finished(now)
         if (run.failed > 0) {
@@ -96,7 +97,7 @@ internal class OnThisDayJob(
 
     private fun finished(now: Instant) {
         lastSuccess.set(now.epochSecond)
-        runs.succeeded(LOCK, now)
+        runs.succeeded(LOCK)
     }
 
     internal companion object {

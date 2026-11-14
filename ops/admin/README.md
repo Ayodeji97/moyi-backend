@@ -256,7 +256,8 @@ an `ADMIN` only.
    and press the button. No code is asked: the run does only what the timer does every fifteen
    minutes and is safe to repeat.
 2. It runs under the timer's own lock. If the timer or another instance holds it, nothing runs and
-   the page says "The close job is running now …": look again in a minute. Otherwise it runs in the
+   the page says "The close job's lock is held …": it is running, or ran moments ago and keeps its
+   lock for up to thirty seconds more. Try again in a minute. Otherwise it runs in the
    request and the page says what it did ("Ran: created N, closed N, revealed N, counted N, failed
    N."); "More days are waiting" means it stopped at its budget, so run it again.
 3. One `JOB_RUN` audit row is written **before** the run (`result: STARTED`, or `BUSY`, `REFUSED`).

@@ -95,21 +95,34 @@ internal class SchedulingTestApplication {
 
 /**
  * The flags as a test sets them: `admin` owns the table and is not in this context. Every flag is
- * its default until [off] is called; [reset] puts them back.
+ * its default, never switched, until [off] or [onAt] is called; [reset] puts them back.
  */
 internal class SettableFlags : FeatureFlags {
     private val off =
         java.util.concurrent.ConcurrentHashMap
             .newKeySet<FeatureFlag>()
+    private val since = java.util.concurrent.ConcurrentHashMap<FeatureFlag, Instant>()
 
     override fun isOn(flag: FeatureFlag): Boolean = flag !in off && flag.defaultOn
+
+    override fun onSince(flag: FeatureFlag): Instant? = if (isOn(flag)) since[flag] else null
 
     fun off(flag: FeatureFlag) {
         off += flag
     }
 
+    /** Switched on again at [at], as the console would record it. */
+    fun onAt(
+        flag: FeatureFlag,
+        at: Instant,
+    ) {
+        off -= flag
+        since[flag] = at
+    }
+
     fun reset() {
         off.clear()
+        since.clear()
     }
 }
 

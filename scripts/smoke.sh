@@ -4617,7 +4617,7 @@ else
   adm_code "$A4_J" -X POST "$ADM/jobs/close-days/run" --data-urlencode "justification=$A4_NOTE" --data-urlencode "_csrf=$AD_CSRF"
   adm_is "admin A4: while another holds the lock, the run is a 303 too" 303 "/admin/jobs"
   m2_follow "$A4_J"
-  if [[ "$ADM_BODY" == *"The close job is running now"* ]]; then pass "admin A4: …saying the close job is running now"; else fail "admin A4: the BUSY line" "${ADM_BODY:0:300}"; fi
+  if [[ "$ADM_BODY" == *"The close job's lock is held"* ]]; then pass "admin A4: …saying the close job's lock is held"; else fail "admin A4: the BUSY line" "${ADM_BODY:0:300}"; fi
   db_is "admin A4: …a REFUSED BUSY row" "$(sql "SELECT count(*) FROM audit_log WHERE actor_id = '$A4_ADMIN' AND action = 'JOB_RUN' AND outcome = 'REFUSED' AND metadata->>'result' = 'BUSY'")" "1"
   sql "UPDATE shedlock SET lock_until = timezone('utc', now()) WHERE name = 'close-days' AND locked_by = 'smoke-a4'" >/dev/null
   adm_code "$A4_J" "$ADM/jobs"; AD_CSRF="$(adm_csrf)"

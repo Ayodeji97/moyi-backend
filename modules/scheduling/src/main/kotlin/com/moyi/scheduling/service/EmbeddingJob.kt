@@ -78,7 +78,7 @@ internal class EmbeddingJob(
 
     private fun finished(now: Instant) {
         lastSuccess.set(now.epochSecond)
-        runs.succeeded(LOCK, now)
+        runs.succeeded(LOCK)
     }
 
     internal companion object {

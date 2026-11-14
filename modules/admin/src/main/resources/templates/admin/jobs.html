@@ -13,7 +13,7 @@
     <p id="timer" th:text="${timerOn} ? 'The timer runs these jobs on this instance.' : 'The timer is off on this instance: nothing runs here unless run by hand.'">Timer.</p>
     <table id="jobs">
         <thead>
-        <tr><th>Job</th><th>What it does</th><th>Schedule</th><th>Last started</th><th>Locked until</th><th>Last finished</th><th>Running</th></tr>
+        <tr><th>Job</th><th>What it does</th><th>Schedule</th><th>Last started</th><th>Locked until</th><th>Last finished without error</th><th>Running</th></tr>
         </thead>
         <tbody>
         <tr th:each="job : ${jobs}" th:attr="data-job=${job.name}">

@@ -3,6 +3,7 @@ package com.moyi.scheduling.infra
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Repository
 import java.sql.Timestamp
+import java.time.Clock
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
@@ -10,15 +11,19 @@ import java.time.temporal.ChronoUnit
  * `job_runs` (V35): when each job last finished a run without throwing. What
  * an alarm reads to tell a job that runs from one that only starts (ADR-0050;
  * ShedLock's own row is taken before the work, so it cannot tell).
+ *
+ * **The time written is the finish**, read from the clock when the job reports success, not the
+ * run's start: the jobs page shows it as "last finished", and tells a run in progress from a lock's
+ * `lockAtLeastFor` tail by comparing it with ShedLock's `locked_at` (ADR-0067 decision 2).
  */
 @Repository
 internal class JobRuns(
     private val jdbc: JdbcTemplate,
+    private val clock: Clock,
 ) {
-    fun succeeded(
-        job: String,
-        at: Instant,
-    ) {
+    /** The job finished a run without throwing, now. Call it last, after the run's work. */
+    fun succeeded(job: String) {
+        val at = clock.instant()
         jdbc.update(
             "INSERT INTO job_runs (name, last_success_at) VALUES (?, ?) " +
                 "ON CONFLICT (name) DO UPDATE SET last_success_at = EXCLUDED.last_success_at",

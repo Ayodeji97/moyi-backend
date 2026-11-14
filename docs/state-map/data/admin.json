@@ -371,7 +371,7 @@
     "to": "LOCK_HELD",
     "status": null,
     "code": null,
-    "reason": "Nothing runs and no beforeRun is called; one JOB_RUN row, REFUSED, {job: close-days, result: BUSY}. The flash: \"The close job is running now (the timer or another instance). Nothing was started; look again in a minute.\"",
+    "reason": "Nothing runs and no beforeRun is called; one JOB_RUN row, REFUSED, {job: close-days, result: BUSY}. The flash: \"The close job's lock is held: it is running now, or ran moments ago and holds its lock a little longer (the timer or another instance). Nothing was started; try again in a minute.\"",
     "rule": "ADR-0067 decision 4",
     "evidence": "test",
     "evidenceRef": "A4PagesTest#while the close job's lock is held the run is BUSY, a REFUSED row, and nothing runs",

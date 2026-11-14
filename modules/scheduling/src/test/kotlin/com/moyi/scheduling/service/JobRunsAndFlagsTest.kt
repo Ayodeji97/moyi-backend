@@ -113,6 +113,54 @@ internal class JobRunsAndFlagsTest(
     }
 
     @Test
+    fun `a reminder that fell due while DAILY_REMINDERS was off is never asked for once it is on, and one due after is`() {
+        // Off from 09:40; at 10:02:30 switched on again. Without the bound, the 10:05:30 run would ask
+        // about (09:35, 10:05] and send, late and at once, every reminder the pause held back.
+        clock.set(Instant.parse("2026-11-14T09:40:30Z"))
+        flags.off(FeatureFlag.DAILY_REMINDERS)
+        reminders.remindOnce()
+        flags.onAt(FeatureFlag.DAILY_REMINDERS, Instant.parse("2026-11-14T10:02:30Z"))
+        clock.set(Instant.parse("2026-11-14T10:05:30Z"))
+
+        reminders.remindOnce()
+
+        recordedReminders.windows shouldBe
+            listOf(Instant.parse("2026-11-14T10:02:30Z") to Instant.parse("2026-11-14T10:05:00Z"))
+        // Half an hour on, the bound has passed out of the window: the usual six windows again.
+        clock.set(Instant.parse("2026-11-14T10:40:30Z"))
+        reminders.remindOnce()
+        recordedReminders.windows.last() shouldBe
+            (Instant.parse("2026-11-14T10:10:00Z") to Instant.parse("2026-11-14T10:40:00Z"))
+    }
+
+    @Test
+    fun `an on-this-day push that fell due while its flag was off is never asked for once it is on`() {
+        clock.set(Instant.parse("2026-11-14T09:20:30Z"))
+        flags.off(FeatureFlag.ON_THIS_DAY_PUSHES)
+        onThisDay.pushOnce()
+        flags.onAt(FeatureFlag.ON_THIS_DAY_PUSHES, Instant.parse("2026-11-14T10:01:00Z"))
+        // Its window is an hour, not the reminder's half hour: unbounded, the 10:15:45 run would ask
+        // about (09:15, 10:15].
+        clock.set(Instant.parse("2026-11-14T10:15:45Z"))
+
+        onThisDay.pushOnce()
+
+        recordedOnThisDay.windows.single() shouldBe
+            (Instant.parse("2026-11-14T10:01:00Z") to Instant.parse("2026-11-14T10:15:00Z"))
+    }
+
+    @Test
+    fun `the window starts at the switch only inside the look-back, and never after its own end`() {
+        val upTo = Instant.parse("2026-11-14T10:05:00Z")
+        val lookback = java.time.Duration.ofMinutes(30)
+
+        windowStart(upTo, lookback, null) shouldBe Instant.parse("2026-11-14T09:35:00Z")
+        windowStart(upTo, lookback, Instant.parse("2026-11-14T09:00:00Z")) shouldBe Instant.parse("2026-11-14T09:35:00Z")
+        windowStart(upTo, lookback, Instant.parse("2026-11-14T09:50:00Z")) shouldBe Instant.parse("2026-11-14T09:50:00Z")
+        windowStart(upTo, lookback, Instant.parse("2026-11-14T10:07:00Z")) shouldBe upTo
+    }
+
+    @Test
     fun `with AI_EMBEDDINGS off the sweep is not asked, and on again it is`() {
         flags.off(FeatureFlag.AI_EMBEDDINGS)
 

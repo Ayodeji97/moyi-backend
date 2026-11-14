@@ -38,6 +38,19 @@ internal class FeatureFlagStore(
             .optional()
             .orElse(flag.defaultOn)
 
+    /**
+     * The `updated_at` of a row that has the flag on: the moment it was last switched on, since a
+     * write that would not change the value is never made (ADR-0067 decision 10). `null` with no row
+     * (on by default, since forever) or with the flag off.
+     */
+    override fun onSince(flag: FeatureFlag): Instant? =
+        jdbc
+            .sql("SELECT updated_at FROM feature_flags WHERE key = :key AND enabled")
+            .param("key", flag.name)
+            .query { rs, _ -> rs.getTimestamp(1).toInstant() }
+            .optional()
+            .orElse(null)
+
     /** Every flag, in [FeatureFlag]'s order, with its row's facts when it has one. */
     fun states(): List<FlagState> {
         val rows =

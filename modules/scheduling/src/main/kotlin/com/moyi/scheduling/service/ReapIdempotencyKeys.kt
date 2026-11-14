@@ -35,7 +35,7 @@ internal class ReapIdempotencyKeys(
         val now = clock.instant()
         val removed = keys.deleteAllExpired(now)
         if (removed > 0) log.info("idempotency: {} expired keys removed", removed)
-        runs.succeeded(LOCK, now)
+        runs.succeeded(LOCK)
         return removed
     }
 

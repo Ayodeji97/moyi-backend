@@ -117,15 +117,20 @@ Each: the decision; why; what it costs if wrong. ✱ marks a departure from the 
    - `DAILY_REMINDERS` — the reminder job asks for no reminder while off.
    - `ON_THIS_DAY_PUSHES` — the on-this-day job asks for no push while off.
    - `AI_EMBEDDINGS` — no text is sent to the embedding provider while off: every call through the
-     `ai` module's `EmbeddingPort` refuses (`EmbeddingUnavailableException("switched off")`), so a
-     search is keywords only (ADR-0054's existing degraded path) and the embedding job skips its run.
+     `ai` module's `EmbeddingPort` refuses (`EmbeddingUnavailableException("switched off")`), the
+     search reads the flag on the request's thread before calling it (so it is keywords only, counted
+     `disabled`) and the embedding job skips its run.
      Nothing stored is erased: switching back on resumes where it was (ADR-0054's "turning semantic
      search off" erases; this flag does not, and is not that).
    Each pauses a send to a person or a third party, and each "off" is a state the code already has.
    A flag that switched off writing, signing in or the reveal would be a way to break the product
    from a browser. *Cost:* a reminder or on-this-day push that falls due while its flag is off is
-   **not sent later** (their jobs look back thirty minutes, by design: ADR-0045, ADR-0046); a search
-   while `AI_EMBEDDINGS` is off counts as `degraded`, not `disabled`, in `gratitude.search.semantic`.
+   **never sent**. Their jobs look back (the reminder thirty minutes, ADR-0045; on-this-day an hour,
+   ADR-0046), so once the flag is on again each window starts no earlier than the moment it was
+   switched on (`FeatureFlags.onSince`, the row's `updated_at`): what the pause held back is not sent,
+   late and at once, by the first run after it. *(Amended in the review wave: the first build let the
+   look-back send them.)* A search while `AI_EMBEDDINGS` is off counts as `disabled` in
+   `gratitude.search.semantic`.
 8. **A flag with no row is its default; the table starts empty.** V67 inserts nothing, so this
    slice changes no behaviour until someone switches a flag. Every read goes to Postgres, **no
    cache**: a change is seen by the next run or call on every instance (a job reads its flag at the
@@ -208,7 +213,7 @@ days are waiting: run it again." on a backlog) or "The close job is running now 
 instance). Nothing was started; look again in a minute."
 
 **`POST /admin/jobs/streak/recalculate`** (`ADMIN`): role → bond id (not a UUID: the form again,
-`422`, "Not a bond id") → note → `JobsConsole.recalculate` in one transaction → `303` to
+`422`, "Not a bond id") → note → `JobsConsole.rebuild` in one transaction → `303` to
 `/admin/jobs` with "Rebuilt: the stored streak had drifted; it is now current N, longest N." /
 "Rebuilt: nothing had drifted." / "That bond has no counted day: nothing to rebuild."
 

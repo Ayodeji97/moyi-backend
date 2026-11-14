@@ -147,7 +147,9 @@ internal class JobsController(
         const val NOT_A_DATE = "Not a date. Use YYYY-MM-DD."
         const val NOT_A_BOND = "Not a bond id."
         val NOTE_REFUSED = DecisionForm.Wording.JUSTIFICATION.noteRefused
-        const val BUSY = "The close job is running now (the timer or another instance). Nothing was started; look again in a minute."
+        const val BUSY =
+            "The close job's lock is held: it is running now, or ran moments ago and holds its lock a little longer " +
+                "(the timer or another instance). Nothing was started; try again in a minute."
         const val BACKLOG = " More days are waiting: run it again."
         const val UNCHANGED = "Rebuilt: nothing had drifted."
         const val NO_DAYS = "That bond has no counted day: nothing to rebuild."
