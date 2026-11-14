@@ -353,7 +353,10 @@
 # fresh database that applied 60 migrations to V66, against its own compose project (moyi-a3s:
 # Postgres 55733, Valkey 56733, MinIO 57733), the jar booted by hand (local profile, the five crons
 # at */5, ports 18733/18734) and --attach: 1849 passed, 0 failed, 0 skipped, 38 "admin A3" checks
-# among them.
+# among them. Run again on 2026-11-14 after the final review's fix wave (refresh mints under the
+# sessions lock; a reset link or code from before a suspension refused; no resend mail; the V65
+# guard), from a jar of 64630af3's tree, on a fresh database that applied 60 migrations to V66,
+# the same compose project and ports: 1849 passed, 0 failed, 0 skipped, the same 38 "admin A3".
 # The late-entries probe "the job has run since" (the ShedLock floor named under #126, and failed in
 # four recorded runs) now waits up to 60 s for the close job's next run, not 30: the lock's 30 s floor
 # plus the five-second cron put that run up to 35 s away, and the 30 one-second polls ran out first.
