@@ -57,7 +57,7 @@ internal class CloseElapsedDays(
         // are written by the same threshold, or a day nobody had opened yet
         // would be written closed `EMPTY` under a late entry meant for it.
         // A reveal falls due at `now` itself, grace or none.
-        val endedAsOf = grace.closesDaysEndedBy(now).minus(DayCloser.SETTLE_MARGIN)
+        val endedAsOf = settledBy(grace, now)
         // Step 1 before step 2 (spec §6.4): a day written here is written
         // closed, so the sweep below has nothing more to do to it.
         val created = missingDays.create(now, endedAsOf, DayCloser.MAX_CREATED_PER_RUN)
@@ -132,8 +132,18 @@ internal class CloseElapsedDays(
         }
     }
 
-    private companion object {
+    internal companion object {
         /** Rows read per query. Small enough that a page is never a long-held result set. */
-        const val PAGE = 200
+        private const val PAGE = 200
+
+        /**
+         * The close job settles, at [now], only days that had ended by this instant: their late-entry
+         * grace run out ([LateEntryGrace.closesDaysEndedBy]) and a minute more (`DayCloser.SETTLE_MARGIN`).
+         * Written once, here: the admin console's date check reads by it too (`DaySettlementService`).
+         */
+        fun settledBy(
+            grace: LateEntryGrace,
+            now: Instant,
+        ): Instant = grace.closesDaysEndedBy(now).minus(DayCloser.SETTLE_MARGIN)
     }
 }
