@@ -2,6 +2,7 @@ package com.moyi.scheduling.service
 
 import com.moyi.common.core.FeatureFlag
 import com.moyi.common.core.FeatureFlags
+import com.moyi.common.core.FlagReading
 import com.moyi.gratitude.api.OnThisDayPushes
 import com.moyi.gratitude.api.OnThisDayRun
 import com.moyi.scheduling.infra.JobRuns
@@ -71,13 +72,17 @@ internal class OnThisDayJob(
         // Switched off by an ADMIN (FR-115, ADR-0067 decision 7): nobody is asked about, and a push that
         // falls due meanwhile is never sent: once on, the window starts no earlier than the switch
         // ([windowStart]). Still a run that finished: a pause is not a stopped job.
-        if (!flags.isOn(FeatureFlag.ON_THIS_DAY_PUSHES)) {
-            log.debug("on this day: switched off")
+        val flag = flags.read(FeatureFlag.ON_THIS_DAY_PUSHES)
+        val upTo = windowEndingBefore(now)
+        // Off, or switched on since the last boundary (an empty window): nobody is asked about, and
+        // it is still a run that finished.
+        val after = (flag as? FlagReading.On)?.let { windowStart(upTo, LOOKBACK, it.since) }
+        if (after == null) {
+            if (flag == FlagReading.Off) log.debug("on this day: switched off")
             finished(now)
             return OnThisDayRun(due = 0, requested = 0, nothingToRemember = 0, failed = 0)
         }
-        val upTo = windowEndingBefore(now)
-        val run = pushes.pushDue(windowStart(upTo, LOOKBACK, flags.onSince(FeatureFlag.ON_THIS_DAY_PUSHES)), upTo)
+        val run = pushes.pushDue(after, upTo)
         requested.increment(run.requested.toDouble())
         finished(now)
         if (run.failed > 0) {

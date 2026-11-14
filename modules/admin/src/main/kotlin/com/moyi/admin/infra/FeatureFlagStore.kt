@@ -2,6 +2,7 @@ package com.moyi.admin.infra
 
 import com.moyi.common.core.FeatureFlag
 import com.moyi.common.core.FeatureFlags
+import com.moyi.common.core.FlagReading
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.stereotype.Component
@@ -39,17 +40,18 @@ internal class FeatureFlagStore(
             .orElse(flag.defaultOn)
 
     /**
-     * The `updated_at` of a row that has the flag on: the moment it was last switched on, since a
-     * write that would not change the value is never made (ADR-0067 decision 10). `null` with no row
-     * (on by default, since forever) or with the flag off.
+     * The value and, when on, the row's `updated_at`, in one statement: the moment it was last switched
+     * on, since a write that would not change the value is never made (ADR-0067 decision 10). No row:
+     * the default, with no `since`.
      */
-    override fun onSince(flag: FeatureFlag): Instant? =
+    override fun read(flag: FeatureFlag): FlagReading =
         jdbc
-            .sql("SELECT updated_at FROM feature_flags WHERE key = :key AND enabled")
+            .sql("SELECT enabled, updated_at FROM feature_flags WHERE key = :key")
             .param("key", flag.name)
-            .query { rs, _ -> rs.getTimestamp(1).toInstant() }
-            .optional()
-            .orElse(null)
+            .query { rs, _ ->
+                if (rs.getBoolean("enabled")) FlagReading.On(rs.getTimestamp("updated_at").toInstant()) else FlagReading.Off
+            }.optional()
+            .orElse(if (flag.defaultOn) FlagReading.On(since = null) else FlagReading.Off)
 
     /** Every flag, in [FeatureFlag]'s order, with its row's facts when it has one. */
     fun states(): List<FlagState> {

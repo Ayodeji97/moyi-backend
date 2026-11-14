@@ -150,14 +150,15 @@ internal class JobRunsAndFlagsTest(
     }
 
     @Test
-    fun `the window starts at the switch only inside the look-back, and never after its own end`() {
+    fun `the window starts at the switch only inside the look-back, and is empty when the switch is at or after its end`() {
         val upTo = Instant.parse("2026-11-14T10:05:00Z")
         val lookback = java.time.Duration.ofMinutes(30)
 
         windowStart(upTo, lookback, null) shouldBe Instant.parse("2026-11-14T09:35:00Z")
         windowStart(upTo, lookback, Instant.parse("2026-11-14T09:00:00Z")) shouldBe Instant.parse("2026-11-14T09:35:00Z")
         windowStart(upTo, lookback, Instant.parse("2026-11-14T09:50:00Z")) shouldBe Instant.parse("2026-11-14T09:50:00Z")
-        windowStart(upTo, lookback, Instant.parse("2026-11-14T10:07:00Z")) shouldBe upTo
+        windowStart(upTo, lookback, upTo) shouldBe null
+        windowStart(upTo, lookback, Instant.parse("2026-11-14T10:05:10Z")) shouldBe null
     }
 
     @Test

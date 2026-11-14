@@ -2,6 +2,7 @@ package com.moyi.scheduling.infra
 
 import com.moyi.common.core.FeatureFlag
 import com.moyi.common.core.FeatureFlags
+import com.moyi.common.core.FlagReading
 import com.moyi.common.core.IdGenerator
 import com.moyi.common.core.SystemIdGenerator
 import com.moyi.common.events.EventConsumer
@@ -105,7 +106,7 @@ internal class SettableFlags : FeatureFlags {
 
     override fun isOn(flag: FeatureFlag): Boolean = flag !in off && flag.defaultOn
 
-    override fun onSince(flag: FeatureFlag): Instant? = if (isOn(flag)) since[flag] else null
+    override fun read(flag: FeatureFlag): FlagReading = if (isOn(flag)) FlagReading.On(since[flag]) else FlagReading.Off
 
     fun off(flag: FeatureFlag) {
         off += flag

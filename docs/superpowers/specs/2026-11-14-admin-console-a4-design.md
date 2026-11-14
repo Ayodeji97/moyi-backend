@@ -127,7 +127,8 @@ Each: the decision; why; what it costs if wrong. ✱ marks a departure from the 
    from a browser. *Cost:* a reminder or on-this-day push that falls due while its flag is off is
    **never sent**. Their jobs look back (the reminder thirty minutes, ADR-0045; on-this-day an hour,
    ADR-0046), so once the flag is on again each window starts no earlier than the moment it was
-   switched on (`FeatureFlags.onSince`, the row's `updated_at`): what the pause held back is not sent,
+   switched on (`FeatureFlags.read`, one statement for the value and the row's `updated_at`; switched
+   on at or after the run's last boundary, the window is empty and the run asks nobody): what the pause held back is not sent,
    late and at once, by the first run after it. *(Amended in the review wave: the first build let the
    look-back send them.)* A search while `AI_EMBEDDINGS` is off counts as `disabled` in
    `gratitude.search.semantic`.

@@ -1,6 +1,7 @@
 package com.moyi.admin.infra
 
 import com.moyi.common.core.FeatureFlag
+import com.moyi.common.core.FlagReading
 import com.moyi.common.testing.IntegrationTest
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
@@ -70,15 +71,15 @@ internal class FeatureFlagStoreTest(
     }
 
     @Test
-    fun `onSince is when a flag on now was last switched on, and null with no row or with the flag off`() {
-        store.onSince(FeatureFlag.DAILY_REMINDERS) shouldBe null
+    fun `one read says off, or on and since when it was switched on, and no row is on since forever`() {
+        store.read(FeatureFlag.DAILY_REMINDERS) shouldBe FlagReading.On(since = null)
         val off = Instant.parse("2026-11-14T09:00:00Z")
         val on = Instant.parse("2026-11-14T10:00:00Z")
         transactions.executeWithoutResult { store.write(FeatureFlag.DAILY_REMINDERS, false, off, admin) }
-        store.onSince(FeatureFlag.DAILY_REMINDERS) shouldBe null
+        store.read(FeatureFlag.DAILY_REMINDERS) shouldBe FlagReading.Off
         transactions.executeWithoutResult { store.write(FeatureFlag.DAILY_REMINDERS, true, on, admin) }
-        store.onSince(FeatureFlag.DAILY_REMINDERS) shouldBe on
-        store.onSince(FeatureFlag.ON_THIS_DAY_PUSHES) shouldBe null
+        store.read(FeatureFlag.DAILY_REMINDERS) shouldBe FlagReading.On(since = on)
+        store.read(FeatureFlag.ON_THIS_DAY_PUSHES) shouldBe FlagReading.On(since = null)
     }
 
     @Test

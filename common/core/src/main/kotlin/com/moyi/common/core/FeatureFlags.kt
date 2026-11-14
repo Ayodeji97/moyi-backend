@@ -20,7 +20,7 @@ enum class FeatureFlag(
 ) {
     /**
      * `ReminderJob` asks for no daily reminder while off. One that falls due meanwhile is never sent: once
-     * on, the job looks back no further than [FeatureFlags.onSince].
+     * on, the job looks back no further than [FlagReading.On.since].
      */
     DAILY_REMINDERS(
         true,
@@ -29,7 +29,7 @@ enum class FeatureFlag(
 
     /**
      * `OnThisDayJob` asks for no on-this-day push while off. One that falls due meanwhile is never sent: once
-     * on, the job looks back no further than [FeatureFlags.onSince].
+     * on, the job looks back no further than [FlagReading.On.since].
      */
     ON_THIS_DAY_PUSHES(
         true,
@@ -55,11 +55,21 @@ fun interface FeatureFlags {
     fun isOn(flag: FeatureFlag): Boolean
 
     /**
-     * When the flag was last switched on, if it is on now and has ever been switched; `null` when it
-     * has never been switched (on since forever, by its default), or is off. A job that sends what
-     * fell due in a window looking back starts its window no earlier than this, so a send that fell
-     * due while the flag was off is never sent once it is on again (ADR-0067 decision 7). A store
-     * with no history, as a test's, has nothing to say and answers `null`.
+     * The flag in one read: off, or on since the moment it was last switched on. A job that sends what
+     * fell due in a window looking back reads this once, and starts its window no earlier than
+     * [FlagReading.On.since], so a send that fell due while the flag was off is never sent once it is on
+     * again (ADR-0067 decision 7). One read, so a switch cannot fall between "is it on" and "since
+     * when". A store with no history, as a test's, answers from [isOn] with no `since`.
      */
-    fun onSince(flag: FeatureFlag): Instant? = null
+    fun read(flag: FeatureFlag): FlagReading = if (isOn(flag)) FlagReading.On(since = null) else FlagReading.Off
+}
+
+/** A flag as one read found it. */
+sealed interface FlagReading {
+    data object Off : FlagReading
+
+    /** On; [since] is when it was last switched on, `null` when it never was (on by its default, since forever). */
+    data class On(
+        val since: Instant?,
+    ) : FlagReading
 }

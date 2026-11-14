@@ -2,6 +2,7 @@ package com.moyi.scheduling.service
 
 import com.moyi.common.core.FeatureFlag
 import com.moyi.common.core.FeatureFlags
+import com.moyi.common.core.FlagReading
 import com.moyi.gratitude.api.DailyReminders
 import com.moyi.gratitude.api.ReminderRun
 import com.moyi.scheduling.infra.JobRuns
@@ -74,13 +75,17 @@ internal class ReminderJob(
         // Switched off by an ADMIN (FR-115, ADR-0067 decision 7): nobody is asked about. A reminder that
         // falls due meanwhile is never sent: once on, the window starts no earlier than the switch
         // ([windowStart]). Still a run that finished: a pause is not a stopped job.
-        if (!flags.isOn(FeatureFlag.DAILY_REMINDERS)) {
-            log.debug("reminders: switched off")
+        val flag = flags.read(FeatureFlag.DAILY_REMINDERS)
+        val upTo = windowEndingBefore(now)
+        // Off, or switched on since the last boundary (an empty window): nobody is asked about, and
+        // it is still a run that finished.
+        val after = (flag as? FlagReading.On)?.let { windowStart(upTo, LOOKBACK, it.since) }
+        if (after == null) {
+            if (flag == FlagReading.Off) log.debug("reminders: switched off")
             finished(now)
             return ReminderRun(due = 0, requested = 0, alreadyWritten = 0, failed = 0)
         }
-        val upTo = windowEndingBefore(now)
-        val run = reminders.remindDue(windowStart(upTo, LOOKBACK, flags.onSince(FeatureFlag.DAILY_REMINDERS)), upTo)
+        val run = reminders.remindDue(after, upTo)
         requested.increment(run.requested.toDouble())
         finished(now)
         if (run.failed > 0) {

@@ -89,10 +89,13 @@ including what changed while it was built.
    that could switch off writing, sign-in or the reveal would be a way to break the product from a
    browser. **A send that falls due while its flag is off is never sent.** The reminder job looks back
    thirty minutes and the on-this-day job an hour, so each starts its window no earlier than the
-   moment its flag was last switched on (`FeatureFlags.onSince`, the row's `updated_at`; no row, no
-   bound): otherwise the first run after a pause would send, late and at once, everything that fell
-   due in its look-back. *Cost:* those sends are lost; the two reads (on, then since when) are not one
-   statement, so a switch made between them is seen by the next run.
+   moment its flag was last switched on: otherwise the first run after a pause would send, late and at
+   once, everything that fell due in its look-back. Each run reads its flag **once**
+   (`FeatureFlags.read`: `Off`, or `On(since)` from the row's `enabled` and `updated_at` in one
+   statement; no row is `On` with no bound), so a switch cannot fall between "is it on" and "since
+   when". A flag switched on at or after the run's last boundary leaves an empty window: the run asks
+   nobody (the roster refuses a window `(upTo, upTo]`) and is still a run that finished
+   (`PausedSendWindowTest`, through the real roster). *Cost:* those sends are lost.
 8. **A flag with no row is its default; the table starts empty**, so this slice changes nothing
    until a flag is switched. **No cache**: every job run and every embedding call reads the row, so a
    switch is seen next on every instance. *Cost:* one primary-key read per run and per call.

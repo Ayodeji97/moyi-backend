@@ -61,7 +61,8 @@ internal class QueryEmbedder(
     ): SemanticMatch? {
         val space = port.space
         val maxDistance = space?.let { properties.maxDistance[it] }
-        val wanted = flags.isOn(FeatureFlag.AI_EMBEDDINGS) && membership.semanticSearchEnabled
+        // The bond's setting first: when it is off, the flag is not read at all.
+        val wanted = membership.semanticSearchEnabled && flags.isOn(FeatureFlag.AI_EMBEDDINGS)
         if (!wanted || space == null || maxDistance == null) {
             disabled.increment()
             return null
