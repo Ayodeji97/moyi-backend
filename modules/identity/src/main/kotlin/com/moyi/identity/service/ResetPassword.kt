@@ -144,9 +144,11 @@ internal class ApplyPasswordReset(
         val user = accounts.findById(token.userId) ?: throw PasswordResetTokenInvalidException()
         // A link or code issued before a suspension (admin console A3): re-read under the lock, so
         // a suspension that committed after the link was sent is seen here. The refusal is the
-        // caller's own for a spent link or code, the same answer after the same work (the hash is
-        // computed before this either way), and the row stays consumed, so nothing tells a
-        // suspended account from a link that was used or ran out.
+        // caller's own for a spent link or code, the same bytes. Not the same work: a link that was
+        // used or ran out is refused before the password hash, this one a hash later, so it is
+        // slower by one hash, as a lost race is. That tells the link's holder nothing a 410 on an
+        // unused link does not already: who can present it knows it was never used. The row stays
+        // consumed, so the answer itself does not tell a suspended account from a spent link.
         if (user.canAuthenticate) replacePassword(user, newPasswordHash, now)
         return user.canAuthenticate
     }
