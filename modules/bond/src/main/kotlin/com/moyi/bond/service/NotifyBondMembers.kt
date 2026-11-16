@@ -6,6 +6,7 @@ import com.moyi.bond.api.PushAudiences
 import com.moyi.bond.domain.BondId
 import com.moyi.bond.domain.ProposalId
 import com.moyi.bond.domain.ProposalOutcome
+import com.moyi.bond.infra.database.BondStore
 import com.moyi.bond.infra.database.ProposalStore
 import com.moyi.common.events.EventConsumer
 import com.moyi.common.events.ReceivedEvent
@@ -51,7 +52,17 @@ import java.util.UUID
  * **ended** (ADR-0069 decision 4): a deletion agreed puts the Bond into a
  * countdown that takes no writes, and the agreement, and calling the
  * countdown off, are exactly what the other member must hear. An ended Bond
- * is told nothing by any of them. Each member's own
+ * is told nothing by any of them.
+ *
+ * **The shared-setting push holds the Bond's row lock** (`FOR UPDATE`, the one
+ * `EndBond` takes) from before it reads whether the Bond has ended until the
+ * delivery commits (spec §7). Without it a leave could commit between that read
+ * and the request, and its `cancelBond`, which cannot see the request not yet
+ * committed, would leave a push owed on an ended Bond: the partner told of a
+ * change by the Bond that has just been left (T-09). With it the leave waits,
+ * then calls the committed push off; or the leave goes first and the read finds
+ * it ended. The lock is taken before any `notification` row, as `EndBond` takes
+ * it, so the two meet in one order. Each member's own
  * toggle (`partnerJoined`, `proposal`, `sharedSettings`), quiet hours and budget travel with
  * their [com.moyi.notification.api.PushRecipient] and hold back only their
  * copy (Q9).
@@ -68,6 +79,7 @@ import java.util.UUID
 internal class NotifyBondMembers(
     private val audiences: PushAudiences,
     private val proposals: ProposalStore,
+    private val bonds: BondStore,
     private val notifications: Notifications,
     private val clock: Clock,
     private val meters: MeterRegistry,
@@ -109,6 +121,7 @@ internal class NotifyBondMembers(
     private fun settingsChanged(event: ReceivedEvent) {
         val bondId = event.reference(BondSettingsChanged.BOND_ID)
         val actor = event.reference(BondSettingsChanged.MEMBER_ID)
+        bonds.lockBond(BondId(bondId))
         val audience = audiences.audienceOf(bondId) ?: return
         tellShared(audience, event, SharedChange.SETTING, actor, calledOff = emptySet())
     }
@@ -117,6 +130,7 @@ internal class NotifyBondMembers(
         val bondId = event.reference(ProposalClosed.BOND_ID)
         val proposalId = event.reference(ProposalClosed.PROPOSAL_ID)
         val actor = event.reference(ProposalClosed.MEMBER_ID)
+        bonds.lockBond(BondId(bondId))
         // The row is the truth: how it ended is read, never carried (ADR-0035).
         val proposal = proposals.findInBond(BondId(bondId), ProposalId(proposalId)) ?: return
         val audience = audiences.audienceOf(bondId) ?: return

@@ -1,5 +1,10 @@
 package com.moyi.bond.service
 
+import com.moyi.bond.domain.BondId
+import com.moyi.bond.domain.MemberId
+import com.moyi.bond.domain.MemberRole
+import com.moyi.bond.domain.Membership
+import com.moyi.bond.domain.UserId
 import com.moyi.bond.infra.BondTestApplication
 import com.moyi.bond.infra.FakeUserDirectory
 import com.moyi.common.events.OutboxDispatcher
@@ -34,6 +39,9 @@ import java.time.Clock
 import java.time.Duration
 import java.time.ZoneId
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
 /**
@@ -54,6 +62,7 @@ internal class SharedSettingPushesTest(
     @Autowired private val dispatcher: OutboxDispatcher,
     @Autowired private val consumer: NotifyBondMembers,
     @Autowired private val meters: MeterRegistry,
+    @Autowired private val endBond: EndBond,
     @Autowired private val clock: Clock,
     @Autowired transactionManager: PlatformTransactionManager,
 ) : IntegrationTest() {
@@ -330,6 +339,46 @@ internal class SharedSettingPushesTest(
     }
 
     @Test
+    fun `a leave racing the delivery waits for its lock, then calls off the push it asked for`() {
+        // Spec §7: decided by cancelBond in the leave's transaction and the consumer's row lock.
+        val bond = pairedBond()
+        patch(ada, bond, """{"name":"Ours"}""").status shouldBe 200
+        val event = received(BondSettingsChanged.TYPE)
+        val leaver = membershipOf(ada, bond)
+        val cancelled = cancelledBondEnded()
+        val asked = CountDownLatch(1)
+        val commit = CountDownLatch(1)
+        val consumerPid = CompletableFuture<Int>()
+
+        // A: the delivery has read the Bond (not ended), asked for Bea's push, and has not committed.
+        val delivery =
+            CompletableFuture.runAsync {
+                transactions.executeWithoutResult {
+                    consumer.handle(event)
+                    consumerPid.complete(jdbc.queryForObject("SELECT pg_backend_pid()", Int::class.java)!!)
+                    asked.countDown()
+                    check(commit.await(WAIT_SECONDS, TimeUnit.SECONDS)) { "the delivery was never let commit" }
+                }
+            }
+        check(asked.await(WAIT_SECONDS, TimeUnit.SECONDS)) { "the delivery never asked" }
+        val pid = consumerPid.get(WAIT_SECONDS, TimeUnit.SECONDS)
+
+        // B: Ada leaves. It must queue on the delivery's lock; were there none, it would finish here.
+        val leave = CompletableFuture.runAsync { endBond.leave(leaver, withdrawEntries = false) }
+        awaitUntil("the leave neither waited on the delivery nor finished") { leave.isDone || waitsOnRowLockOf(pid) }
+        val leaveWaited = !leave.isDone
+        commit.countDown()
+        delivery.get(WAIT_SECONDS, TimeUnit.SECONDS)
+        leave.get(WAIT_SECONDS, TimeUnit.SECONDS)
+
+        bondStatus(bond) shouldBe "ARCHIVED"
+        sharedRow(bea)["status"] shouldBe "CANCELLED"
+        cancelledBondEnded() shouldBe cancelled + 1
+        jdbc.queryForObject("SELECT count(*) FROM notifications WHERE status IN ('REQUESTED', 'HELD')", Int::class.java) shouldBe 0
+        leaveWaited shouldBe true
+    }
+
+    @Test
     fun `turning search off on a bond that has ended asks nothing`() {
         val bond = pairedBond()
         post(bea, "/bonds/$bond/leave").status shouldBe 204
@@ -428,6 +477,53 @@ internal class SharedSettingPushesTest(
         change: String,
         outcome: String,
     ): Double = meters.counter(NotifyBondMembers.SHARED_CHANGES, "change", change, "outcome", outcome).count()
+
+    private fun cancelledBondEnded(): Double =
+        meters.counter("notification.push.cancelled", "category", "SHARED_SETTING_CHANGED", "nudge", "none", "reason", "bond_ended").count()
+
+    /** A backend waiting, not granted, for the transaction [pid] holds: a row lock it has taken. */
+    private fun waitsOnRowLockOf(pid: Int): Boolean =
+        jdbc.queryForObject(
+            """
+            SELECT count(*) FROM pg_locks waiting
+              JOIN pg_locks holding ON holding.locktype = 'transactionid' AND holding.pid = ? AND holding.granted
+                                   AND holding.transactionid = waiting.transactionid
+             WHERE waiting.locktype = 'transactionid' AND NOT waiting.granted
+            """.trimIndent(),
+            Int::class.java,
+            pid,
+        )!! > 0
+
+    /** Polls [condition] against a deadline that fails: what happened, never how long it took. */
+    private fun awaitUntil(
+        failure: String,
+        condition: () -> Boolean,
+    ) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_SECONDS)
+        while (!condition()) {
+            check(System.nanoTime() < deadline) { failure }
+            Thread.onSpinWait()
+        }
+    }
+
+    private fun membershipOf(
+        userId: UUID,
+        bond: String,
+    ): Membership =
+        jdbc.queryForObject(
+            "SELECT id, role FROM bond_members WHERE bond_id = ? AND user_id = ?",
+            { row, _ ->
+                Membership(
+                    bondId = BondId(UUID.fromString(bond)),
+                    memberId = MemberId(row.getObject("id", UUID::class.java)),
+                    userId = UserId(userId),
+                    role = MemberRole.valueOf(row.getString("role")),
+                    left = false,
+                )
+            },
+            UUID.fromString(bond),
+            userId,
+        )
 
     private fun cancelledForProposalClosed(): Double =
         meters.counter("notification.push.cancelled", "category", "PROPOSAL_OPENED", "nudge", "none", "reason", "proposal_closed").count()
@@ -609,6 +705,7 @@ internal class SharedSettingPushesTest(
     private companion object {
         const val BUDGET = 100
         const val DISPATCH_ROUNDS = 3
+        const val WAIT_SECONDS = 10L
         val OWED = listOf("REQUESTED", "HELD")
 
         /** A region zone (a member's zone must be one) that has no daylight saving. */

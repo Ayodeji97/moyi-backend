@@ -159,7 +159,7 @@ internal class BondPushesTest(
         dispatchAll()
 
         pushes().filter { it.category == "PROPOSAL_OPENED" }.shouldBeEmpty()
-        // ADR-0069 decision 3's recorded cost: no opening push was owed to call off, so the
+        // Spec ruling 10's recorded cost (ADR-0069 decision 3): no opening push was owed to call off, so the
         // withdrawal is told (as SHARED_SETTING_CHANGED) about a proposal Bea was never pushed.
         pushes().map { it.category } shouldBe listOf("SHARED_SETTING_CHANGED")
     }
