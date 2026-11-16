@@ -191,7 +191,7 @@
   },
   {
     "id": "GET /api/v1/bonds",
-    "summary": "list your bonds",
+    "summary": "list your bonds, with how each ended proposal ended",
     "machine": "bond",
     "auth": "bearer",
     "headers": [],
