@@ -122,6 +122,21 @@ internal class SupersedeTest(
     }
 
     @Test
+    fun `a re-ask supersedes nothing, even a push asked for after it`() {
+        // Lead ruling 2026-11-16: nudge 2 recorded first, nudge 1 only later (and held); the
+        // look-back asking for nudge 2 again must not call off the one push still owed.
+        ask(second, Nudge(2, 2, setOf(first))) shouldBe true
+        ask(first, Nudge(1, 0, emptySet())) shouldBe true
+        hold(first)
+
+        ask(second, Nudge(2, 2, setOf(first))) shouldBe false
+
+        status(first) shouldBe "HELD"
+        jdbc.queryForObject("SELECT count(*) FROM notifications WHERE dedupe_key = ?", Int::class.java, second) shouldBe 1
+        leaveFree(second) shouldBe 2
+    }
+
+    @Test
     fun `cancel takes a series in one call`() {
         ask(first, Nudge(1, 0, emptySet()))
         ask(second, Nudge(2, 1, emptySet()))
@@ -131,7 +146,7 @@ internal class SupersedeTest(
         ask(sent, Nudge(1, 0, emptySet()))
         send(sent)
 
-        transactions.execute { notifications.cancel(listOf(first, second, third)) } shouldBe 3
+        transactions.execute { notifications.cancel(listOf(first, second, third, sent)) } shouldBe 3
         transactions.execute { notifications.cancel(listOf(first, second, third, sent)) } shouldBe 0
 
         listOf(first, second, third).map(::status) shouldBe List(3) { "CANCELLED" }

@@ -239,10 +239,12 @@ On-this-day keeps `dueBetween` with shift zero only; `DueReminder` is unchanged,
    staleAfter = bondDayEndsAt, bondDate = d, nudge = Nudge(n, leaveFree, supersedes =
    ReminderKey.series(m, d) before n)))`.
 
-**Request** (`notification`, `PushRequests.request`, the caller's transaction): if `supersedes` is not
-empty, `UPDATE notifications SET status = 'CANCELLED' WHERE dedupe_key = ANY(?) AND status IN
-('REQUESTED', 'HELD') RETURNING leave_free_across_bonds, nudge`; the new row's
-`leave_free_across_bonds` is the least of its own and those returned; then `insertOnce` as today.
+**Request** (`notification`, `PushRequests.request`, the caller's transaction): `insertOnce` as
+today; if it recorded the row and `supersedes` is not empty, `UPDATE notifications SET status =
+'CANCELLED' WHERE dedupe_key = ANY(?) AND status IN ('REQUESTED', 'HELD') RETURNING
+leave_free_across_bonds, nudge`, and the new row's `leave_free_across_bonds` is lowered to the least
+of its own and those returned. A re-ask, whose key is already recorded, supersedes nothing (*lead
+ruling 2026-11-16*): not even a push asked for after the first ask.
 
 **Send** (`SendPush`, unchanged order): expired → suppressed → held → `PushBudget.decide(…,
 leaveFreeAcrossBonds = push.leaveFree)` → send with `PushMessage.nudge`.

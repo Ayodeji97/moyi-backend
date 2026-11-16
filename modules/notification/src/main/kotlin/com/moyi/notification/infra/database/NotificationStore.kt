@@ -130,6 +130,21 @@ internal class NotificationStore(
         )
 
     /**
+     * Lowers the leave-free of the push [id] to [leaveFree], never raises it: a superseding nudge
+     * taking over the claim of what it cancelled (ADR-0068 decision 7).
+     */
+    fun lowerLeaveFree(
+        id: UUID,
+        leaveFree: Int,
+    ): Boolean =
+        jdbc.update(
+            "UPDATE notifications SET leave_free_across_bonds = ? WHERE id = ? AND leave_free_across_bonds > ?",
+            leaveFree,
+            id,
+            leaveFree,
+        ) == 1
+
+    /**
      * Whether a push of [category] to [userId] in [bondId], asked for after
      * [since], has one of [statuses]. Read by `notifications_recipient_idx`
      * (V31).
