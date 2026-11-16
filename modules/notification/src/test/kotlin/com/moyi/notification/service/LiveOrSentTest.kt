@@ -51,6 +51,7 @@ internal class LiveOrSentTest(
                     staleAfter = asked.plus(Duration.ofHours(12)),
                     recipient = PushRecipient(ZoneId.of("Africa/Lagos"), null, NotificationPreferences(onThisDay = true)),
                     bondDate = null,
+                    nudge = null,
                 ),
             )
         }

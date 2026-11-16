@@ -198,6 +198,18 @@ is not content either: it says which day, never what was written on it (FR-084, 
 - **`LoggingPushSender`'s line is unchanged.** It prints the category and the Bond, as before,
   and no other field of the payload. `PushSenderConfigurationTest` fails if the date reaches it.
 
+*Amended 2026-11-16 (issue #200, ADR-0068).* `data` is now `{bondId, kind, date, nudge}`. `nudge`
+is the reminder's ordinal in its Bond-day's series, `"1"`, `"2"` or `"3"` (a string, as every FCM
+data value is), kept on the row (`notifications.nudge`, V68). Only a `REMINDER` carries it; every
+other push, and a reminder recorded before V68, leaves the key out, as `date` is left out. It names
+an ordinal, never a time, a count of anything else or the other member. The localisation keys, the
+channel and the collapse key are unchanged: all three nudges send `push_reminder_*` (per-nudge keys
+are owed, ADR-0068). **A `REMINDER` also carries `android.notification.tag` =
+`REMINDER:{bondId}:{date}`**, so on Android a Bond-day's later nudge replaces the earlier one in the
+shade, as iOS's `apns-collapse-id` already does; `collapse_key` replaces only a message still
+waiting for an offline phone. The Bond-day is in the tag so that tomorrow's first nudge is a new
+notification. No other category gains a tag. `LoggingPushSender`'s line is unchanged.
+
 **10. The provider posture is ADR-0017's.** `moyi.notification.push.provider` defaults to `FCM`,
 which refuses to start without `fcm.project-id`, `fcm.client-email` and `fcm.private-key-pem`
 (a key file's escaped `\n` accepted). `LOG` is asked for by name: the `local` profile, the test

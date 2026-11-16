@@ -14,7 +14,8 @@ import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
-/** The `notifications` ledger (V29, V30, V58). */
+/** The `notifications` ledger (V29, V30, V58, V68). */
+@Suppress("TooManyFunctions") // One per statement on the ledger, in the ledger's terms.
 @Component
 internal class NotificationStore(
     private val jdbc: JdbcTemplate,
@@ -31,8 +32,8 @@ internal class NotificationStore(
         jdbc.update(
             """
             INSERT INTO notifications (id, user_id, bond_id, category, dedupe_key, not_before, stale_after, status, created_at,
-                                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'REQUESTED', ?, ?, ?, ?, ?, ?)
+                                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date, nudge, leave_free_across_bonds)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'REQUESTED', ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (dedupe_key) DO NOTHING
             """.trimIndent(),
             push.id,
@@ -48,6 +49,8 @@ internal class NotificationStore(
             push.quietHoursEnd?.let(Time::valueOf),
             push.wanted,
             push.bondDate?.let(java.sql.Date::valueOf),
+            push.nudge,
+            push.leaveFreeAcrossBonds,
         ) == 1
 
     /**
@@ -61,7 +64,7 @@ internal class NotificationStore(
             .query(
                 """
                 SELECT id, user_id, bond_id, category, not_before, stale_after, status,
-                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date
+                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date, nudge, leave_free_across_bonds
                   FROM notifications WHERE id = ? FOR UPDATE
                 """.trimIndent(),
                 { row, _ -> storedPush(row) },
@@ -100,15 +103,46 @@ internal class NotificationStore(
     }
 
     /**
-     * `CANCELLED` for the push under [dedupeKey], if it is still owed:
-     * `REQUESTED` or `HELD`. A push the consumer has locked is waited for,
-     * and is then either settled (and left alone) or still owed (and
-     * cancelled): never both sent and cancelled.
+     * `CANCELLED` for every push under [dedupeKeys] that is still owed:
+     * `REQUESTED` or `HELD`. One statement, through `notifications_dedupe_key_key`.
+     * A push the consumer has locked is waited for, and is then either settled
+     * (and left alone) or still owed (and cancelled): never both sent and
+     * cancelled.
+     *
+     * @return what this call cancelled, and only that: a push already settled,
+     *   cancelled before, or never asked for is not returned, so nothing is
+     *   counted or inherited from twice (spec C16, ADR-0068 decision 7).
      */
-    fun cancel(dedupeKey: String): Boolean =
+    fun cancelOwed(dedupeKeys: Collection<String>): List<CancelledPush> =
+        jdbc.query(
+            """
+            UPDATE notifications SET status = 'CANCELLED'
+             WHERE dedupe_key = ANY (?) AND status IN ('REQUESTED', 'HELD')
+            RETURNING category, nudge, leave_free_across_bonds
+            """.trimIndent(),
+            { row, _ ->
+                CancelledPush(
+                    category = PushCategory.valueOf(row.getString("category")),
+                    nudge = row.getObject("nudge", Integer::class.java)?.toInt(),
+                    leaveFreeAcrossBonds = row.getInt("leave_free_across_bonds"),
+                )
+            },
+            dedupeKeys.toTypedArray(),
+        )
+
+    /**
+     * Lowers the leave-free of the push [id] to [leaveFree], never raises it: a superseding nudge
+     * taking over the claim of what it cancelled (ADR-0068 decision 7).
+     */
+    fun lowerLeaveFree(
+        id: UUID,
+        leaveFree: Int,
+    ): Boolean =
         jdbc.update(
-            "UPDATE notifications SET status = 'CANCELLED' WHERE dedupe_key = ? AND status IN ('REQUESTED', 'HELD')",
-            dedupeKey,
+            "UPDATE notifications SET leave_free_across_bonds = ? WHERE id = ? AND leave_free_across_bonds > ?",
+            leaveFree,
+            id,
+            leaveFree,
         ) == 1
 
     /**
@@ -138,6 +172,30 @@ internal class NotificationStore(
             bondId,
             statuses.map { it.name }.toTypedArray(),
         ) == true
+
+    /**
+     * The Bond and Bond-day of each push to [userId] in one of [bondIds], of one of [categories],
+     * in one of [statuses], asked for after [since]. One read through
+     * `notifications_recipient_idx (user_id, category, created_at)`: the user and each category
+     * are its equality columns and [since] bounds its range; Bond and status are filtered on the
+     * rows it finds. A push about no day is not returned.
+     */
+    fun datedSince(
+        userId: UUID,
+        bondIds: Collection<UUID>,
+        categories: Set<PushCategory>,
+        statuses: Set<NotificationStatus>,
+        since: Instant,
+    ): List<DatedPush> =
+        jdbc.query(
+            DATED_SINCE,
+            { row, _ -> DatedPush(row.getObject("bond_id", UUID::class.java), row.getDate("bond_date").toLocalDate()) },
+            userId,
+            categories.map { it.name }.toTypedArray(),
+            timestamp(since),
+            bondIds.toTypedArray(),
+            statuses.map { it.name }.toTypedArray(),
+        )
 
     /**
      * Holds a `REQUESTED` push back until [until]: quiet hours (ADR-0045).
@@ -195,11 +253,29 @@ internal class NotificationStore(
             quietHours = if (quietStart != null && quietEnd != null) QuietWindow(quietStart, quietEnd) else null,
             wanted = row.getBoolean("wanted"),
             bondDate = row.getDate("bond_date")?.toLocalDate(),
+            nudge = row.getObject("nudge", Integer::class.java)?.toInt(),
+            leaveFreeAcrossBonds = row.getInt("leave_free_across_bonds"),
         )
     }
 
     private fun timestamp(instant: Instant): Timestamp = Timestamp.from(instant.truncatedTo(ChronoUnit.MICROS))
+
+    internal companion object {
+        /** [datedSince]'s statement; a test EXPLAINs it to see that the recipient index can serve it. */
+        val DATED_SINCE =
+            """
+            SELECT DISTINCT bond_id, bond_date FROM notifications
+             WHERE user_id = ? AND category = ANY (?) AND created_at > ?
+               AND bond_id = ANY (?) AND status = ANY (?) AND bond_date IS NOT NULL
+            """.trimIndent()
+    }
 }
+
+/** A push's Bond and the Bond-day it is about. */
+internal data class DatedPush(
+    val bondId: UUID,
+    val bondDate: LocalDate,
+)
 
 /** A push about to be recorded, with the member's settings as they stand (ADR-0045). */
 internal data class NewPush(
@@ -216,6 +292,10 @@ internal data class NewPush(
     val wanted: Boolean,
     /** The Bond-day the push is about; `null` for a push about no day. */
     val bondDate: LocalDate?,
+    /** Which nudge of its Bond-day a reminder is; `null` for any other push (V68). */
+    val nudge: Int?,
+    /** How many cross-Bond slots the push must leave free when sent (V68). */
+    val leaveFreeAcrossBonds: Int,
 ) {
     val quietHoursStart: LocalTime? get() = quietHours?.start
     val quietHoursEnd: LocalTime? get() = quietHours?.end
@@ -237,6 +317,19 @@ internal data class StoredPush(
     val wanted: Boolean,
     /** The Bond-day the push is about: `null` for a push about no day, and for a row written before V58. */
     val bondDate: LocalDate?,
+    /** Which nudge of its Bond-day a reminder is: `null` for any other push, and for a row written before V68. */
+    val nudge: Int?,
+    /** How many cross-Bond slots the push must leave free when sent: 0 for a row written before V68. */
+    val leaveFreeAcrossBonds: Int,
+)
+
+/** A push [NotificationStore.cancelOwed] has just called off: what a superseding nudge inherits from. */
+internal data class CancelledPush(
+    val category: PushCategory,
+    /** Which nudge of its Bond-day it was: `null` for any other push, and for a row written before V68. */
+    val nudge: Int?,
+    /** How many cross-Bond slots it had to leave free when sent. */
+    val leaveFreeAcrossBonds: Int,
 )
 
 /** Quiet hours as two columns hold them. */

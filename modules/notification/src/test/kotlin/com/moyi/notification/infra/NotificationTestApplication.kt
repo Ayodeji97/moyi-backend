@@ -4,6 +4,8 @@ import com.moyi.common.testing.MutableClock
 import com.moyi.notification.api.PushDelivery
 import com.moyi.notification.api.PushMessage
 import com.moyi.notification.api.PushSender
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
@@ -26,6 +28,9 @@ internal class NotificationTestApplication {
     @Bean
     @Primary
     fun testClock(): MutableClock = MutableClock(Instant.parse("2026-10-27T18:00:00Z"))
+
+    @Bean
+    fun meterRegistry(): MeterRegistry = SimpleMeterRegistry()
 
     @Bean
     @Primary

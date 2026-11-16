@@ -143,6 +143,67 @@ internal class FcmPushSenderTest {
     }
 
     @Test
+    fun `a nudge carries its index as a string in data`() {
+        val reminder = message.copy(category = PushCategory.REMINDER, bondDate = LocalDate.parse("2026-11-16"))
+        dataOf(reminder.copy(nudge = 2))["nudge"] shouldBe "2"
+    }
+
+    @Test
+    fun `no other push carries nudge`() {
+        PushCategory.entries.filter { it != PushCategory.REMINDER }.forEach { category ->
+            dataOf(message.copy(category = category, nudge = 2)).containsKey("nudge") shouldBe false
+        }
+    }
+
+    @Test
+    fun `a reminder recorded before V68 carries no nudge`() {
+        val reminder = message.copy(category = PushCategory.REMINDER, bondDate = LocalDate.parse("2026-11-16"), nudge = null)
+        dataOf(reminder).containsKey("nudge") shouldBe false
+    }
+
+    @Test
+    fun `a reminder carries a tag per Bond and Bond-day`() {
+        val reminder = message.copy(category = PushCategory.REMINDER, bondDate = LocalDate.parse("2026-11-16"))
+        androidNotificationOf(reminder)["tag"] shouldBe "REMINDER:$bond:2026-11-16"
+    }
+
+    @Test
+    fun `no other category carries a tag`() {
+        PushCategory.entries.filter { it != PushCategory.REMINDER }.forEach { category ->
+            androidNotificationOf(message.copy(category = category, bondDate = LocalDate.parse("2026-11-16")))
+                .containsKey("tag") shouldBe false
+        }
+    }
+
+    @Test
+    fun `a reminder with no date carries no tag`() {
+        androidNotificationOf(message.copy(category = PushCategory.REMINDER, bondDate = null)).containsKey("tag") shouldBe false
+    }
+
+    @Test
+    fun `nudges 2 and 3 show the same localisation keys as nudge 1 in v1`() {
+        val reminder = message.copy(category = PushCategory.REMINDER, bondDate = LocalDate.parse("2026-11-16"))
+        listOf(1, 2, 3).forEach { n ->
+            val android = androidNotificationOf(reminder.copy(nudge = n))
+            android["title_loc_key"] shouldBe "push_reminder_title"
+            android["body_loc_key"] shouldBe "push_reminder_body"
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun dataOf(message: PushMessage) =
+        ((FcmPushSender.payloadOf(message, clock.instant())["message"] as Map<String, Any>)["data"] as Map<String, Any>)
+
+    @Suppress("UNCHECKED_CAST")
+    private fun androidNotificationOf(message: PushMessage) =
+        (
+            (
+                (FcmPushSender.payloadOf(message, clock.instant())["message"] as Map<String, Any>)["android"]
+                    as Map<String, Any>
+            )["notification"] as Map<String, Any>
+        )
+
+    @Test
     fun `a push sent at or past its deadline asks for no time at all, never a negative one`() {
         @Suppress("UNCHECKED_CAST")
         fun ttlAt(now: Instant) =

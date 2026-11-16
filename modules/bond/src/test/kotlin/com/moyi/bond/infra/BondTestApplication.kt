@@ -4,6 +4,8 @@ import com.moyi.common.security.TokenRevocation
 import com.moyi.common.security.TokenRevocations
 import com.moyi.identity.api.AccountStanding
 import com.moyi.identity.api.UserDirectory
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan
@@ -59,6 +61,10 @@ internal class BondTestApplication {
     /** identity's standing port (A3): spans a test sets, so a bond's pause can be driven without identity. */
     @Bean
     fun accountStanding(): AccountStanding = FakeAccountStanding()
+
+    /** No actuator in this context; `notification`'s push requests count in a registry (#200). */
+    @Bean
+    fun meterRegistry(): MeterRegistry = SimpleMeterRegistry()
 
     @Bean
     fun tokenRevocations(): TokenRevocations = TokenRevocations { TokenRevocation(invalidBefore = null) }

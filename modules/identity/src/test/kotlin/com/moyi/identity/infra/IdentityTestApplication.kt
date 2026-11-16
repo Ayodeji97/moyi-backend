@@ -1,8 +1,11 @@
 package com.moyi.identity.infra
 
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan
 import org.springframework.boot.persistence.autoconfigure.EntityScan
+import org.springframework.context.annotation.Bean
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories
 
 /**
@@ -24,4 +27,8 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories
 @ConfigurationPropertiesScan("com.moyi")
 @EntityScan("com.moyi")
 @EnableJpaRepositories("com.moyi")
-internal class IdentityTestApplication
+internal class IdentityTestApplication {
+    /** No actuator in this context; `notification`'s push requests count in a registry (#200). */
+    @Bean
+    fun meterRegistry(): MeterRegistry = SimpleMeterRegistry()
+}

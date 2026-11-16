@@ -32,6 +32,9 @@ interface PushSender {
  * ([PushRequest.bondDate]); `null` for a push about no day, and for one
  * recorded before the ledger kept it (V58). A calendar label, not content.
  *
+ * [nudge] is which nudge of its Bond-day a reminder is (1..3), `null` for any other push and for a
+ * reminder recorded before V68. An ordinal, never a time.
+ *
  * [token] redacts itself; this class's [toString] is the generated one and is
  * safe for that reason alone.
  */
@@ -41,6 +44,7 @@ data class PushMessage(
     val bondId: UUID,
     val staleAfter: Instant,
     val bondDate: LocalDate? = null,
+    val nudge: Int? = null,
 )
 
 /**

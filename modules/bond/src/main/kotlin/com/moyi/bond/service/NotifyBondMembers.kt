@@ -114,6 +114,7 @@ internal class NotifyBondMembers(
                 recipient = member.recipient,
                 // A partner joining and a proposal opening are about the Bond, not one of its days (#146).
                 bondDate = null,
+                nudge = null,
             ),
         )
     }

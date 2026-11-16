@@ -2,6 +2,7 @@ package com.moyi.gratitude.service
 
 import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondMembership
+import com.moyi.bond.api.ReminderRoster
 import com.moyi.common.core.IdGenerator
 import com.moyi.common.events.EventPublisher
 import com.moyi.common.events.OutboxEvent
@@ -541,8 +542,9 @@ internal class SubmitEntry(
         // The member has written this day, so a reminder to write it that has not gone yet is
         // pointless: a 06:30 reminder held by quiet hours to 07:00 would otherwise reach someone
         // who wrote at 06:45 (ADR-0045). In this transaction, so it is called off exactly when
-        // the entry commits. Their own reminder only: the other member's is about their writing.
-        notifications.cancel(ReminderKey.of(membership.memberId, day.date))
+        // the entry commits. Their own reminders only: the other member's are about their writing.
+        // The whole day's series in one statement (#200): whichever nudge is still unsent, by any index.
+        notifications.cancel(ReminderKey.series(membership.memberId, day.date, ReminderRoster.NUDGES_PER_BOND_DAY))
         events.publish(OutboxEvent("Entry", entry.id.value, "EntrySubmitted", mapOf("bondId" to bondId, "bondDayId" to day.id.value), now))
         val updated = reveal.apply(day.withEntry(), membership.revealTimeLocal, now)
         if (joiningDate != null && joiningDate.isAfter(claimed.date)) joining.underBondLock(membership, now)

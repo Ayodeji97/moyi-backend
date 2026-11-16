@@ -37,19 +37,24 @@ interface Notifications {
     fun request(request: PushRequest): Boolean
 
     /**
-     * Calls off the push recorded under [dedupeKey], if it has not gone yet:
-     * one still `REQUESTED`, or `HELD` by quiet hours, becomes `CANCELLED` and
-     * is never sent. A push already settled, or never asked for, is left as it
-     * is. For a push whose reason has gone before it could be sent: the daily
-     * reminder of a member who has since written (ADR-0045).
+     * Calls off the pushes recorded under [dedupeKeys], those that have not
+     * gone yet: each one still `REQUESTED`, or `HELD` by quiet hours, becomes
+     * `CANCELLED` and is never sent. A push already settled, or never asked
+     * for, is left as it is. For pushes whose reason has gone before they
+     * could be sent: the daily reminder and its nudges, of a member who has
+     * since written (ADR-0045, ADR-0068). One statement, however many keys.
      *
      * **Joins the caller's transaction and refuses to run without one**, so
-     * the push is called off exactly when the fact that made it pointless
+     * the pushes are called off exactly when the fact that made them pointless
      * commits. Calling it twice is calling it once.
      *
-     * @return whether this call cancelled a push.
+     * Its only caller is an entry's write, so every push it calls off is
+     * counted with the reason `written` (`notification.push.cancelled`). A
+     * caller with another reason needs that reason in this API first.
+     *
+     * @return how many pushes this call cancelled.
      */
-    fun cancel(dedupeKey: String): Boolean
+    fun cancel(dedupeKeys: Collection<String>): Int
 
     /**
      * Whether [userId] has, in [bondId], a push of [category] asked for after
@@ -68,6 +73,23 @@ interface Notifications {
         category: PushCategory,
         since: Instant,
     ): Boolean
+
+    /**
+     * Which Bonds of [bondDays] have a reveal-class push ([PushCategory.isRevealClass]) to
+     * [userId] about that Bond's own date that is **settled**: sent, or gone nowhere for good
+     * (suppressed by a toggle, dropped by the budget, expired, failed). A push still owed
+     * (`REQUESTED`, or `HELD` by quiet hours) is not settled, nor is one called off, nor a day
+     * with no such push at all: those reveals may yet need a slot (spec C17, ADR-0068 decision 6).
+     *
+     * Only pushes asked for in the last 72 hours are looked at: a current Bond-day's reveal is
+     * asked for during that day. For a nudge counting the cross-Bond slots it must leave free;
+     * the caller supplies the Bonds and their current dates, as values, since this module can
+     * read neither. An empty map is answered with an empty set, without a query.
+     */
+    fun revealClassSettled(
+        userId: UUID,
+        bondDays: Map<UUID, LocalDate>,
+    ): Set<UUID>
 }
 
 /**
@@ -90,6 +112,9 @@ interface Notifications {
  *   so that a tap opens that day (issue #146). It directs and authorises
  *   nothing: the app still loads the day from the server. Required, with no
  *   default, so that every caller decides whether its push concerns a day.
+ * @property nudge Which nudge of its Bond-day a reminder is, and what it supersedes (issue #200,
+ *   ADR-0068); `null` for every other push. Only a [PushCategory.REMINDER] may carry one.
+ *   Required, with no default, so that every caller decides.
  */
 data class PushRequest(
     val userId: UUID,
@@ -99,14 +124,52 @@ data class PushRequest(
     val staleAfter: Instant,
     val recipient: PushRecipient,
     val bondDate: LocalDate?,
+    val nudge: Nudge?,
 ) {
     init {
         require(dedupeKey.length in 1..MAX_DEDUPE_KEY_LENGTH) { "a dedupe key must be 1 to $MAX_DEDUPE_KEY_LENGTH characters" }
+        require(nudge == null || category == PushCategory.REMINDER) { "only a reminder may be a nudge" }
     }
 
     companion object {
         /** The CHECK in V29. */
         const val MAX_DEDUPE_KEY_LENGTH = 200
+    }
+}
+
+/**
+ * Which nudge of its Bond-day a reminder is (issue #200, ADR-0068, spec §5).
+ *
+ * @property index 1 for the day's first reminder, 2 and 3 for the nudges after it. The count
+ *   itself is `bond`'s (`NUDGES_PER_BOND_DAY`); this module only requires 1 or more.
+ * @property leaveFreeAcrossBonds How many of the member's cross-Bond slots (FR-082's six) this
+ *   push must leave free when it is sent: 0 for nudge 1, more for nudges 2 and 3 (ruling 7).
+ *   Kept on the ledger row, because a held push is decided again from its row alone.
+ * @property supersedes Dedupe keys of earlier pushes this one replaces: any of them still owed
+ *   (`REQUESTED` or `HELD`) is called off when this one is recorded. Keys only, never content.
+ */
+data class Nudge(
+    val index: Int,
+    val leaveFreeAcrossBonds: Int,
+    val supersedes: Set<String>,
+) {
+    init {
+        require(index >= 1) { "a nudge's index is 1 or more" }
+        require(leaveFreeAcrossBonds in 0 until ACROSS_BONDS) {
+            "a nudge leaves 0 to ${ACROSS_BONDS - 1} cross-Bond slots free"
+        }
+        require(supersedes.all { it.length in 1..PushRequest.MAX_DEDUPE_KEY_LENGTH }) {
+            "a superseded key is 1 to ${PushRequest.MAX_DEDUPE_KEY_LENGTH} characters"
+        }
+    }
+
+    companion object {
+        /**
+         * FR-082's cap on pushes to one member across Bonds in a rolling 24 hours. `api` and
+         * `domain` may depend on nothing (ArchitectureTest), so neither can read the other's
+         * copy; `PushApiTest` pins this to `PushBudget.ACROSS_BONDS`, so they cannot drift.
+         */
+        const val ACROSS_BONDS = 6
     }
 }
 

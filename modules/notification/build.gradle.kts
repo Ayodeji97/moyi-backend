@@ -23,6 +23,8 @@ dependencies {
     implementation(projects.common.core)
     implementation(projects.common.events)
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
+    // Counters of what became of each push (spec §9); the registry itself is the app's.
+    implementation("io.micrometer:micrometer-core")
     // Nimbus JOSE, to sign the service account's assertion for Google's
     // OAuth2 token endpoint (RS256). Doc 25 D5: no hand-written crypto.
     // Through Spring Security's JOSE module rather than by name: Nimbus is

@@ -67,7 +67,7 @@ internal class MemberNotifications(
     fun reminderCandidates(): List<ReminderCandidate> =
         jdbc.query(
             """
-            SELECT m.id, m.bond_id, m.user_id, m.reminder_time_local, m.reminder_timezone,
+            SELECT b.status, m.id, m.bond_id, m.user_id, m.reminder_time_local, m.reminder_timezone,
                    m.quiet_hours_start, m.quiet_hours_end, m.notification_prefs::text AS prefs
               FROM bond_members m
               JOIN bonds b ON b.id = m.bond_id
@@ -106,6 +106,7 @@ internal class MemberNotifications(
             memberId = row.getObject("id", UUID::class.java),
             bondId = row.getObject("bond_id", UUID::class.java),
             userId = row.getObject("user_id", UUID::class.java),
+            bondStatus = BondStatus.valueOf(row.getString("status")),
             reminderTimeLocal = row.getTime("reminder_time_local").toLocalTime(),
             reminderTimezone = row.getString("reminder_timezone"),
             quietHoursStart = row.getTime("quiet_hours_start")?.toLocalTime(),
@@ -155,6 +156,8 @@ internal data class ReminderCandidate(
     val memberId: UUID,
     val bondId: UUID,
     val userId: UUID,
+    /** `PENDING_MEMBER` or `ACTIVE`: only an `ACTIVE` bond has a partner to reveal with (C17). */
+    val bondStatus: BondStatus,
     val reminderTimeLocal: LocalTime,
     val reminderTimezone: String,
     val quietHoursStart: LocalTime?,

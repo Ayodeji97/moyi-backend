@@ -354,6 +354,7 @@ internal class SendPushTest(
         staleAfter,
         PushRecipient(ZoneId.of("UTC"), null, NotificationPreferences.DEFAULTS),
         DAY,
+        null,
     )
 
     private fun register(

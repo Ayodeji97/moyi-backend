@@ -75,6 +75,9 @@ dependencies {
     // Flyway's own API, at compile time, for one test: V65MigrationTest builds a database of its
     // own to V65 and tests what the schema refuses, with no Spring context in between.
     testImplementation("org.flywaydb:flyway-core")
+    // A registry for the test context: `notification`'s push request counts what it settles
+    // (#200), and this context has no actuator to supply one.
+    testImplementation("io.micrometer:micrometer-core")
 }
 
 // --- The breached-password corpus -----------------------------------------
