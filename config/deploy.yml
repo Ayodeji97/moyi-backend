@@ -272,9 +272,9 @@ env:
     MOYI_BOND_INVITE_LINK_BASE_URL: https://getmoyi.app/i
     # The legal documents (FR-103, ADR-0056): required, no default. Every
     # consent row records these versions, and changing one asks every person to
-    # accept again. NOT YET PUBLISHED: site/ has no /terms, /privacy or
-    # /data-processing page (2026-11-08), so these addresses are 404 until the
-    # owner publishes the documents. Until then each version is the sentinel
+    # accept again. NOT YET PUBLISHED: since 2026-11-16 the three pages are on
+    # getmoyi.app (the moyi-web repository) as drafts, labelled "unpublished",
+    # until the owner publishes the documents. Until then each version is the sentinel
     # "unpublished", never a date-like placeholder: a sign-up in the gap is then
     # recorded as accepting "unpublished", and setting the real versions at
     # publication asks every such person to accept again (review of #148).
