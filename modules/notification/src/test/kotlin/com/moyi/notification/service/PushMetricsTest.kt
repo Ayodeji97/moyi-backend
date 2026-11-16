@@ -3,6 +3,7 @@ package com.moyi.notification.service
 import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.notification.api.HeldPushes
 import com.moyi.notification.api.NotificationPreferences
 import com.moyi.notification.api.Notifications
 import com.moyi.notification.api.Nudge
@@ -49,6 +50,7 @@ internal class PushMetricsTest(
     @Autowired private val clock: MutableClock,
     @Autowired private val provider: ScriptedPushSender,
     @Autowired private val meters: MeterRegistry,
+    @Autowired private val held: HeldPushes,
 ) : PostgresIntegrationTest() {
     private val member = UUID.randomUUID()
     private val bond = UUID.randomUUID()
@@ -91,6 +93,37 @@ internal class PushMetricsTest(
 
         settled("REMINDER", "1", "held") shouldBe 1.0
         totalSettled() shouldBe 1.0
+    }
+
+    @Test
+    fun `a held push counts held once, and its final outcome once when released`() {
+        register("token")
+        val night = recipient(quiet = QuietHoursWindow(LocalTime.of(17, 0), LocalTime.of(23, 0)))
+        ask(first, Nudge(1, 0, emptySet()), recipient = night)
+        dispatch()
+
+        settled("REMINDER", "1", "held") shouldBe 1.0
+        settled("REMINDER", "1", "sent") shouldBe 0.0
+
+        clock.set(Instant.parse("2026-11-16T23:00:00Z"))
+        held.releaseDue(clock.instant(), 10) shouldBe 1
+        dispatch()
+
+        settled("REMINDER", "1", "held") shouldBe 1.0
+        settled("REMINDER", "1", "sent") shouldBe 1.0
+        totalSettled() shouldBe 2.0
+    }
+
+    @Test
+    fun `cancelling a held push counts it cancelled, reason written, once`() {
+        val night = recipient(quiet = QuietHoursWindow(LocalTime.of(17, 0), LocalTime.of(23, 0)))
+        ask(first, Nudge(1, 0, emptySet()), recipient = night)
+        dispatch()
+
+        transactions.execute { notifications.cancel(listOf(first)) } shouldBe 1
+        transactions.execute { notifications.cancel(listOf(first)) } shouldBe 0
+
+        cancelled("REMINDER", "1", "written") shouldBe 1.0
     }
 
     @Test
