@@ -1,6 +1,7 @@
 package com.moyi.scheduling.service
 
 import com.moyi.common.web.idempotency.IdempotencyKeyStore
+import com.moyi.scheduling.infra.JobRuns
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock
 import org.slf4j.LoggerFactory
 import org.springframework.scheduling.annotation.Scheduled
@@ -18,6 +19,7 @@ import java.time.Clock
 @Component
 internal class ReapIdempotencyKeys(
     private val keys: IdempotencyKeyStore,
+    private val runs: JobRuns,
     private val clock: Clock,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -30,8 +32,10 @@ internal class ReapIdempotencyKeys(
     }
 
     fun reapOnce(): Int {
-        val removed = keys.deleteAllExpired(clock.instant())
+        val now = clock.instant()
+        val removed = keys.deleteAllExpired(now)
         if (removed > 0) log.info("idempotency: {} expired keys removed", removed)
+        runs.succeeded(LOCK)
         return removed
     }
 

@@ -111,12 +111,14 @@ internal class EntryTextControllerTest(
         val response = posted.response
         response.status shouldBe 200
         posted.modelAndView!!.viewName shouldBe "admin/entry-text"
-        // Spring adds a BindingResult beside each model object; the handler's own keys are these three.
+        // Spring adds a BindingResult beside each model object; the handler's own keys are these three,
+        // and every admin page carries `navAdmin`, the navigation's role flag (ADR-0067 decision 23).
         posted.modelAndView!!
             .model.keys
             .filterNot { it.startsWith(BindingResult.MODEL_KEY_PREFIX) }
             .toSet() shouldBe
-            setOf("words", "date", "reportId")
+            setOf("words", "date", "reportId", "navAdmin")
+        posted.modelAndView!!.model["navAdmin"] shouldBe true
         posted.modelAndView!!.model["date"] shouldBe date
         posted.modelAndView!!.model.toString() shouldNotContain text
         neverKept(posted)

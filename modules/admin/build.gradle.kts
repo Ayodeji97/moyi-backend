@@ -22,6 +22,12 @@ dependencies {
     // ADR-0059 decision 8). export depends on no part of admin, so there is no cycle.
     implementation(projects.modules.export)
 
+    // A4 (ADR-0067): `scheduling.api.JobConsole` for the jobs page and `support.api.SupportInbox`
+    // for the support inbox. Neither depends on any part of admin, so there is no cycle; the
+    // flags go the other way, through `common.core.FeatureFlags`, which admin implements.
+    implementation(projects.modules.scheduling)
+    implementation(projects.modules.support)
+
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")

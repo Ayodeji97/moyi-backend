@@ -1,7 +1,11 @@
 package com.moyi.scheduling.service
 
+import com.moyi.common.core.FeatureFlag
+import com.moyi.common.core.FeatureFlags
+import com.moyi.common.core.FlagReading
 import com.moyi.gratitude.api.OnThisDayPushes
 import com.moyi.gratitude.api.OnThisDayRun
+import com.moyi.scheduling.infra.JobRuns
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
@@ -36,6 +40,8 @@ import java.util.concurrent.atomic.AtomicLong
 @Component
 internal class OnThisDayJob(
     private val pushes: OnThisDayPushes,
+    private val flags: FeatureFlags,
+    private val runs: JobRuns,
     private val clock: Clock,
     meters: MeterRegistry,
 ) {
@@ -63,10 +69,22 @@ internal class OnThisDayJob(
     /** One run, without the timer or the lock. */
     fun pushOnce(): OnThisDayRun {
         val now = clock.instant()
+        // Switched off by an ADMIN (FR-115, ADR-0067 decision 7): nobody is asked about, and a push that
+        // falls due meanwhile is never sent: once on, the window starts no earlier than the switch
+        // ([windowStart]). Still a run that finished: a pause is not a stopped job.
+        val flag = flags.read(FeatureFlag.ON_THIS_DAY_PUSHES)
         val upTo = windowEndingBefore(now)
-        val run = pushes.pushDue(upTo.minus(LOOKBACK), upTo)
+        // Off, or switched on since the last boundary (an empty window): nobody is asked about, and
+        // it is still a run that finished.
+        val after = (flag as? FlagReading.On)?.let { windowStart(upTo, LOOKBACK, it.since) }
+        if (after == null) {
+            if (flag == FlagReading.Off) log.debug("on this day: switched off")
+            finished(now)
+            return OnThisDayRun(due = 0, requested = 0, nothingToRemember = 0, failed = 0)
+        }
+        val run = pushes.pushDue(after, upTo)
         requested.increment(run.requested.toDouble())
-        lastSuccess.set(now.epochSecond)
+        finished(now)
         if (run.failed > 0) {
             log.warn(
                 "on this day: due {}, asked for {}, nothing to remember {}, FAILED {}",
@@ -80,6 +98,11 @@ internal class OnThisDayJob(
             log.debug("on this day: due {}, asked for {}, nothing to remember {}", run.due, run.requested, run.nothingToRemember)
         }
         return run
+    }
+
+    private fun finished(now: Instant) {
+        lastSuccess.set(now.epochSecond)
+        runs.succeeded(LOCK)
     }
 
     internal companion object {

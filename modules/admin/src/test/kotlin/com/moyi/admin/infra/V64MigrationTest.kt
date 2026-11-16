@@ -50,7 +50,7 @@ internal class V64MigrationTest : PostgresIntegrationTest() {
         flyway("64").migrate()
 
         // V66 added the two suspension actions, which V64 rightly refuses.
-        val laterActions = listOf("ACCOUNT_SUSPENDED", "ACCOUNT_UNSUSPENDED")
+        val laterActions = listOf("ACCOUNT_SUSPENDED", "ACCOUNT_UNSUSPENDED") + V67MigrationTest.A4_ACTIONS
         (AuditAction.entries.map { it.name } - laterActions).forEach { action ->
             withClue(action) { insert(action) shouldBe 1 }
         }

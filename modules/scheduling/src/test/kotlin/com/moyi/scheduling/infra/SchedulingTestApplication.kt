@@ -1,5 +1,8 @@
 package com.moyi.scheduling.infra
 
+import com.moyi.common.core.FeatureFlag
+import com.moyi.common.core.FeatureFlags
+import com.moyi.common.core.FlagReading
 import com.moyi.common.core.IdGenerator
 import com.moyi.common.core.SystemIdGenerator
 import com.moyi.common.events.EventConsumer
@@ -86,6 +89,42 @@ internal class SchedulingTestApplication {
 
     @Bean
     fun dataExports(): RecordingDataExports = RecordingDataExports()
+
+    @Bean
+    fun flags(): SettableFlags = SettableFlags()
+}
+
+/**
+ * The flags as a test sets them: `admin` owns the table and is not in this context. Every flag is
+ * its default, never switched, until [off] or [onAt] is called; [reset] puts them back.
+ */
+internal class SettableFlags : FeatureFlags {
+    private val off =
+        java.util.concurrent.ConcurrentHashMap
+            .newKeySet<FeatureFlag>()
+    private val since = java.util.concurrent.ConcurrentHashMap<FeatureFlag, Instant>()
+
+    override fun isOn(flag: FeatureFlag): Boolean = flag !in off && flag.defaultOn
+
+    override fun read(flag: FeatureFlag): FlagReading = if (isOn(flag)) FlagReading.On(since[flag]) else FlagReading.Off
+
+    fun off(flag: FeatureFlag) {
+        off += flag
+    }
+
+    /** Switched on again at [at], as the console would record it. */
+    fun onAt(
+        flag: FeatureFlag,
+        at: Instant,
+    ) {
+        off -= flag
+        since[flag] = at
+    }
+
+    fun reset() {
+        off.clear()
+        since.clear()
+    }
 }
 
 internal class RecordingDataExports : DataExportJobs {

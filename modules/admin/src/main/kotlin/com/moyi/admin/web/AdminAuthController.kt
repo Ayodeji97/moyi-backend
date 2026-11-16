@@ -5,6 +5,7 @@ import com.moyi.admin.service.AdminSignIn
 import com.moyi.admin.service.ConditionalOnAdminConsole
 import com.moyi.admin.service.ModerationConsole
 import com.moyi.admin.service.PasswordStep
+import com.moyi.admin.service.SupportConsole
 import com.moyi.admin.service.TotpStep
 import com.moyi.common.security.ClientAddress
 import com.moyi.common.security.ClientAddressResolver
@@ -40,13 +41,17 @@ import java.util.UUID
  */
 @Controller
 @ConditionalOnAdminConsole
-@Suppress("FunctionOnlyReturningConstant") // A page's handler answers with its view's name.
+@Suppress(
+    "FunctionOnlyReturningConstant", // A page's handler answers with its view's name.
+    "LongParameterList", // The sign-in, its address, settings and clock, and the two consoles whose counts the home page shows.
+)
 internal class AdminAuthController(
     private val signIn: AdminSignIn,
     private val addresses: ClientAddressResolver,
     private val properties: AdminProperties,
     private val clock: Clock,
     private val console: ModerationConsole,
+    private val support: SupportConsole,
     private val secondFactor: SecondFactor,
 ) {
     private val contexts = SecurityContextHolder.getContextHolderStrategy()
@@ -132,8 +137,9 @@ internal class AdminAuthController(
     }
 
     /**
-     * The front page. A moderator also sees each queue's open count (A2 spec §5), read through
-     * the ports' count methods, which write no log row and no audit row.
+     * The front page. A moderator also sees each queue's open count (A2 spec §5), and every role
+     * the open support tickets (A4 spec §4), read through the ports' count methods, which write no
+     * log row and no audit row.
      */
     @GetMapping("/admin")
     fun home(
@@ -144,6 +150,7 @@ internal class AdminAuthController(
             model.addAttribute("moderator", true)
             model.addAttribute("counts", console.counts())
         }
+        model.addAttribute("openTickets", support.openCount())
         return "admin/home"
     }
 

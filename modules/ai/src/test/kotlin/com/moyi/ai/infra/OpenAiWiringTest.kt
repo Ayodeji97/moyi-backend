@@ -22,7 +22,7 @@ internal class OpenAiWiringTest {
                 """{"object":"list","data":[{"object":"embedding","index":0,"embedding":[$vector]}],""" +
                 """"model":"text-embedding-3-small","usage":{"prompt_tokens":1,"total_tokens":1}}"""
             val port =
-                AiConfiguration().embeddingPort(
+                AiConfiguration().provider(
                     AiProperties(
                         provider = AiProperties.Provider.OPENAI,
                         openai = AiProperties.OpenAi(apiKey = "sk-test", baseUrl = "${stub.baseUrl}/v1"),
@@ -45,7 +45,7 @@ internal class OpenAiWiringTest {
             stub.responses += 200 to """{"object":"list","data":[{"object":"embedding","index":0,"embedding":[$vector]}],""" +
                 """"model":"text-embedding-3-small","usage":{"prompt_tokens":1,"total_tokens":1}}"""
             val port =
-                AiConfiguration().embeddingPort(
+                AiConfiguration().provider(
                     AiProperties(openai = AiProperties.OpenAi(apiKey = "sk-test", baseUrl = stub.baseUrl + defaultPath)),
                     SimpleMeterRegistry(),
                     RestClient.builder(),
@@ -61,7 +61,7 @@ internal class OpenAiWiringTest {
             val vector = List(EmbeddingSpace.VOYAGE_3_5.dimensions) { "0.0" }.joinToString(",")
             stub.responses += 200 to """{"data":[{"embedding":[$vector],"index":0}],"usage":{"total_tokens":1}}"""
             val port =
-                AiConfiguration().embeddingPort(
+                AiConfiguration().provider(
                     AiProperties(
                         provider = AiProperties.Provider.VOYAGE,
                         voyage = AiProperties.Voyage(apiKey = "pa-test", baseUrl = stub.baseUrl),
@@ -77,7 +77,7 @@ internal class OpenAiWiringTest {
     @Test
     fun `OPENAI without a key refuses to start`() {
         shouldThrow<IllegalStateException> {
-            AiConfiguration().embeddingPort(AiProperties(), SimpleMeterRegistry(), RestClient.builder())
+            AiConfiguration().provider(AiProperties(), SimpleMeterRegistry(), RestClient.builder())
         }.message shouldContain "MOYI_AI_EMBEDDING_OPENAI_API_KEY"
     }
 }

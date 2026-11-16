@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/* One support ticket (A4 spec §4, ADR-0057): its words, its reference, the address to answer at as
+       identity holds it now and whether it was ever confirmed, and, while it is open, the close form.
+       th:text only: what a person wrote is shown escaped. */-->
+<head th:replace="~{admin/layout :: head('Support ticket')}"></head>
+<body>
+<header th:replace="~{admin/layout :: masthead}"></header>
+<nav th:replace="~{admin/layout :: nav(${moderator == true})}"></nav>
+<main class="wide">
+    <h1>Support ticket</h1>
+    <p th:replace="~{admin/layout :: result}"></p>
+    <dl>
+        <dt>Id</dt><dd th:text="${case.ticketId}"></dd>
+        <dt>Status</dt><dd id="status" th:text="${case.open} ? 'OPEN' : 'CLOSED'"></dd>
+        <dt>Sender</dt><dd><a th:href="@{/admin/users(q=${case.userId})}" th:text="${case.userId}"></a></dd>
+        <dt>Received</dt><dd th:text="${case.receivedAt}"></dd>
+        <dt>Answer at</dt>
+        <dd id="reply-to" th:text="${case.replyTo != null} ? ${case.replyTo} : 'No address: the account is gone.'"></dd>
+        <dt>Address confirmed</dt>
+        <dd th:text="${case.replyToConfirmed} ? 'yes' : 'no: it may not be the sender who owns it'"></dd>
+        <dt>Reference</dt><dd id="reference" th:text="${case.reference != null} ? ${case.reference} : '-'"></dd>
+    </dl>
+    <p th:unless="${case.open}">Closed: its words and reference were deleted.</p>
+    <th:block th:if="${case.open}">
+        <h2>Subject</h2>
+        <p id="subject" th:text="${case.subject}"></p>
+        <h2>Message</h2>
+        <blockquote id="body" th:text="${case.body}"></blockquote>
+        <form th:replace="~{admin/fragments/decision :: form(${closeForm})}"></form>
+    </th:block>
+    <p><a th:href="@{/admin/support}">Back to the inbox</a></p>
+</main>
+</body>
+</html>

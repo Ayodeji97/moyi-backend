@@ -1,7 +1,11 @@
 package com.moyi.scheduling.service
 
+import com.moyi.common.core.FeatureFlag
+import com.moyi.common.core.FeatureFlags
+import com.moyi.common.core.FlagReading
 import com.moyi.gratitude.api.DailyReminders
 import com.moyi.gratitude.api.ReminderRun
+import com.moyi.scheduling.infra.JobRuns
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
@@ -39,6 +43,8 @@ import java.util.concurrent.atomic.AtomicLong
 @Component
 internal class ReminderJob(
     private val reminders: DailyReminders,
+    private val flags: FeatureFlags,
+    private val runs: JobRuns,
     private val clock: Clock,
     meters: MeterRegistry,
 ) {
@@ -66,10 +72,22 @@ internal class ReminderJob(
     /** One run, without the timer or the lock. */
     fun remindOnce(): ReminderRun {
         val now = clock.instant()
+        // Switched off by an ADMIN (FR-115, ADR-0067 decision 7): nobody is asked about. A reminder that
+        // falls due meanwhile is never sent: once on, the window starts no earlier than the switch
+        // ([windowStart]). Still a run that finished: a pause is not a stopped job.
+        val flag = flags.read(FeatureFlag.DAILY_REMINDERS)
         val upTo = windowEndingBefore(now)
-        val run = reminders.remindDue(upTo.minus(LOOKBACK), upTo)
+        // Off, or switched on since the last boundary (an empty window): nobody is asked about, and
+        // it is still a run that finished.
+        val after = (flag as? FlagReading.On)?.let { windowStart(upTo, LOOKBACK, it.since) }
+        if (after == null) {
+            if (flag == FlagReading.Off) log.debug("reminders: switched off")
+            finished(now)
+            return ReminderRun(due = 0, requested = 0, alreadyWritten = 0, failed = 0)
+        }
+        val run = reminders.remindDue(after, upTo)
         requested.increment(run.requested.toDouble())
-        lastSuccess.set(now.epochSecond)
+        finished(now)
         if (run.failed > 0) {
             log.warn("reminders: due {}, asked for {}, had written {}, FAILED {}", run.due, run.requested, run.alreadyWritten, run.failed)
         } else if (run.due > 0) {
@@ -77,6 +95,11 @@ internal class ReminderJob(
             log.debug("reminders: due {}, asked for {}, had written {}", run.due, run.requested, run.alreadyWritten)
         }
         return run
+    }
+
+    private fun finished(now: Instant) {
+        lastSuccess.set(now.epochSecond)
+        runs.succeeded(LOCK)
     }
 
     internal companion object {

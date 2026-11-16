@@ -16,7 +16,7 @@ import org.springframework.web.client.RestClient
  * nothing, so these run without a network; the HTTP each model sends is Task 3's to test.
  */
 internal class AiConfigurationTest {
-    private fun port(properties: AiProperties) = AiConfiguration().embeddingPort(properties, SimpleMeterRegistry(), RestClient.builder())
+    private fun port(properties: AiProperties) = AiConfiguration().provider(properties, SimpleMeterRegistry(), RestClient.builder())
 
     @Test
     fun `none has no space, and every request is refused as no provider`() {
@@ -35,6 +35,27 @@ internal class AiConfigurationTest {
         port(
             AiProperties(provider = AiProperties.Provider.VOYAGE, voyage = AiProperties.Voyage(apiKey = "pa-test")),
         ).space shouldBe EmbeddingSpace.VOYAGE_3_5
+    }
+
+    @Test
+    fun `the bean is the provider behind the AI_EMBEDDINGS switch, whichever provider is configured`() {
+        val none =
+            AiConfiguration().embeddingPort(
+                AiProperties(provider = AiProperties.Provider.NONE),
+                SimpleMeterRegistry(),
+                RestClient.builder(),
+            ) {
+                false
+            }
+        shouldThrow<EmbeddingUnavailableException> { none.embed(listOf("x")) }.message shouldBe "switched off"
+        val openai =
+            AiConfiguration().embeddingPort(
+                AiProperties(openai = AiProperties.OpenAi(apiKey = "sk-test")),
+                SimpleMeterRegistry(),
+                RestClient.builder(),
+            ) { false }
+        openai.space shouldBe EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL
+        shouldThrow<EmbeddingUnavailableException> { openai.embed(listOf("x")) }.message shouldBe "switched off"
     }
 
     @Test

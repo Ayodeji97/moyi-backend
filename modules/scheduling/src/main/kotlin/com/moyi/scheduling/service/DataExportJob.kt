@@ -58,7 +58,7 @@ internal class DataExportJob(
         val made = exports.prepareDue(BATCH)
         prepared.increment(made.toDouble())
         lastSuccess.set(now.epochSecond)
-        runs.succeeded(LOCK, now)
+        runs.succeeded(LOCK)
         if (made > 0) log.info("data export: {} made ready", made)
         return made
     }
@@ -73,7 +73,7 @@ internal class DataExportJob(
             total += batch
         } while (batch == EXPIRY_BATCH && total < EXPIRY_BUDGET)
         expired.increment(total.toDouble())
-        runs.succeeded(EXPIRY_LOCK, now)
+        runs.succeeded(EXPIRY_LOCK)
         if (total > 0) log.info("data export: {} expired", total)
         return total
     }

@@ -1,7 +1,10 @@
 package com.moyi.scheduling.service
 
+import com.moyi.common.core.FeatureFlag
+import com.moyi.common.core.FeatureFlags
 import com.moyi.gratitude.api.EmbeddingRun
 import com.moyi.gratitude.api.EmbeddingSweep
+import com.moyi.scheduling.infra.JobRuns
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock
@@ -9,6 +12,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Clock
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -28,6 +32,8 @@ import java.util.concurrent.atomic.AtomicLong
 @Component
 internal class EmbeddingJob(
     private val sweep: EmbeddingSweep,
+    private val flags: FeatureFlags,
+    private val runs: JobRuns,
     private val clock: Clock,
     meters: MeterRegistry,
 ) {
@@ -50,9 +56,17 @@ internal class EmbeddingJob(
     /** One run, without the timer or the lock. */
     fun embedOnce(): EmbeddingRun {
         val now = clock.instant()
+        // Switched off by an ADMIN (FR-115, ADR-0067 decision 7). The `ai` module's port refuses every
+        // call while it is off, which is what keeps text from the provider; skipping the sweep only spares
+        // a failed call a minute. Entries written meanwhile stay pending and are embedded once it is on.
+        if (!flags.isOn(FeatureFlag.AI_EMBEDDINGS)) {
+            log.debug("embedding: switched off")
+            finished(now)
+            return EmbeddingRun(embedded = 0, skipped = 0, failed = false)
+        }
         val run = sweep.embedPending(BUDGET)
         val reachedProvider = run.embedded + run.skipped > 0
-        if (!run.failed || reachedProvider) lastSuccess.set(now.epochSecond)
+        if (!run.failed || reachedProvider) finished(now)
         // Counts only: which entries were pending is the couple's.
         if (run.failed) {
             log.warn("embedding: a provider call failed; embedded {}, skipped {}", run.embedded, run.skipped)
@@ -60,6 +74,11 @@ internal class EmbeddingJob(
             log.debug("embedding: embedded {}, skipped {}", run.embedded, run.skipped)
         }
         return run
+    }
+
+    private fun finished(now: Instant) {
+        lastSuccess.set(now.epochSecond)
+        runs.succeeded(LOCK)
     }
 
     internal companion object {

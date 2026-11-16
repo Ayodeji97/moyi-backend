@@ -62,7 +62,7 @@ internal class AccountDeletionJob(
         } while (batch == BATCH && total < RUN_BUDGET)
         executed.increment(total.toDouble())
         lastSuccess.set(now.epochSecond)
-        runs.succeeded(LOCK, now)
+        runs.succeeded(LOCK)
         if (total > 0) log.info("account deletion: carried out {}", total)
         return total
     }

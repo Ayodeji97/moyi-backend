@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/* The feature flags (A4 spec §4, FR-115): each pauses one optional send, is on by default, and is
+       switched by an ADMIN with a justification. th:text only. */-->
+<head th:replace="~{admin/layout :: head('Feature flags')}"></head>
+<body>
+<header th:replace="~{admin/layout :: masthead}"></header>
+<nav th:replace="~{admin/layout :: nav(true)}"></nav>
+<main class="wide">
+    <h1>Feature flags</h1>
+    <p th:replace="~{admin/layout :: result}"></p>
+    <p class="hint">A switch is seen by the next run of the job it pauses, on every instance. Nothing is sent later for the time it was off.</p>
+    <section th:each="f : ${flags}" th:attr="data-flag=${f.key}" th:aria-labelledby="${'flag-' + f.key}">
+        <h2 th:id="${'flag-' + f.key}" th:text="${f.key}">FLAG</h2>
+        <p th:text="'Pauses: ' + ${f.pauses}">Pauses.</p>
+        <p class="state" th:text="${f.on} ? 'On' : 'Off'">On</p>
+        <p class="hint" th:text="${f.changedAt != null} ? ('Last switched ' + ${f.changedAt} + ' by admin ' + ${f.changedBy}) : 'Never switched: on by default.'">Never switched.</p>
+        <form method="post" th:action="@{/admin/flags/{key}(key=${f.key})}" class="decision" th:id="${'switch-' + f.key}">
+            <input type="hidden" name="enabled" th:value="${!f.on}">
+            <div class="field">
+                <label th:for="${'justification-' + f.key}">Justification</label>
+                <p th:id="${'hint-' + f.key}" class="hint" th:text="${hint}">Required.</p>
+                <textarea th:id="${'justification-' + f.key}" name="justification" rows="2" required
+                          th:attr="aria-describedby=${'hint-' + f.key}"
+                          th:text="${refused != null and refused.key == f.key} ? ${refused.justification} : ''"></textarea>
+            </div>
+            <p th:if="${refused != null and refused.key == f.key}" class="error" role="alert" th:text="${refused.error}">Error.</p>
+            <button type="submit" th:text="${f.on} ? 'Switch off' : 'Switch on'">Switch off</button>
+        </form>
+    </section>
+</main>
+</body>
+</html>

@@ -8,7 +8,9 @@ What exists: sign-in with a password and an authenticator code, three roles, an 
 audit log (A1, ADR-0055); a user lookup by id or exact email, metadata only, with a stated
 purpose; for a `MODERATOR` or `ADMIN`, the report queue and the quarantined media (A2,
 ADR-0063); for an `ADMIN`, reading a reported entry's words (A5, ADR-0064) and suspending an
-account or lifting its suspension (A3, ADR-0066, below). The moderation steps themselves are
+account or lifting its suspension (A3, ADR-0066, below); for every role, the jobs page and the
+support inbox, and for an `ADMIN`, the close job run by hand, a bond's streak rebuilt and three
+feature flags (A4, ADR-0067, below). The moderation steps themselves are
 `ops/moderation/takedown.md`'s.
 It lives under `/admin`. The owner ruled (2026-11-11, ADR-0055) that it is reached at
 `admin.getmoyi.app`, DNS only, allowlisted to his own address; that host is not routed yet (see
@@ -232,6 +234,82 @@ stays withheld after the lift (ADR-0066 decision 17).
 The same attempt twice (suspending a suspended account, lifting one that is not) changes nothing and
 is still recorded, `REFUSED`.
 
+## The jobs page
+
+`/admin/jobs`, for every role. One row per job that runs under a ShedLock lock (eleven): its lock
+name, what it does, its schedule here, when it last started, until when it holds its lock, when it
+last **finished** (`job_runs`), and "running" when it started after its last finish and still holds
+its lock. The line above the table says whether the timer runs the jobs on this instance. Nothing
+on the page writes an audit row. The outbox poller is not on it: its health is its own gauges.
+
+**A date's days:** type a date (`YYYY-MM-DD`) and **Check**. It counts, across every bond, that
+date's days still open, how many of those are past due (the next run closes them), and how many are
+closed but not yet counted in their streak. All three at zero means the date is done. A day nobody
+wrote and the job has not written yet is not counted.
+
+## Running the close job by hand
+
+This replaces the redeploy in doc 11's `close-job-did-not-run.md` wherever the console is on. For
+an `ADMIN` only.
+
+1. On the jobs page, under **Run the close job now**, type a justification (1 to 400 characters)
+   and press the button. No code is asked: the run does only what the timer does every fifteen
+   minutes and is safe to repeat.
+2. It runs under the timer's own lock. If the timer or another instance holds it, nothing runs and
+   the page says "The close job's lock is held …": it is running, or ran moments ago and keeps its
+   lock for up to thirty seconds more. Try again in a minute. Otherwise it runs in the
+   request and the page says what it did ("Ran: created N, closed N, revealed N, counted N, failed
+   N."); "More days are waiting" means it stopped at its budget, so run it again.
+3. One `JOB_RUN` audit row is written **before** the run (`result: STARTED`, or `BUSY`, `REFUSED`).
+   What the run changed is in the page's line and the application log, not the row.
+4. Then check the date that worried you (above).
+
+**Never delete a row from `shedlock`.** ShedLock remembers which lock names it has inserted and
+afterwards only updates their rows, so an instance whose row was deleted can never take that lock
+again until it restarts, and the job stops without a word (ADR-0067 decision 19). To free a lock
+left by a dead instance, update it:
+
+```
+UPDATE shedlock SET lock_until = timezone('utc', now()) WHERE name = 'close-days';
+```
+
+**Rebuilding a bond's streak** (FR-074), when a couple reports a streak that looks wrong: under
+**Rebuild a bond's streak**, the bond id and a justification. It replays the bond's counted days,
+changes the stored streak only if it had drifted, and tells nobody. The answer is "Rebuilt: the
+stored streak had drifted; it is now …", "Rebuilt: nothing had drifted." or "That bond has no
+counted day". Each is a `STREAK_RECALCULATED` row with the figures before and after.
+
+## Feature flags
+
+`/admin/flags`, for an `ADMIN` only. Three switches, each on until someone switches it:
+
+| Flag | Off pauses | While off |
+|---|---|---|
+| `DAILY_REMINDERS` | the daily reminder push | a reminder that falls due is **never sent**, not even once it is on again |
+| `ON_THIS_DAY_PUSHES` | the on-this-day push | a push that falls due is **never sent**, not even once it is on again |
+| `AI_EMBEDDINGS` | every call to the embedding provider | search is keywords only; entries wait and are embedded once it is on; nothing stored is erased |
+
+Type a justification and press **Switch off** (or **Switch on**). It takes effect on the next run
+of the job, or the next search, on every instance, with no restart. Each switch is a
+`FEATURE_FLAG_CHANGED` row with `from` and `to`; switching to what it already is changes nothing and
+is recorded `REFUSED`. With the console off, nothing can switch a flag (and every flag is on).
+
+## The support inbox
+
+`/admin/support`, for every role. Once the console is on it replaces `moyi support` (which keeps
+working, and writes the same log).
+
+- The list shows the open tickets, oldest first: when, the ticket id, the sender's id (a link to
+  the lookup, which asks its own purpose), and how long the subject and message are. **Never the
+  words.** Opening the list is a `LISTED` log row and an audit row.
+- A ticket's page shows its subject, message and reference, the address to answer at **as the
+  account holds it now** (none if the account is gone), and whether that address was ever confirmed
+  (an unconfirmed one may not be the sender's). Opening it is a `READ` log row and an audit row.
+- **Answer from your own mailbox**, then **Close this ticket** with a note of what you did. Closing
+  deletes the words and the reference, so it needs a code proven in the last five minutes (the same
+  window as the moderation decisions). "Already closed" means another operator, `moyi support` or
+  an account deletion closed it first.
+
 ## Routing a host of its own
 
 Doc 10 names `admin.getmoyi.app`, and the owner ruled (2026-11-11) that the console is reached
@@ -248,7 +326,7 @@ The console never does these; they are `scripts/moyi` or `psql` on the server, a
   runbook §2 step 4; the owner's ruling 4 in ADR-0063);
 - holding or blocking an asset that is not in the quarantine queue, by id (`moyi media quarantine
   hold|block`, for a report that came by email);
-- the support inbox (`moyi support`, ADR-0057);
+- the support inbox, while the console is off (`moyi support`, ADR-0057);
 - the TOTP key, the allowlist and the switch itself (deploy-time configuration).
 
 Once the console is on, an entry's words are no longer read at `psql` to decide a report (the
@@ -259,5 +337,8 @@ the spent code again, which answers `401` and counts towards the five-failure lo
 
 ## What this does not do
 
-No entry content beyond that one read (A5, ADR-0064), no job re-runs, no passkeys (ADR-0055, the owner's ruling 1: TOTP only until a second operator
-joins), no suspension with an end date and no appeal route (ADR-0066). Jobs are A4.
+No entry content beyond that one read (A5, ADR-0064), no re-run of any job but the close job, no
+replying to a ticket from the console, no client-side flags or percentage rollouts (ADR-0067), no
+passkeys (ADR-0055, the owner's ruling 1: TOTP only until a second operator joins), no suspension
+with an end date and no appeal route (ADR-0066), and no `audit_log` retention yet (owed, due by
+2028-11-11).

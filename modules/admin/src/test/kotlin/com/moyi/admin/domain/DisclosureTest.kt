@@ -180,6 +180,10 @@ internal class DisclosureTest {
         const val MEDIA = "MEDIA"
 
         /** Every `target_type` the console writes, an unknown one, and none. */
-        val TARGETS: List<String?> = listOf(USER, MEDIA, "ENTRY", "REPORT", "ADMIN_ACCOUNT", "SOMETHING_ELSE", null)
+        val TARGETS: List<String?> =
+            listOf(USER, MEDIA, "ENTRY", "REPORT", "ADMIN_ACCOUNT", "BOND", "FLAG", "SUPPORT_TICKET", "SOMETHING_ELSE", null)
+
+        /** Every outcome, target, purpose (and none) and reportDriven value: what [everyRow] gives each action. */
+        val ROWS_PER_ACTION = AuditOutcome.entries.size * TARGETS.size * (LookupPurpose.entries.size + 1) * 3
     }
 }

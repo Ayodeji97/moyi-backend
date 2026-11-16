@@ -30,7 +30,7 @@ internal class TimedOutCallTest {
     fun `after an OpenAI timeout the thread is not interrupted and the next call succeeds`() {
         StubHttpServer("/v1/embeddings").use { stub ->
             val port =
-                AiConfiguration().embeddingPort(
+                AiConfiguration().provider(
                     AiProperties(
                         provider = AiProperties.Provider.OPENAI,
                         openai = AiProperties.OpenAi(apiKey = "sk-test", baseUrl = "${stub.baseUrl}/v1"),
@@ -59,7 +59,7 @@ internal class TimedOutCallTest {
     fun `after an OpenAI call timeout on a slow body the thread is not interrupted and the next call succeeds`() {
         StubHttpServer("/v1/embeddings").use { stub ->
             val port =
-                AiConfiguration().embeddingPort(
+                AiConfiguration().provider(
                     AiProperties(
                         provider = AiProperties.Provider.OPENAI,
                         openai = AiProperties.OpenAi(apiKey = "sk-test", baseUrl = "${stub.baseUrl}/v1"),
@@ -84,7 +84,7 @@ internal class TimedOutCallTest {
     fun `after a Voyage timeout the thread is not interrupted and the next call succeeds`() {
         StubHttpServer("/v1/embeddings").use { stub ->
             val port =
-                AiConfiguration().embeddingPort(
+                AiConfiguration().provider(
                     AiProperties(
                         provider = AiProperties.Provider.VOYAGE,
                         voyage = AiProperties.Voyage(apiKey = "pa-test", baseUrl = stub.baseUrl),

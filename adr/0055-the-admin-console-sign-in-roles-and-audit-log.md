@@ -181,7 +181,9 @@ who agreed to each recommendation on 2026-11-11.
   (ADR-0063 decision 14), departing from A1 spec §9's `GET ?q=`, and implemented ADR-0059's
   `AdminAccessLog`. The owner ruled A5 is built before A3.* *A3 (suspension) done by ADR-0066,
   2026-11-13: suspending an account is `ADMIN`'s second act that `MODERATOR` lacks, after reading a
-  reported entry's words (ADR-0064).*
+  reported entry's words (ADR-0064).* *A4 (the jobs page, three feature flags and the support inbox)
+  done by ADR-0067, 2026-11-14. The `audit_log` retention job is still owed, now with a date: nothing
+  is due before 2028-11-11, and ADR-0067 decision 15 records its design sketch.*
 - ~~**A follow-up pull request:** narrow the trusted proxies to kamal-proxy alone (ruling 5). The
   console is not switched on before it merges.~~ Done by ADR-0062 (2026-11-11); the console is
   not switched on before that is deployed.

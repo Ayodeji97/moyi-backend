@@ -31,6 +31,7 @@ import java.io.File
  * exists to prevent: it makes the convention the other rules assume into
  * a rule of its own.
  */
+@Suppress("LargeClass") // One rule per test, each with its positive controls: splitting them would split the one list of rules.
 class ArchitectureTest {
     companion object {
         /**
@@ -76,6 +77,13 @@ class ArchitectureTest {
                     "ReportedEntryRead",
                     "ReportedWords",
                     "WordsRefusal",
+                    // A4: the streak rebuild and the date check (A4 spec §5, ADR-0067 decisions 3, 6).
+                    "StreakRecalculation",
+                    "StreakRebuild",
+                    "StreakFigures",
+                    "RebuildResult",
+                    "DaySettlement",
+                    "DateSettlement",
                 ).map { "com.moyi.gratitude.api.$it" }
 
         /** The `api` packages A2's console reaches for its two queues, and for nothing else. */
@@ -520,6 +528,14 @@ class ArchitectureTest {
                 "com.moyi.identity.api.AccountStatus" to "identity",
                 "com.moyi.bond.api.BondAdminLookup" to "bond",
                 "com.moyi.bond.api.BondAdminView" to "bond",
+                // A4: the jobs page's port and the support inbox's, with their types (spec §5).
+                "com.moyi.scheduling.api.JobConsole" to "scheduling",
+                "com.moyi.scheduling.api.JobStatus" to "scheduling",
+                "com.moyi.scheduling.api.CloseRun" to "scheduling",
+                "com.moyi.support.api.SupportInbox" to "support",
+                "com.moyi.support.api.TicketRow" to "support",
+                "com.moyi.support.api.TicketCase" to "support",
+                "com.moyi.support.api.TicketCloseOutcome" to "support",
             ) + A2_MODERATION_TYPES.associateWith { it.removePrefix("com.moyi.").substringBefore('.') }
 
         // A wildcard import of a declaring package (`com.moyi.media.api.*`) reaches every
@@ -562,6 +578,39 @@ class ArchitectureTest {
             "Only the admin module (and the module declaring them) may import the admin lookups, PasswordHashing and " +
                 "the moderation ports. Found: $violations",
         )
+    }
+
+    @Test
+    fun `only the admin module's infra writes feature_flags in main code`() {
+        // ADR-0067 decision 11: `admin.infra.FeatureFlagStore` is the one writer of the flags, behind
+        // the console's role, justification and audit row; every other module reads them through
+        // `common.core.FeatureFlags`. A second writer would be a switch with no audit row. Tests may
+        // write the table: they build the cases. Matched on the SQL, wherever it is written.
+        val writes = Regex("""(?i)\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+feature_flags\b""")
+
+        fun violates(
+            path: String,
+            text: String,
+        ): Boolean =
+            "/src/main/" in path && !path.startsWith("/modules/admin/src/main/kotlin/com/moyi/admin/infra/") && writes.containsMatchIn(text)
+        // Positive controls: a write elsewhere in main code is caught; the store's, a test's and a read are not.
+        assertTrue(
+            violates("/modules/scheduling/src/main/kotlin/X.kt", "UPDATE feature_flags SET enabled = false"),
+            "a write was let through",
+        )
+        assertTrue(violates("/app/src/main/kotlin/X.kt", "insert into  feature_flags (key)"), "a lower-case insert was let through")
+        assertTrue(
+            !violates("/modules/admin/src/main/kotlin/com/moyi/admin/infra/FeatureFlagStore.kt", "INSERT INTO feature_flags"),
+            "the store was refused",
+        )
+        assertTrue(!violates("/modules/admin/src/test/kotlin/X.kt", "DELETE FROM feature_flags"), "a test was refused")
+        assertTrue(!violates("/modules/scheduling/src/main/kotlin/X.kt", "SELECT enabled FROM feature_flags"), "a read was refused")
+        val violations =
+            project.files
+                .filter { violates(it.normalisedProjectPath, it.text) }
+                .map { it.normalisedProjectPath }
+
+        assertTrue(violations.isEmpty(), "Only admin.infra may write feature_flags in main code (ADR-0067 decision 11). Found: $violations")
     }
 
     @Test

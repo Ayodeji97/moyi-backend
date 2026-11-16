@@ -28,6 +28,9 @@ package com.moyi.admin.domain
  * An `ACCOUNT_SUSPENDED` or `ACCOUNT_UNSUSPENDED` row is withheld whatever its outcome, target or
  * metadata (A3 spec §10): a suspension is usually report-driven, and in a bond of two the reporter is
  * the partner; the release review owed for withheld rows decides whether a lifted one may be shown.
+ * None of A4's rows is shown, whatever its outcome, target or metadata (ADR-0067 decision 14): a job run and a
+ * flag switched name nobody; a streak rebuilt is a bond's and changes nothing anybody wrote; a support ticket
+ * listed, read or closed is what the person sent to a person, and its acknowledgement told them a person reads it.
  * A `MEDIA_DELETED` row whose `reportDriven` is unknown (`null`) is withheld too: only a row
  * that says no report drove it is shown.
  */
@@ -41,6 +44,17 @@ internal object Disclosure {
     /** The `audit_log.target_type` of a row about one of a member's media. */
     const val MEDIA = "MEDIA"
 
+    /** ADR-0067 decision 14: withheld, every one, whatever the row says. */
+    private val A4_ACTIONS =
+        setOf(
+            AuditAction.JOB_RUN,
+            AuditAction.STREAK_RECALCULATED,
+            AuditAction.FEATURE_FLAG_CHANGED,
+            AuditAction.SUPPORT_INBOX_VIEWED,
+            AuditAction.SUPPORT_TICKET_READ,
+            AuditAction.SUPPORT_TICKET_CLOSED,
+        )
+
     fun shows(
         action: AuditAction,
         outcome: AuditOutcome,
@@ -51,6 +65,7 @@ internal object Disclosure {
         when {
             action == AuditAction.ACCOUNT_SUSPENDED || action == AuditAction.ACCOUNT_UNSUSPENDED -> null
             action == AuditAction.ENTRY_TEXT_READ -> null
+            action in A4_ACTIONS -> null
             outcome != AuditOutcome.SUCCEEDED -> null
             action == AuditAction.USER_LOOKED_UP && targetType == USER && purpose?.disclosed == true -> ACCOUNT_LOOKED_UP
             action == AuditAction.MEDIA_DELETED && targetType == MEDIA && reportDriven == false -> MEDIA_REMOVED

@@ -1,6 +1,7 @@
 # ADR-0050 — Media erasure deletes the objects; the reaper, the demotion and the mirror
 
-**Status:** Accepted · **Date:** 2026-10-29 · **Deciders:** Daniel
+**Status:** Accepted · **Date:** 2026-10-29 · **Deciders:** Daniel · **Amended:** 2026-11-14 (every
+locked job records its finish in `job_runs`, not only these: ADR-0067 decision 2)
 
 ## Context
 

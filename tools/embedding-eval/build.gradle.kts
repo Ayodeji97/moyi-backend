@@ -10,6 +10,7 @@ plugins {
 // vectors it writes are the vectors production would make.
 dependencies {
     implementation(projects.modules.ai)
+    implementation(projects.common.core) // the FeatureFlags the ai port asks for (ADR-0067)
     implementation("org.springframework:spring-context")
     implementation("org.springframework:spring-web")
     implementation("io.micrometer:micrometer-core")

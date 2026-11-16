@@ -1,7 +1,9 @@
 # ADR-0057 — In-app support messages: a ticket for a person, an acknowledgement that never repeats it, and the operator's queue in the database
 
 **Status:** Accepted · **Date:** 2026-11-08 · **Amended:** 2026-11-10 (decision 11, an optional
-`reference`, issue #168; decisions 7, 8 and 10 widened to carry it) · **Deciders:** Daniel, for FR-102
+`reference`, issue #168; decisions 7, 8 and 10 widened to carry it); 2026-11-14 (the admin console
+lists, reads and closes tickets through `support.api.SupportInbox`, over the same three functions, as
+`admin:<id>`: ADR-0067 decisions 12 and 13) · **Deciders:** Daniel, for FR-102
 and doc 06; decisions 1, 3, 6 and 7 were made without him and are his to revisit (issue #129 left them
 to the backend); decision 11's rulings were the session lead's for issue #168.
 

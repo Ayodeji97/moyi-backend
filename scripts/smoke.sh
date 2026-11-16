@@ -357,6 +357,33 @@
 # sessions lock; a reset link or code from before a suspension refused; no resend mail; the V65
 # guard), from a jar of 64630af3's tree, on a fresh database that applied 60 migrations to V66,
 # the same compose project and ports: 1849 passed, 0 failed, 0 skipped, the same 38 "admin A3".
+# Since the admin console A4 (FR-114, FR-115, FR-074, ADR-0067) a fourth admin section has an invited
+# ADMIN and SUPPORT use the jobs page, the flags and the support inbox: every new POST from a refused
+# address the API's own 401, byte for byte an unknown path's; the jobs page listing the eleven locked
+# jobs with close-days' finish in job_runs; today's date check, and a value that is not a date 400; the
+# close job run by hand (its lock freed by an UPDATE first, never a DELETE) a 303 saying what it did
+# with one JOB_RUN STARTED row, and while another holds the lock BUSY with a REFUSED row; a blank
+# justification 422; a bond's streak rebuilt NO_DAYS (no day of a smoke run is counted) and a bad bond
+# id 422; DAILY_REMINDERS off, off again (UNCHANGED, REFUSED) and on, three rows with from and to, an
+# unknown flag 404; a ticket filed through the API listed without its words, read with them, closed
+# inside the step-up window (302, its words, body and reference null) and closed again "Already
+# closed"; support_ticket_log under admin:<id>; SUPPORT seeing the jobs page and the inbox but no run
+# form, its run 403 with no row, the flags 403; the member's export listing none of it; no note,
+# subject or message in a log line. Last run on 2026-11-14, on feat/admin-console-a4, from a jar of
+# 1dd5822d's tree, on a fresh database that applied 61 migrations to V67, against its own compose
+# project (moyi-a4: Postgres 55481, Valkey 56401, MinIO 59481), the jar booted by hand (local profile,
+# the five crons at */5, ports 8099/9099) and --attach: 1914 passed, 4 failed (four faults in the new
+# section's own probes: a column named job, not name; a job count read from the wrong markup; a CSRF
+# token taken from a closed ticket's page, which has no form; READ rows from the pages after a close
+# left out). Fixed, and run again on the same stack: 1918 passed, 0 failed, 0 skipped, 64 "admin A4".
+# After the review wave (a paused send never sent late; job_runs records the finish; BUSY says the
+# lock is held), from a jar of be8c26df's tree, on a fresh database at V67, the same project and
+# ports: 1917 passed, 1 failed (this section's own BUSY match, written with the apostrophe the page
+# escapes); the match fixed, on a fresh database again: 1917 passed, 0 failed, 1 skipped (the tag
+# across the erasure, the poller having won the race), 64 "admin A4".
+# After review wave 2 (an empty window after a late switch-on is an empty run; one read of a flag),
+# from a jar of bb559a68's tree, on a fresh database at V67, the same project and ports: 1918
+# passed, 0 failed, 0 skipped, 64 "admin A4".
 # The late-entries probe "the job has run since" (the ShedLock floor named under #126, and failed in
 # four recorded runs) now waits up to 60 s for the close job's next run, not 30: the lock's 30 s floor
 # plus the five-second cron put that run up to 35 s away, and the 30 one-second polls ran out first.
@@ -711,10 +738,22 @@ a3_cleanup() {
   [ -n "${M2_EMAIL_a3:-}" ] && { sql "SELECT admin_disable('$M2_EMAIL_a3')" >/dev/null || true; }
   return 0
 }
+# a4_cleanup: disables the admin A4 section's two accounts and puts DAILY_REMINDERS back to its default.
+A4_CLEANUP=0
+a4_cleanup() {
+  local email
+  for email in "${M2_EMAIL_a4:-}" "${M2_EMAIL_a4s:-}"; do
+    [ -n "$email" ] && { sql "SELECT admin_disable('$email')" >/dev/null || true; }
+  done
+  sql "UPDATE shedlock SET lock_until = timezone('utc', now()) WHERE name = 'close-days' AND locked_by = 'smoke-a4'" >/dev/null || true
+  sql "DELETE FROM feature_flags WHERE key = 'DAILY_REMINDERS'" >/dev/null || true
+  return 0
+}
 on_exit() {
   if [ "$PR_TRANSLATIONS_IN" = 1 ]; then sql "DELETE FROM prompt_texts WHERE text LIKE 'PT~ %'" >/dev/null || true; fi
   if [ "$M2_CLEANUP" = 1 ]; then m2_cleanup; fi
   if [ "$A3_CLEANUP" = 1 ]; then a3_cleanup; fi
+  if [ "$A4_CLEANUP" = 1 ]; then a4_cleanup; fi
   if [ -n "$APP_PID" ]; then kill "$APP_PID" 2>/dev/null || true; wait "$APP_PID" 2>/dev/null || true; fi
 }
 trap on_exit EXIT
@@ -4520,6 +4559,170 @@ else
   if grep -qE "suspension admin=$A3_ADMIN user=$A3_USER result=SUSPENDED" "$MOYI_LOG"; then pass "admin A3: …and the act's own log line names ids and the result"; else fail "admin A3: the suspension's log line" "no 'suspension admin=… user=… result=SUSPENDED' in $MOYI_LOG"; fi
   a3_cleanup
   A3_CLEANUP=0
+fi
+
+echo; echo "admin console A4 — the jobs page, the close job by hand, a streak rebuilt, a flag switched, the support inbox (FR-114, FR-115, FR-074, ADR-0067)"
+# Spec §10 of docs/superpowers/specs/2026-11-14-admin-console-a4-design.md. It reuses the A2 section's
+# helpers, so it runs only where that section did. Not driven here: a reminder not asked for while
+# DAILY_REMINDERS is off (it needs a reminder due in a given minute; JobRunsAndFlagsTest holds it), and
+# a rebuild that answers CHANGED or UNCHANGED (no day of this run has been counted, so the bond is
+# NO_DAYS; StreakRecalculationServiceTest holds the other two).
+if ! command -v oathtool >/dev/null; then
+  skip "admin A4: the whole section (oathtool not installed: brew install oath-toolkit)"
+elif [ "$PSQL_OK" != 1 ]; then
+  skip "admin A4: the whole section (psql not reachable through docker compose)"
+elif [ "$ADM_ON" != 200 ] || ! declare -F m2_admin >/dev/null; then
+  skip "admin A4: the whole section (this server has the console off, or the A2 section did not run)"
+else
+  flush_buckets
+  A4_CLEANUP=1 # from here, however the run ends, on_exit disables the accounts and puts the flag back
+  # Every new POST from a refused address: the API's own 401, as every other console path.
+  expect "admin A4: POST an unknown path from a refused address gets the API's 401" 401 '"status":401' -- -X POST "$ADM/jobs/no-such-path" -H 'X-Forwarded-For: 203.0.113.9'
+  A4_UNKNOWN_POST="$(no_instance)"
+  for p in jobs/close-days/run jobs/streak/recalculate flags/DAILY_REMINDERS support/00000000-0000-7000-8000-000000000000/close; do
+    expect "admin A4: POST /admin/$p from a refused address gets the API's 401" 401 '"status":401' -- -X POST "$ADM/$p" -H 'X-Forwarded-For: 203.0.113.9'
+    is "admin A4: …byte for byte what an unknown path answers (but its instance)" "$(no_instance)" "$A4_UNKNOWN_POST"
+  done
+
+  A4_NOTE="smoke-a4-justification-$RANDOM$RANDOM"
+  m2_admin a4 ADMIN; A4_ADMIN="$M2_ID_a4"; A4_J="$ADM_DIR/a4-admin"
+  m2_admin a4s SUPPORT; A4_SJ="$ADM_DIR/a4-support"
+  m2_sign_in a4 "$A4_J"
+  adm_is "admin A4: the ADMIN signs in" 302 "/admin"
+  adm_code "$A4_J" "$ADM"
+  if [[ "$ADM_BODY" == *'href="/admin/jobs"'* && "$ADM_BODY" == *'href="/admin/support"'* && "$ADM_BODY" == *'href="/admin/flags"'* && "$ADM_BODY" == *'id="open-tickets"'* ]]; then pass "admin A4: the ADMIN's home has the open-ticket count and links to the jobs, the inbox and the flags"; else fail "admin A4: the ADMIN's navigation" "${ADM_BODY:0:300}"; fi
+
+  # The jobs page: eleven jobs, close-days with a finish recorded by the timer's runs (*/5 here).
+  adm_code "$A4_J" "$ADM/jobs"
+  adm_is "admin A4: the jobs page is 200" 200
+  is "admin A4: …it lists the eleven locked jobs" "$(printf '%s' "$ADM_BODY" | grep -o 'data-job="[^"]*"' | sort -u | wc -l | tr -d ' ')" "11"
+  is "admin A4: …close-days with a last finish recorded" "$(sql "SELECT count(*) FROM job_runs WHERE name = 'close-days'")" "1"
+  if [[ "$ADM_BODY" == *"The timer runs these jobs on this instance."* ]]; then pass "admin A4: …and says the timer runs here"; else fail "admin A4: the timer line" "${ADM_BODY:0:300}"; fi
+  adm_code "$A4_J" "$ADM/jobs?date=$(date -u +%Y-%m-%d)"
+  if [ "$ADM_CODE" = 200 ] && [[ "$ADM_BODY" == *'id="settlement"'* && "$ADM_BODY" == *'id="past-due"'* ]]; then pass "admin A4: the date check for today answers its three counts (200)"; else fail "admin A4: the date check" "$ADM_CODE ${ADM_BODY:0:300}"; fi
+  adm_code "$A4_J" "$ADM/jobs?date=yesterday"
+  adm_is "admin A4: …a value that is not a date is 400" 400
+  if [[ "$ADM_BODY" == *"Not a date. Use YYYY-MM-DD."* ]]; then pass "admin A4: …saying so"; else fail "admin A4: the not-a-date line" "${ADM_BODY:0:300}"; fi
+
+  # The close job by hand. Its lock is held most of the time at */5 (lockAtLeastFor 30 s), so free it
+  # (an UPDATE, never a DELETE: ADR-0067 decision 19) and run at once, a few times if the timer wins.
+  A4_RAN=""
+  for _ in 1 2 3 4 5 6; do
+    sql "UPDATE shedlock SET lock_until = timezone('utc', now()) WHERE name = 'close-days'" >/dev/null
+    adm_code "$A4_J" "$ADM/jobs"; AD_CSRF="$(adm_csrf)"
+    adm_code "$A4_J" -X POST "$ADM/jobs/close-days/run" --data-urlencode "justification=$A4_NOTE" --data-urlencode "_csrf=$AD_CSRF"
+    [ "$ADM_CODE" = 303 ] || break
+    A4_LOC="$(adm_location)"; m2_follow "$A4_J"
+    if [[ "$ADM_BODY" == *"Ran: created "* ]]; then A4_RAN=1; break; fi
+    sleep 1
+  done
+  if [ -n "$A4_RAN" ]; then pass "admin A4: an ADMIN runs the close job: 303 to the jobs page, saying what it did"; else fail "admin A4: the close run by hand" "$ADM_CODE ${ADM_BODY:0:300}"; fi
+  if [[ "${A4_LOC:-}" == *"$A4_NOTE"* || "$ADM_BODY" == *"$A4_NOTE"* ]]; then fail "admin A4: …the note is in neither the Location nor the page" "it is"; else pass "admin A4: …the note is in neither the Location nor the page"; fi
+  db_is "admin A4: …one JOB_RUN row STARTED, with the note as justification" "$(sql "SELECT count(*) FROM audit_log WHERE actor_id = '$A4_ADMIN' AND action = 'JOB_RUN' AND outcome = 'SUCCEEDED' AND metadata->>'result' = 'STARTED' AND metadata->>'job' = 'close-days' AND justification = '$A4_NOTE'")" "1"
+  # Held by someone else: BUSY, a REFUSED row, nothing run.
+  sql "UPDATE shedlock SET lock_until = timezone('utc', now()) + interval '2 minutes', locked_by = 'smoke-a4' WHERE name = 'close-days'" >/dev/null
+  adm_code "$A4_J" "$ADM/jobs"; AD_CSRF="$(adm_csrf)"
+  adm_code "$A4_J" -X POST "$ADM/jobs/close-days/run" --data-urlencode "justification=$A4_NOTE" --data-urlencode "_csrf=$AD_CSRF"
+  adm_is "admin A4: while another holds the lock, the run is a 303 too" 303 "/admin/jobs"
+  m2_follow "$A4_J"
+  if [[ "$ADM_BODY" == *"lock is held: it is running now"* ]]; then pass "admin A4: …saying the close job's lock is held"; else fail "admin A4: the BUSY line" "${ADM_BODY:0:300}"; fi
+  db_is "admin A4: …a REFUSED BUSY row" "$(sql "SELECT count(*) FROM audit_log WHERE actor_id = '$A4_ADMIN' AND action = 'JOB_RUN' AND outcome = 'REFUSED' AND metadata->>'result' = 'BUSY'")" "1"
+  sql "UPDATE shedlock SET lock_until = timezone('utc', now()) WHERE name = 'close-days' AND locked_by = 'smoke-a4'" >/dev/null
+  adm_code "$A4_J" "$ADM/jobs"; AD_CSRF="$(adm_csrf)"
+  adm_code "$A4_J" -X POST "$ADM/jobs/close-days/run" --data-urlencode "justification= " --data-urlencode "_csrf=$AD_CSRF"
+  adm_is "admin A4: a blank justification is the page again, 422" 422
+
+  # A bond's streak rebuilt: no day of this run has been counted, so NO_DAYS, REFUSED, nothing written.
+  A4_BOND="$(sql "SELECT id FROM bonds WHERE status = 'ACTIVE' ORDER BY created_at DESC LIMIT 1")"
+  adm_code "$A4_J" "$ADM/jobs"; AD_CSRF="$(adm_csrf)"
+  adm_code "$A4_J" -X POST "$ADM/jobs/streak/recalculate" --data-urlencode "bondId=$A4_BOND" --data-urlencode "justification=$A4_NOTE" --data-urlencode "_csrf=$AD_CSRF"
+  adm_is "admin A4: a bond's streak rebuilt is a 303 to the jobs page" 303 "/admin/jobs"
+  m2_follow "$A4_J"
+  if [[ "$ADM_BODY" == *"That bond has no counted day: nothing to rebuild."* ]]; then pass "admin A4: …a bond with no counted day says so"; else fail "admin A4: the rebuild line" "${ADM_BODY:0:300}"; fi
+  db_is "admin A4: …one STREAK_RECALCULATED row, REFUSED NO_DAYS, on the bond" "$(sql "SELECT count(*) FROM audit_log WHERE actor_id = '$A4_ADMIN' AND action = 'STREAK_RECALCULATED' AND outcome = 'REFUSED' AND metadata->>'result' = 'NO_DAYS' AND target_id = '$A4_BOND'")" "1"
+  adm_code "$A4_J" "$ADM/jobs"; AD_CSRF="$(adm_csrf)"
+  adm_code "$A4_J" -X POST "$ADM/jobs/streak/recalculate" --data-urlencode "bondId=not-a-bond" --data-urlencode "justification=$A4_NOTE" --data-urlencode "_csrf=$AD_CSRF"
+  adm_is "admin A4: …a bond id that is not one is 422" 422
+
+  # A flag switched off, the same again, and back on.
+  a4_flag() { # <enabled>
+    adm_code "$A4_J" "$ADM/flags"; AD_CSRF="$(adm_csrf)"
+    adm_code "$A4_J" -X POST "$ADM/flags/DAILY_REMINDERS" --data-urlencode "enabled=$1" --data-urlencode "justification=$A4_NOTE" --data-urlencode "_csrf=$AD_CSRF"
+  }
+  adm_code "$A4_J" "$ADM/flags"
+  adm_is "admin A4: the flags page is 200" 200
+  if [[ "$ADM_BODY" == *'id="flag-DAILY_REMINDERS"'* && "$ADM_BODY" == *'id="flag-ON_THIS_DAY_PUSHES"'* && "$ADM_BODY" == *'id="flag-AI_EMBEDDINGS"'* ]]; then pass "admin A4: …listing the three flags"; else fail "admin A4: the three flags" "${ADM_BODY:0:300}"; fi
+  a4_flag false
+  adm_is "admin A4: switching DAILY_REMINDERS off is a 303 to the flags page" 303 "/admin/flags"
+  m2_follow "$A4_J"; [[ "$ADM_BODY" == *"Switched off."* ]] && pass "admin A4: …saying Switched off" || fail "admin A4: the switched-off line" "${ADM_BODY:0:300}"
+  db_is "admin A4: …the flag's row is off, by this admin" "$(sql "SELECT enabled || '|' || (updated_by = '$A4_ADMIN') FROM feature_flags WHERE key = 'DAILY_REMINDERS'")" "false|true"
+  a4_flag false
+  m2_follow "$A4_J"; [[ "$ADM_BODY" == *"Already off. Nothing changed."* ]] && pass "admin A4: off again says Already off" || fail "admin A4: the already-off line" "${ADM_BODY:0:300}"
+  a4_flag true
+  m2_follow "$A4_J"; [[ "$ADM_BODY" == *"Switched on."* ]] && pass "admin A4: on again says Switched on" || fail "admin A4: the switched-on line" "${ADM_BODY:0:300}"
+  db_is "admin A4: three FEATURE_FLAG_CHANGED rows: CHANGED, UNCHANGED refused, CHANGED" \
+    "$(sql "SELECT string_agg(outcome || ':' || (metadata->>'result') || ':' || (metadata->>'from') || '>' || (metadata->>'to'), ',' ORDER BY occurred_at) FROM audit_log WHERE actor_id = '$A4_ADMIN' AND action = 'FEATURE_FLAG_CHANGED' AND target_id = 'DAILY_REMINDERS'")" \
+    "SUCCEEDED:CHANGED:true>false,REFUSED:UNCHANGED:false>false,SUCCEEDED:CHANGED:false>true"
+  adm_code "$A4_J" "$ADM/flags"; AD_CSRF="$(adm_csrf)"
+  adm_code "$A4_J" -X POST "$ADM/flags/NO_SUCH_FLAG" --data-urlencode "enabled=false" --data-urlencode "justification=$A4_NOTE" --data-urlencode "_csrf=$AD_CSRF"
+  adm_is "admin A4: an unknown flag is the 404 page" 404
+
+  # The support inbox: a ticket filed through the API, listed without its words, read, closed.
+  verified_account "a4-member" "203.0.113.252"; A4_M="$ACCOUNT_ACCESS"
+  flush_buckets
+  A4_SUBJECT="A4~subject~$RANDOM$RANDOM"; A4_BODY="A4~body~$RANDOM$RANDOM"
+  expect "admin A4: a member files a ticket through the API" 201 '"createdAt"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $A4_M" -H "Idempotency-Key: $(new_key)" -d "{\"subject\":\"$A4_SUBJECT\",\"body\":\"$A4_BODY\"}"
+  A4_T="$(printf '%s' "$LAST_BODY" | jget id)"
+  adm_code "$A4_J" "$ADM/support"
+  adm_is "admin A4: the support inbox is 200" 200
+  if [[ "$ADM_BODY" == *"$A4_T"* ]]; then pass "admin A4: …listing the ticket"; else fail "admin A4: the ticket in the inbox" "${ADM_BODY:0:300}"; fi
+  if [[ "$ADM_BODY" == *"$A4_SUBJECT"* || "$ADM_BODY" == *"$A4_BODY"* ]]; then fail "admin A4: …without its words" "they are in the list"; else pass "admin A4: …without its words"; fi
+  adm_code "$A4_J" "$ADM/support/$A4_T"
+  adm_is "admin A4: the ticket's page is 200" 200
+  if [[ "$ADM_BODY" == *"$A4_SUBJECT"* && "$ADM_BODY" == *"$A4_BODY"* ]]; then pass "admin A4: …with its subject and message"; else fail "admin A4: the ticket's words" "${ADM_BODY:0:300}"; fi
+  adm_code "$A4_J" "$ADM/support/00000000-0000-7000-8000-000000000000"
+  adm_is "admin A4: an unknown ticket is the 404 page" 404
+  adm_code "$A4_J" "$ADM/support/$A4_T"; AD_CSRF="$(adm_csrf)"
+  adm_code "$A4_J" -X POST "$ADM/support/$A4_T/close" --data-urlencode "note=$A4_NOTE" --data-urlencode "_csrf=$AD_CSRF"
+  adm_is "admin A4: closing inside the step-up window redirects to the ticket" 302 "/admin/support/$A4_T"
+  m2_follow "$A4_J"
+  if [[ "$ADM_BODY" == *"Closed. Its words are gone."* ]]; then pass "admin A4: …saying its words are gone"; else fail "admin A4: the closed line" "${ADM_BODY:0:300}"; fi
+  db_is "admin A4: …the ticket is CLOSED with no subject, body or reference" "$(sql "SELECT status || '|' || (subject IS NULL) || '|' || (body IS NULL) || '|' || (reference IS NULL) FROM support_tickets WHERE id = '$A4_T'")" "CLOSED|true|true|true"
+  db_is "admin A4: …support_ticket_log has LISTED, READ and CLOSED under admin:<id>" "$(sql "SELECT string_agg(DISTINCT action, ',' ORDER BY action) FROM support_ticket_log WHERE actor = 'admin:$A4_ADMIN'")" "CLOSED,LISTED,READ"
+  # A closed ticket's page has no close form (so no CSRF token): take one from the jobs page.
+  adm_code "$A4_J" "$ADM/jobs"; AD_CSRF="$(adm_csrf)"
+  adm_code "$A4_J" -X POST "$ADM/support/$A4_T/close" --data-urlencode "note=$A4_NOTE" --data-urlencode "_csrf=$AD_CSRF"
+  m2_follow "$A4_J"
+  if [[ "$ADM_BODY" == *"Already closed. Nothing changed."* ]]; then pass "admin A4: closing it again says Already closed"; else fail "admin A4: the already-closed line" "${ADM_BODY:0:300}"; fi
+  # Every page of the ticket is a READ, a closed one's too: two before the close, one after each close.
+  db_is "admin A4: the inbox's audit rows: one view, four reads and one REFUSED (the unknown id), a close and a refused close" \
+    "$(sql "SELECT string_agg(action || ':' || outcome || ':' || n, ',' ORDER BY action, outcome) FROM (SELECT action, outcome, count(*) AS n FROM audit_log WHERE actor_id = '$A4_ADMIN' AND action IN ('SUPPORT_INBOX_VIEWED', 'SUPPORT_TICKET_READ', 'SUPPORT_TICKET_CLOSED') GROUP BY 1, 2) c")" \
+    "SUPPORT_INBOX_VIEWED:SUCCEEDED:1,SUPPORT_TICKET_CLOSED:REFUSED:1,SUPPORT_TICKET_CLOSED:SUCCEEDED:1,SUPPORT_TICKET_READ:REFUSED:1,SUPPORT_TICKET_READ:SUCCEEDED:4"
+
+  # SUPPORT: the jobs page and the inbox, no forms, no runs, no flags.
+  m2_sign_in a4s "$A4_SJ"
+  adm_is "admin A4: the SUPPORT operator signs in" 302 "/admin"
+  adm_code "$A4_SJ" "$ADM"
+  if [[ "$ADM_BODY" == *'href="/admin/jobs"'* && "$ADM_BODY" != *'href="/admin/flags"'* ]]; then pass "admin A4: …SUPPORT's navigation has the jobs and not the flags"; else fail "admin A4: SUPPORT's navigation" "${ADM_BODY:0:300}"; fi
+  adm_code "$A4_SJ" "$ADM/jobs"
+  adm_is "admin A4: …the jobs page is 200 for SUPPORT" 200
+  if [[ "$ADM_BODY" == *'id="run-close"'* ]]; then fail "admin A4: …with no run form" "it has one"; else pass "admin A4: …with no run form"; fi
+  AD_CSRF="$(adm_csrf)"
+  adm_code "$A4_SJ" -X POST "$ADM/jobs/close-days/run" --data-urlencode "justification=$A4_NOTE" --data-urlencode "_csrf=$AD_CSRF"
+  adm_is "admin A4: …SUPPORT's run is 403" 403
+  adm_code "$A4_SJ" "$ADM/flags"
+  adm_is "admin A4: …the flags page is 403 for SUPPORT" 403
+  adm_code "$A4_SJ" "$ADM/support"
+  adm_is "admin A4: …and the inbox is 200 for SUPPORT" 200
+  db_is "admin A4: SUPPORT's refused run wrote no row" "$(sql "SELECT count(*) FROM audit_log WHERE actor_id = '$M2_ID_a4s' AND action = 'JOB_RUN'")" "0"
+
+  is "admin A4: the member's export lists none of it" "$(m2_export "$A4_M")" "True - True"
+  for w in "$A4_NOTE" "$A4_SUBJECT" "$A4_BODY"; do
+    if grep -q "$w" "$MOYI_LOG"; then fail "admin A4: a note, subject or message is in no log line" "'$w' is in $MOYI_LOG"; else pass "admin A4: a note, subject or message is in no log line"; fi
+  done
+  if grep -qE "job run by hand admin=$A4_ADMIN job=close-days" "$MOYI_LOG"; then pass "admin A4: …and the run's own log line names the admin and the job"; else fail "admin A4: the run's log line" "no 'job run by hand admin=… job=close-days' in $MOYI_LOG"; fi
+  a4_cleanup
+  A4_CLEANUP=0
 fi
 rm -rf "$ADM_DIR"
 

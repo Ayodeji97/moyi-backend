@@ -214,7 +214,7 @@
     "rule": "FR-045, BR-3a (amended 2026-11-08), ADR-0033 §15",
     "evidence": "test",
     "evidenceRef": "CloseElapsedDaysTest#a day left open through its grace takes a late entry, and is decided once, after it",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseElapsedDays.kt#val endedAsOf = grace.closesDaysEndedBy(now).minus(DayCloser.SETTLE_MARGIN)"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseElapsedDays.kt#): Instant = grace.closesDaysEndedBy(now).minus(DayCloser.SETTLE_MARGIN)"
   },
   {
     "id": "day-partial-write-waits",

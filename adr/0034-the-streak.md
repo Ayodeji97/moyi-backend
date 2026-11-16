@@ -5,7 +5,8 @@
 2026-10-22 ("Owed — C6" discharged — ADR-0041); 2026-11-08 (the ended run and the rest day's
 reason, issue #141: see "Amendment — 2026-11-08"); 2026-11-08 (decision 8, the undecided days
 of the late-entry grace, issue #132 — ADR-0033 decision 15); 2026-11-13 (a second kind of pause,
-the suspension, judged by overlap: see "Amendment — 2026-11-13")
+the suspension, judged by overlap: see "Amendment — 2026-11-13"); 2026-11-14 (decision 10's
+`recalculate` route exists, in the admin console: see "Amendment — 2026-11-14")
 
 *(2026-10-09: the status read "Proposed" until this date, though the slice merged as #55, and its rulings as #56, on 2026-10-06. Brought to the convention of ADR-0026 to ADR-0031, which say "Accepted"; noted in ADR-0036's slice.)*
 
@@ -416,3 +417,12 @@ both count. The close job (`CloseDay`), the gap writer (`CreateMissingDays`) and
 (`EvaluateStreaks.outcomeOf`, a `MISSED` day that overlaps evaluated `SUSPENDED`) ask the same
 question through `BondClosingView.wasSuspendedDuring`. Such a day breaks no run and spends no
 freeze; the run is where it was when the bond resumes. `wasPausedAt` is unchanged.
+
+## Amendment — 2026-11-14: the `recalculate` route (ADR-0067)
+
+Decision 10 left `recalculate` "a service and not yet a route" until `modules/admin` existed. It is
+now an `ADMIN`'s act on the console's jobs page (ADR-0067 decision 6): a bond id and a
+justification, through `gratitude.api.StreakRecalculation`, which joins the console's transaction
+so the rebuild and its `STREAK_RECALCULATED` audit row commit together. It still writes
+`streak_states` and nothing else, and announces nothing; a bond with no evaluated day is answered
+`NO_DAYS` and given no row.

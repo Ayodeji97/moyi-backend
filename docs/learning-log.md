@@ -3467,3 +3467,18 @@ Wrong about: lock order being enough. An ordered lock protects the writes made u
          writes back what it read. Separately, the spec's first overlap window left out the day's
          late-entry grace, which the paused bond also refuses; the review caught it, and the window
          is now the day's whole writable window (ADR-0066 decision 16).
+
+## 2026-11-14 · Admin console A4 · a deleted ShedLock row is a lock that instance never takes again
+Expected: a test could clear `shedlock` between cases the way it clears any other table: delete the
+         rows, and the next run inserts a fresh one and takes the lock.
+Reality: the run by hand answered `BUSY` with nothing holding the lock. ShedLock's JDBC storage
+         remembers, per instance, which lock names it has already inserted, and from then on only
+         `UPDATE`s their rows; an `UPDATE` that matches no row reads as "someone else holds it". So
+         a row deleted while the application runs makes that lock untakeable until a restart, and in
+         production the job would stop without a word. The tests now release a lock by setting
+         `lock_until` to now, and the runbook says never to delete a row (ADR-0067 decision 19).
+Wrong about: a library's table being only its rows. Some of its state lives in the process, and the
+         table is a cache of what the process believes. Separately, the spec counted twelve locked
+         jobs from memory; the code has eleven (the export job holds two locks). The registry test
+         that compares the page's list to the `@SchedulerLock` annotations found it before any page
+         did: count from the code, not from the corpus.

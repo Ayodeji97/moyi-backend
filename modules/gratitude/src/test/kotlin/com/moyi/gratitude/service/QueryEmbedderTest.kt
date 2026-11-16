@@ -5,6 +5,8 @@ import com.moyi.ai.api.EmbeddingSpace
 import com.moyi.ai.api.EmbeddingUnavailableException
 import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondMembership
+import com.moyi.common.core.FeatureFlag
+import com.moyi.common.core.FeatureFlags
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.gratitude.domain.VectorTable
@@ -118,6 +120,24 @@ internal class QueryEmbedderTest(
     }
 
     @Test
+    fun `with AI_EMBEDDINGS off the provider is not asked, on this thread, and the search counts disabled`() {
+        var asked = false
+        val off = FeatureFlags { it != FeatureFlag.AI_EMBEDDINGS }
+
+        embedder(
+            port {
+                asked = true
+                FloatArray(SPACE.dimensions)
+            },
+            flags = off,
+        ).matchFor(membership, "calm light").shouldBeNull()
+
+        asked shouldBe false
+        counted("disabled") shouldBe 1.0
+        counted("degraded") shouldBe 0.0
+    }
+
+    @Test
     fun `a model with no threshold is not asked`() {
         val asked = mutableListOf<String>()
         val answering = port { text -> FloatArray(SPACE.dimensions).also { asked += text } }
@@ -147,7 +167,8 @@ internal class QueryEmbedderTest(
         port: EmbeddingPort,
         timeout: Duration = Duration.ofSeconds(AWAIT_SECONDS),
         maxDistance: Map<EmbeddingSpace, Double> = mapOf(SPACE to MAX_DISTANCE),
-    ): QueryEmbedder = QueryEmbedder(port, SemanticSearchProperties(timeout, maxDistance), meters).also { embedders += it }
+        flags: FeatureFlags = FeatureFlags { true },
+    ): QueryEmbedder = QueryEmbedder(port, SemanticSearchProperties(timeout, maxDistance), flags, meters).also { embedders += it }
 
     private fun port(answer: (String) -> FloatArray): EmbeddingPort =
         object : EmbeddingPort {
