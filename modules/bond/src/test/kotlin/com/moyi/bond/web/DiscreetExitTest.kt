@@ -64,6 +64,7 @@ import javax.sql.DataSource
  */
 @SpringBootTest(classes = [BondTestApplication::class])
 @AutoConfigureMockMvc
+@Suppress("LongParameterList", "TooManyFunctions") // A test's collaborators and its routes, each named.
 internal class DiscreetExitTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val tokens: AccessTokenIssuer,
@@ -392,7 +393,8 @@ internal class DiscreetExitTest(
         jdbc.queryForList("SELECT category, status FROM notifications").associate { it["category"] as String to it["status"] as String }
 
     private fun sharedRows(): List<Map<String, Any?>> =
-        jdbc.queryForList("SELECT id, user_id, status FROM notifications WHERE category = 'SHARED_SETTING_CHANGED' ORDER BY id")
+        jdbc
+            .queryForList("SELECT id, user_id, status FROM notifications WHERE category = 'SHARED_SETTING_CHANGED' ORDER BY id")
             .map { it - "status" }
 
     /** Every column of the bond's ledger but its ids and its times, the users named by who they are. */
@@ -408,7 +410,7 @@ internal class DiscreetExitTest(
                 (row - setOf("id", "bond_id", "created_at", "sent_at", "not_before", "stale_after"))
                     .mapValues { (column, value) ->
                         when (column) {
-                            "user_id" -> if (value == ada) "ada" else if (value == bea) "bea" else "other"
+                            "user_id" -> listOf(ada to "ada", bea to "bea").toMap().getOrDefault(value, "other")
                             "dedupe_key" -> uuid.replace(value as String) { ids.getOrPut(it.value) { "id-${ids.size}" } }
                             else -> value
                         }
