@@ -230,9 +230,10 @@ internal class SendPush(
          * `notification.push.settled{category, nudge, outcome}`: `nudge` is `none` or 1 to 3.
          *
          * Counts dispatch decisions, not pushes. A held push contributes `held` once per hold, and
-         * exactly one final outcome later, when [HeldPushes] hands it back and it is decided again;
-         * so the final outcomes (every outcome but `held`) sum to the pushes settled, and `held`
-         * alone is quiet-hours volume.
+         * exactly one final outcome later, when [HeldPushes] hands it back and it is decided again,
+         * unless it is cancelled while held (written or superseded): then it has none, and
+         * `notification.push.cancelled` counts it. So the final outcomes (every outcome but `held`)
+         * sum to the pushes that reached a final outcome, and `held` alone is quiet-hours volume.
          */
         const val SETTLED = "notification.push.settled"
         const val NO_NUDGE = "none"

@@ -347,8 +347,10 @@ Unchanged: every HTTP route, `contracts/openapi.json`, the preferences resource,
 - `notification.push.settled{category, nudge="none|1|2|3", outcome}` in `SendPush`, outcome one of
   `sent`, `held`, `suppressed`, `expired`, `dropped_budget`, `dropped_leaving_room` (C18's soft drop),
   `failed`. Partly discharges ADR-0045 Owed (`…{category,status}`). It counts dispatch decisions: a
-  held push contributes `held` once per hold plus exactly one final outcome later, so the outcomes
-  other than `held` sum to the pushes settled (lead ruling 2026-11-16).
+  held push contributes `held` once per hold plus exactly one final outcome later, unless it is
+  cancelled while held (written or superseded): then it has none, and `notification.push.cancelled`
+  counts it. So the outcomes other than `held` sum to the pushes that reached a final outcome (lead
+  ruling 2026-11-16).
 - `notification.push.cancelled{category, nudge, reason="written|superseded"}` in `PushRequests`.
 - Bounded tags only. No user, member or bond id, no time of day, in a tag or a log line; the sweep's
   log stays counts.
