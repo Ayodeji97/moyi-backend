@@ -405,6 +405,38 @@ internal class DailyRemindersTest(
     }
 
     @Test
+    fun `after yesterday's solo-unlock takes the reserved slot, nudge 3 leaves today's reveal its slot`() {
+        // The lead's ruling (ADR-0068 decision 19): yesterday closed after its late-entry grace with Bea's
+        // entry alone, so Ada's solo-unlock of it came at noon and took the Bond's reserved slot for today.
+        morningReminder(ada)
+        phone(ada)
+        sweepAt(NUDGE_1, dispatch = true)
+        sweepAt(NUDGE_2, dispatch = true)
+        clock.set(Instant.parse("2026-09-02T11:00:00Z"))
+        reveal(UUID.fromString(bond), LocalDate.parse("2026-09-01"), PushCategory.SOLO_UNLOCK)
+        dispatcher.dispatchDue(clock.instant().plusSeconds(1), DISPATCH)
+
+        sweepAt(NUDGE_3, dispatch = true)
+
+        // Three sent in the Bond, the reserved among them: the fourth is today's reveal's.
+        statusOf(ada, 3) shouldBe "DROPPED_BUDGET"
+        nudgesOf(ada).single { it.nudge == 3 }.leaveFree shouldBe 1
+        clock.set(Instant.parse("2026-09-02T19:00:00Z"))
+        write(bea)
+        write(ada)
+        reveal(UUID.fromString(bond), LocalDate.parse("2026-09-02"))
+        dispatcher.dispatchDue(clock.instant().plusSeconds(1), DISPATCH)
+
+        sender.sent.map { it.category to it.nudge } shouldBe
+            listOf(
+                PushCategory.REMINDER to 1,
+                PushCategory.REMINDER to 2,
+                PushCategory.SOLO_UNLOCK to null,
+                PushCategory.REVEAL to null,
+            )
+    }
+
+    @Test
     fun `moving the reminder time mid-day never asks a fourth nudge`() {
         morningReminder(ada)
         phone(ada)
@@ -530,18 +562,19 @@ internal class DailyRemindersTest(
         return (listOf(bond) + others).map(UUID::fromString)
     }
 
-    /** A reveal to Ada in [bondId] for [date], asked for as the day's consumer would, not yet sent. */
+    /** A reveal-class push to Ada in [bondId] for [date], asked for as the day's consumer would, not yet sent. */
     private fun reveal(
         bondId: UUID,
         date: LocalDate,
+        category: PushCategory = PushCategory.REVEAL,
     ) {
         transactions.executeWithoutResult {
             notificationsApi.request(
                 PushRequest(
                     userId = ada,
                     bondId = bondId,
-                    category = PushCategory.REVEAL,
-                    dedupeKey = "reveal:$bondId:$date:$ada",
+                    category = category,
+                    dedupeKey = "${category.name.lowercase()}:$bondId:$date:$ada",
                     staleAfter = DAY_ENDS.plus(Duration.ofDays(1)),
                     recipient = LAGOS,
                     bondDate = date,

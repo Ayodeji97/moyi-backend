@@ -90,15 +90,32 @@ arithmetic; this record is what was decided.
     pushes settled.
 17. **A member who joins, or moves their reminder time, after nudge 1's instant still gets nudges 2
     and 3 that day.** Decision 2 guards the bond's start, not the member's: the entry is still owed,
-    and the budget caps still apply. *Owner-visible; his to overrule.*
+    and the budget caps still apply. *Owner-visible; his to overrule.* A known rare case of the
+    same: a reminder time moved earlier after nudge 1 can make the new series' nudge 3 the next
+    instant due while its nudge 2 has already passed (08:00 sent, moved at 12:30 to 06:30: nudge 3
+    at 12:30), so the ledger records nudge 3 with no nudge 2, and a further move can then record
+    nudge 2 after nudge 3. The keys still hold each index to once a Bond-day; the indices are not
+    guaranteed to arrive in order. Recorded, not fixed.
 18. **`ArchitectureTest` is unchanged.** The spec had `declaredIn` gain `DueNudge`, `RevealDay` and
     `Nudge`; that map backs the admin-only import rule, so adding them would forbid `gratitude`
     from importing `Nudge`. The spec (§5) was corrected.
+19. **A soft nudge leaves its own Bond's last slot for the day's reveal** (*lead ruling 2026-11-16,
+    owner may revise*). The reserved slot counts per member, Bond and day, so a reveal-class push
+    of the day before sent today (a `SOLO_UNLOCK` when yesterday closed after its late-entry grace,
+    or a late `REVEAL`) spends today's. Nudges 1 and 2 and that push make three, nudge 3 would make
+    four, and the evening's `REVEAL` of today would be dropped, never retried. So in
+    `PushBudget.decide` a push with something to leave free (decision 5: a nudge 2 or 3 that did not
+    inherit zero) is dropped as leaving room when the reserved slot is spent and
+    `sentInBondToday + 1 >= 4`. The line runs after the per-Bond cap, so a nudge that finds the
+    four already spent is counted under the cap, and `dropped_leaving_room` counts only the nudges
+    held back for a slot the reveal could still use. Nudge 1 and reveal-class pushes are unchanged;
+    no new parameter.
 
 ## Consequences
 
 **Positive:** a member who has not written is nudged up to three times, never after writing and never
-about a day that has ended; a reveal is never dropped because nudges spent the cross-Bond cap; quiet
+about a day that has ended; a reveal is never dropped because nudges spent the cross-Bond cap, nor
+because nudges spent its own Bond's last slot after the reserved one went to the day before (19); quiet
 hours release one push, not a pile; nothing in a nudge depends on the other member (T-09): the only
 other-member fact read, a reveal in another Bond, is one the member already sees there.
 
@@ -106,7 +123,8 @@ other-member fact read, a reveal in another Bond, is one the member already sees
 partner-joined or proposal push is dropped; #205's push will share that remainder first-come
 (*lead ruling 2026-11-16*: accepted for now; the hook to let it outrank nudge 3 is a per-Bond
 leave-free on nudge 3). A member in three Bonds gets no nudge 2 or 3 until a reveal settles
-(*lead ruling 2026-11-16*: accepted). A held nudge's count can be stale by a night. Up to three `REMINDER` rows per member
+(*lead ruling 2026-11-16*: accepted). After a midday solo-unlock or late reveal of the day before, a
+member may get only two nudges in that Bond that day (19). A held nudge's count can be stale by a night. Up to three `REMINDER` rows per member
 per Bond-day in the ledger, `SUPPRESSED` ones included for a member who turned reminders off. A bond
 made after its member's reminder time has no nudges that first day.
 

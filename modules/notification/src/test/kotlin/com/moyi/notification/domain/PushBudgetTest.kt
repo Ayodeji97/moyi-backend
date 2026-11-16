@@ -163,6 +163,55 @@ internal class PushBudgetTest {
     }
 
     @Test
+    fun `a soft nudge leaves its Bond's last slot for the reveal once the reserved slot is spent (lead ruling)`() {
+        // Yesterday's solo-unlock took the reserved slot this morning, and two remainder pushes went: one slot left.
+        PushBudget.decide(
+            sentInBondToday = 3,
+            reservedSpentToday = true,
+            sentAcrossBonds = 3,
+            revealClass = false,
+            leaveFreeAcrossBonds = 1,
+        ) shouldBe
+            BudgetDecision.DROPPED_LEAVING_ROOM
+        // Nudge 1, or a nudge that inherited nothing to leave free, is hard: it takes the slot.
+        PushBudget.decide(
+            sentInBondToday = 3,
+            reservedSpentToday = true,
+            sentAcrossBonds = 3,
+            revealClass = false,
+            leaveFreeAcrossBonds = 0,
+        ) shouldBe
+            BudgetDecision.REMAINDER
+        // The reserved slot still free: the reveal will take it, so the nudge may take the last remainder slot.
+        PushBudget.decide(
+            sentInBondToday = 2,
+            reservedSpentToday = false,
+            sentAcrossBonds = 2,
+            revealClass = false,
+            leaveFreeAcrossBonds = 1,
+        ) shouldBe
+            BudgetDecision.REMAINDER
+        // A reveal-class push is unchanged: it takes the last slot.
+        PushBudget.decide(
+            sentInBondToday = 3,
+            reservedSpentToday = true,
+            sentAcrossBonds = 3,
+            revealClass = true,
+            leaveFreeAcrossBonds = 0,
+        ) shouldBe
+            BudgetDecision.REMAINDER
+        // With the Bond's four already spent, the drop is counted under the cap.
+        PushBudget.decide(
+            sentInBondToday = 4,
+            reservedSpentToday = true,
+            sentAcrossBonds = 4,
+            revealClass = false,
+            leaveFreeAcrossBonds = 1,
+        ) shouldBe
+            BudgetDecision.DROPPED
+    }
+
+    @Test
     fun `two Bonds nudged all day still have room for both reveals (spec ruling B7)`() {
         // Both reminders at 08:00, the member writing in neither until the afternoon; both reveals owed all day.
         var acrossBonds = 0

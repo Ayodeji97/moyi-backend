@@ -126,6 +126,17 @@ Each: the decision; why; what it costs if wrong.
     per Bond and one reserved, the remainder is three, and three nudges spend it: on such a day those
     pushes are `DROPPED_BUDGET`. Accepted and recorded (ADR-0068 Consequences). *Cost:* on a day the
     member does not write until late, a milestone push is lost (the milestone itself is not).
+    **A soft nudge never takes the Bond's last slot once the reserved slot is spent**
+    (*lead ruling 2026-11-16, owner may revise*; ADR-0068 decision 19). The reserved slot is per
+    member, Bond and day, so a reveal-class push of the day before sent today (a `SOLO_UNLOCK` when
+    yesterday closes after its late-entry grace, or a late `REVEAL`) spends today's. Nudges 1 and 2
+    and that push are then three of the four, and nudge 3 would take the fourth, leaving the evening's
+    `REVEAL` of today nothing: `DROPPED_BUDGET`, never retried. So a nudge 2 or 3 with something to
+    leave free (ruling 7) is dropped as leaving room when the reserved slot is spent and, sent, it
+    would make the Bond's four. Nudge 1, and a nudge that inherits nothing to leave free (ruling 16),
+    stay hard; reveal-class pushes are unchanged. No new parameter: the leave-free that marks a soft
+    nudge is the marker. *Cost:* after a midday solo-unlock or late reveal, a member may get only two
+    nudges in that Bond.
 
 ### C. The builder's (for the owner; each his to overrule)
 
@@ -193,12 +204,14 @@ Each: the decision; why; what it costs if wrong.
       need not be: safe), or another Bond's next day may begin (too low: the released nudge may take a
       slot that day's reveal needs). Ruling 8 bounds this at one nudge per member and Bond-day.
       (b) Only each Bond's **current** day is counted; a `SOLO_UNLOCK` of the day before, sent during
-      its grace, is not. (c) The twelve-hour grace means a Bond's previous day may still reveal; not
+      its grace, is not; ruling 11 keeps it from costing today's reveal its per-Bond slot. (c) The twelve-hour grace means a Bond's previous day may still reveal; not
       counted, as (b).
     *Cost:* one indexed read per nudge 2 or 3 request (and per re-ask in the look-back: at most six).
 18. **The rule lives in `PushBudget.decide`, generalised by one term.** `sentAcrossBonds +
     leaveFreeAcrossBonds >= ACROSS_BONDS` → dropped. With zero it is today's `sentAcrossBonds >= 6`
-    exactly, so every other category, reveal-class included, is decided as before. A soft drop is
+    exactly, so every other category, reveal-class included, is decided as before. Ruling 11 adds a
+    second line for the same soft pushes, per Bond: with the reserved slot spent, `sentInBondToday + 1
+    >= 4` → dropped, leaving room. A soft drop is
     `DROPPED_BUDGET` in the ledger (it is the budget) and a distinct outcome in the metric (§9).
     *Cost:* none.
 19. **One migration, V68, two columns on `notifications`** (§6). The lead asked to avoid one if
@@ -363,8 +376,11 @@ Unchanged: every HTTP route, `contracts/openapi.json`, the preferences resource,
 **Unit**
 - `PushBudgetTest`: FR-082's example restated (four before 22:00: three sent, one dropped, the
   reveal in the reserved slot); "no more than four a day in one Bond"; with `leaveFree = 0` every
-  existing case unchanged; `sent = 3, leaveFree = 2` → remainder; `sent = 4, leaveFree = 2` → dropped
-  (leaving room); a reveal-class push is never given a leave-free by any caller (property over the
+  existing case unchanged; across Bonds `sentAcrossBonds = 3, leaveFree = 2` → remainder,
+  `sentAcrossBonds = 4, leaveFree = 2` → dropped (leaving room), `sentAcrossBonds = 6, leaveFree = 0` →
+  dropped (the cap); in one Bond (ruling 11), the reserved slot spent and three sent, `leaveFree = 1` →
+  dropped (leaving room), `leaveFree = 0` → remainder, and a reveal-class push → remainder; the
+  reserved slot unspent and two sent, `leaveFree = 1` → remainder; a reveal-class push is never given a leave-free by any caller (property over the
   three callers' categories).
 - `NudgeScheduleTest` (the roster's arithmetic, pure): 08:00 London → 08:00, 11:00, 14:00; 20:00 with
   the anchor in London → two; 22:00 → one; a bond made at 09:30 with an 08:00 reminder → none;
@@ -380,7 +396,8 @@ Unchanged: every HTTP route, `contracts/openapi.json`, the preferences resource,
   whether the other member wrote changes nothing about any nudge (T-09); quiet hours holding nudges 1
   and 2: 1 `CANCELLED`, 2 `HELD` with leave-free 0, one release; a superseded chain 1→2→3 keeps zero;
   three Bonds with reveals owed: nudge 2 `DROPPED_BUDGET`, then the evening's three reveals all `SENT`
-  (**red if the nudged Bond is not counted**); a reveal toggled off is not owed; a pending Bond is not
+  (**red if the nudged Bond is not counted**); yesterday's `SOLO_UNLOCK` at noon after nudges 1 and 2:
+  nudge 3 `DROPPED_BUDGET`, the evening's `REVEAL` `SENT` (**red without ruling 11's per-Bond line**); a reveal toggled off is not owed; a pending Bond is not
   owed; a settled `REVEAL` row for the current date is not owed, one for yesterday's date is.
 - `PausedSendWindowTest` (app, the real roster): `DAILY_REMINDERS` switched on between nudge 1 and
   nudge 2: nudge 1 never asked, nudge 2 asked; switched off, no nudge asked.
@@ -391,7 +408,7 @@ Unchanged: every HTTP route, `contracts/openapi.json`, the preferences resource,
   refused by the CHECK.
 
 **Mutation targets (each must turn a test red):** drop the leave-free term; count only the other
-Bonds; let a superseding nudge keep its own leave-free; cancel only nudge 1's key on a write;
+Bonds; drop the per-Bond leaving-room line (ruling 11); let a superseding nudge keep its own leave-free; cancel only nudge 1's key on a write;
 schedule a nudge past the day's end; wall-clock instead of elapsed (the spring-forward case); put the
 per-Bond cap back to three; drop `supersedes`; send `nudge` on a non-reminder; drop the reminder's
 Android `tag`, or put the Bond-day out of it.

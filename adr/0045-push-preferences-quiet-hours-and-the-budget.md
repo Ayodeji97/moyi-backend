@@ -150,12 +150,15 @@ night. NFR-006's 60 s is measured outside quiet hours (D-15).
   can last a send, and a push that waited across the member's midnight counted against the day
   that had ended. The test holds the lock over a London midnight.
 
-*Amended 2026-11-16 (issue #200, ADR-0068 decisions 4 and 5).* **Four per Bond per member per
+*Amended 2026-11-16 (issue #200, ADR-0068 decisions 4, 5 and 19).* **Four per Bond per member per
 day**, one still reserved for reveal-class, so the remainder is three: room for a Bond-day's three
 reminder nudges, which milestones, on-this-day, partner-joined and proposals share. The cross-Bond
 cap stays six; a nudge 2 or 3 is sent only if, after it, the member's rolling count leaves a slot for
 every Bond whose reveal for its current Bond-day is still owed (`leave_free_across_bonds` on the
 row; zero for every other push, which is the rule above exactly). Over it is `DROPPED_BUDGET`.
+Such a nudge also leaves its own Bond's last slot free once that day's reserved slot is spent (by a
+reveal-class push of the day before): it is `DROPPED_BUDGET` if, sent, it would make the Bond's
+four, so today's reveal still has a slot (ADR-0068 decision 19).
 
 **6. The daily reminder: `scheduling` knows when, `bond` whose, `gratitude` who wrote.**
 
