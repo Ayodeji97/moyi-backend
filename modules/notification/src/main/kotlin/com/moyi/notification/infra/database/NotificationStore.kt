@@ -102,16 +102,32 @@ internal class NotificationStore(
     }
 
     /**
-     * `CANCELLED` for the push under [dedupeKey], if it is still owed:
-     * `REQUESTED` or `HELD`. A push the consumer has locked is waited for,
-     * and is then either settled (and left alone) or still owed (and
-     * cancelled): never both sent and cancelled.
+     * `CANCELLED` for every push under [dedupeKeys] that is still owed:
+     * `REQUESTED` or `HELD`. One statement, through `notifications_dedupe_key_key`.
+     * A push the consumer has locked is waited for, and is then either settled
+     * (and left alone) or still owed (and cancelled): never both sent and
+     * cancelled.
+     *
+     * @return what this call cancelled, and only that: a push already settled,
+     *   cancelled before, or never asked for is not returned, so nothing is
+     *   counted or inherited from twice (spec C16, ADR-0068 decision 7).
      */
-    fun cancel(dedupeKey: String): Boolean =
-        jdbc.update(
-            "UPDATE notifications SET status = 'CANCELLED' WHERE dedupe_key = ? AND status IN ('REQUESTED', 'HELD')",
-            dedupeKey,
-        ) == 1
+    fun cancelOwed(dedupeKeys: Collection<String>): List<CancelledPush> =
+        jdbc.query(
+            """
+            UPDATE notifications SET status = 'CANCELLED'
+             WHERE dedupe_key = ANY (?) AND status IN ('REQUESTED', 'HELD')
+            RETURNING category, nudge, leave_free_across_bonds
+            """.trimIndent(),
+            { row, _ ->
+                CancelledPush(
+                    category = PushCategory.valueOf(row.getString("category")),
+                    nudge = row.getObject("nudge", Integer::class.java)?.toInt(),
+                    leaveFreeAcrossBonds = row.getInt("leave_free_across_bonds"),
+                )
+            },
+            dedupeKeys.toTypedArray(),
+        )
 
     /**
      * Whether a push of [category] to [userId] in [bondId], asked for after
@@ -248,6 +264,15 @@ internal data class StoredPush(
     /** Which nudge of its Bond-day a reminder is: `null` for any other push, and for a row written before V68. */
     val nudge: Int?,
     /** How many cross-Bond slots the push must leave free when sent: 0 for a row written before V68. */
+    val leaveFreeAcrossBonds: Int,
+)
+
+/** A push [NotificationStore.cancelOwed] has just called off: what a superseding nudge inherits from. */
+internal data class CancelledPush(
+    val category: PushCategory,
+    /** Which nudge of its Bond-day it was: `null` for any other push, and for a row written before V68. */
+    val nudge: Int?,
+    /** How many cross-Bond slots it had to leave free when sent. */
     val leaveFreeAcrossBonds: Int,
 )
 

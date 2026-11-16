@@ -542,7 +542,7 @@ internal class SubmitEntry(
         // pointless: a 06:30 reminder held by quiet hours to 07:00 would otherwise reach someone
         // who wrote at 06:45 (ADR-0045). In this transaction, so it is called off exactly when
         // the entry commits. Their own reminder only: the other member's is about their writing.
-        notifications.cancel(ReminderKey.of(membership.memberId, day.date))
+        notifications.cancel(listOf(ReminderKey.of(membership.memberId, day.date)))
         events.publish(OutboxEvent("Entry", entry.id.value, "EntrySubmitted", mapOf("bondId" to bondId, "bondDayId" to day.id.value), now))
         val updated = reveal.apply(day.withEntry(), membership.revealTimeLocal, now)
         if (joiningDate != null && joiningDate.isAfter(claimed.date)) joining.underBondLock(membership, now)

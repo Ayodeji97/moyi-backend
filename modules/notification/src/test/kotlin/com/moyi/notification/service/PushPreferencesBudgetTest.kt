@@ -205,10 +205,10 @@ internal class PushPreferencesBudgetTest(
         statuses(ada).getValue("held").first shouldBe "HELD"
         ask(push(ada, PushCategory.REMINDER, key = "requested"))
 
-        transactions.execute { notifications.cancel("held") } shouldBe true
-        transactions.execute { notifications.cancel("held") } shouldBe false
+        transactions.execute { notifications.cancel(listOf("held")) } shouldBe 1
+        transactions.execute { notifications.cancel(listOf("held")) } shouldBe 0
         // "requested" is still owed to the outbox; its delivery runs and finds nothing to send.
-        transactions.execute { notifications.cancel("requested") } shouldBe true
+        transactions.execute { notifications.cancel(listOf("requested")) } shouldBe 1
         dispatcher.dispatchDue(clock.instant(), BUDGET)
         held.releaseDue(Instant.parse("2026-10-15T06:00:00Z"), LIMIT) shouldBe 0
 
@@ -221,12 +221,12 @@ internal class PushPreferencesBudgetTest(
         ask(push(ada, PushCategory.REMINDER, key = "sent"))
         dispatcher.dispatchDue(evening, BUDGET)
 
-        transactions.execute { notifications.cancel("sent") } shouldBe false
-        transactions.execute { notifications.cancel("never-asked") } shouldBe false
+        transactions.execute { notifications.cancel(listOf("sent")) } shouldBe 0
+        transactions.execute { notifications.cancel(listOf("never-asked")) } shouldBe 0
         statuses(ada).getValue("sent").first shouldBe "SENT"
         // And a cancelled key stays spent: asking again records nothing new.
         ask(push(ada, PushCategory.REMINDER, key = "cancelled"))
-        transactions.execute { notifications.cancel("cancelled") } shouldBe true
+        transactions.execute { notifications.cancel(listOf("cancelled")) } shouldBe 1
         transactions.execute { notifications.request(push(ada, PushCategory.REMINDER, key = "cancelled")) } shouldBe false
     }
 
@@ -234,7 +234,7 @@ internal class PushPreferencesBudgetTest(
     fun `calling a push off refuses to run outside the caller's transaction`() {
         ask(push(ada, PushCategory.REMINDER, key = "owed"))
         io.kotest.assertions.throwables.shouldThrow<org.springframework.transaction.IllegalTransactionStateException> {
-            notifications.cancel("owed")
+            notifications.cancel(listOf("owed"))
         }
         statuses(ada).getValue("owed").first shouldBe "REQUESTED"
     }

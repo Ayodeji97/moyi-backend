@@ -4,6 +4,7 @@ import com.moyi.common.core.IdGenerator
 import com.moyi.common.events.EventPublisher
 import com.moyi.common.events.OutboxEvent
 import com.moyi.notification.api.Notifications
+import com.moyi.notification.api.Nudge
 import com.moyi.notification.api.PushCategory
 import com.moyi.notification.api.PushRequest
 import com.moyi.notification.domain.NotificationStatus
@@ -27,6 +28,10 @@ import java.util.UUID
  * consumer that is handed the same event twice (ADR-0035 decision 6) asks
  * twice and causes one push.
  *
+ * A nudge that supersedes earlier ones calls off those still owed first, in
+ * the same transaction, and takes over the least of their budget claims
+ * (ADR-0068 decision 7).
+ *
  * **Every request is published, even one already past `staleAfter`**, and the
  * push consumer records it `EXPIRED`. One path to every final status, and the
  * ledger shows what was asked for and why it went nowhere.
@@ -44,6 +49,9 @@ internal class PushRequests(
         // Time-ordered: the id is internal (it travels in the outbox, never to a phone),
         // and the ledger is read by time.
         val id = ids.timeOrdered()
+        val nudge = request.nudge
+        // Before the insert: what it supersedes is called off first, and its claim is this row's.
+        val leaveFree = nudge?.let(::supersede) ?: 0
         val recorded =
             ledger.insertOnce(
                 NewPush(
@@ -62,8 +70,8 @@ internal class PushRequests(
                     // NotificationPreferences' rule, asked once, here.
                     wanted = request.recipient.preferences.allows(request.category),
                     bondDate = request.bondDate,
-                    nudge = request.nudge?.index,
-                    leaveFreeAcrossBonds = request.nudge?.leaveFreeAcrossBonds ?: 0,
+                    nudge = nudge?.index,
+                    leaveFreeAcrossBonds = leaveFree,
                 ),
             )
         if (recorded) {
@@ -72,8 +80,22 @@ internal class PushRequests(
         return recorded
     }
 
+    /**
+     * Calls off what [nudge] supersedes that is still owed, and returns the leave-free its row
+     * takes: the least of its own and of every push it cancelled (spec C8, C16, ADR-0068
+     * decision 7). Superseding a hard nudge 1 held by quiet hours makes the newer one hard, so a
+     * night's only reminder is not turned into a push the cap may drop; one statement cancels and
+     * returns, so a chain carries the claim down. A push already sent is not returned, so it gives
+     * nothing. Runs before the insert, in the caller's transaction.
+     */
+    private fun supersede(nudge: Nudge): Int {
+        if (nudge.supersedes.isEmpty()) return nudge.leaveFreeAcrossBonds
+        val cancelled = ledger.cancelOwed(nudge.supersedes)
+        return (cancelled.map { it.leaveFreeAcrossBonds } + nudge.leaveFreeAcrossBonds).min()
+    }
+
     @Transactional(propagation = Propagation.MANDATORY)
-    override fun cancel(dedupeKey: String): Boolean = ledger.cancel(dedupeKey)
+    override fun cancel(dedupeKeys: Collection<String>): Int = ledger.cancelOwed(dedupeKeys).size
 
     @Transactional(readOnly = true)
     override fun hasLiveOrSent(
