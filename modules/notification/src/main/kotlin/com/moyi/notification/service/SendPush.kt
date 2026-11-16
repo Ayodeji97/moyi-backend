@@ -131,7 +131,7 @@ internal class SendPush(
     ) {
         val answers =
             tokens.heldBy(push.userId).map { held ->
-                val answer = sender.send(PushMessage(held.token, push.category, push.bondId, push.staleAfter, push.bondDate))
+                val answer = sender.send(PushMessage(held.token, push.category, push.bondId, push.staleAfter, push.bondDate, push.nudge))
                 if (answer is PushDelivery.TokenInvalid) tokens.deleteIfStillHeld(held)
                 answer
             }
