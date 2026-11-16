@@ -44,8 +44,8 @@
   var value = "";
   var path = "";
   if (page === "invite") {
-    // _redirects rewrites /i/<code> with no trailing slash, so neither does this.
-    var match = location.pathname.match(/^\/i\/([^/]+)$/);
+    // _redirects rewrites /i/<code> and /i/<code>/, so both are read here.
+    var match = location.pathname.match(/^\/i\/([^/]+)\/?$/);
     try {
       value = match ? decodeURIComponent(match[1]).trim().toUpperCase() : "";
     } catch (malformed) {
@@ -60,11 +60,13 @@
     path = (page === "reset" ? "/reset-password" : "/verify") + "?token=" + value;
   }
 
+  // Both parts start hidden, so a visitor without JavaScript sees only the
+  // <noscript> line, not a button that goes nowhere or an empty copy box.
   if (!value) {
-    document.getElementById("found").hidden = true;
     document.getElementById("missing").hidden = false;
     return;
   }
+  document.getElementById("found").hidden = false;
 
   document.getElementById("open").setAttribute("href", OPEN + path);
   // An invite is copied as its code; verify and reset as the whole link,

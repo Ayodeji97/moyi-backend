@@ -10,5 +10,8 @@
         ]
       }
     ]
+  },
+  "webcredentials": {
+    "apps": ["7DUJFVWF7W.app.getmoyi.moyi"]
   }
 }

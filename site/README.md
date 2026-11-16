@@ -27,8 +27,17 @@ any of them:
    token pasted there would be read as digits. The 6-digit code in the email is
    a different value from the link's token (`PresentedCredential`), and the page
    cannot show it, because it is not in the link; the page says the emailed code
-   works too. For an invite it copies the code, which the join field takes
-   either way.
+   works too, for its 15 minutes (`VerificationEmailComposer`). For reset, the
+   app's only code field is behind "I forgot my password" → "Send the code" →
+   "Enter the code"; sending again retires the last email's code but not its
+   link (`RequestVerification`), so the page says the link keeps working and
+   the newest email's code works too. For an invite it copies the code, which
+   the join field takes either way.
+
+The button and the copy box start `hidden` and `link.js` shows them, so a
+visitor without JavaScript sees only the `<noscript>` line, never a button
+that goes nowhere. `/i/<code>/`, with a trailing slash, is the same page
+(`_redirects`).
 
 They **fetch nothing**. `_headers` sets `default-src 'none'`, so the browser
 refuses any request the pages might make, and opening a link spends nothing:
@@ -65,8 +74,8 @@ and checks it names the app.
 
 | File | For | Says |
 |---|---|---|
-| `assetlinks.json` | Android App Links | package `app.getmoyi.moyi`, and the SHA-256 of the certificate the app is signed with |
-| `apple-app-site-association` (no extension) | iOS Universal Links | app `7DUJFVWF7W.app.getmoyi.moyi`, and the three addresses below |
+| `assetlinks.json` | Android App Links, and saved passwords | package `app.getmoyi.moyi`, the SHA-256 of the certificate the app is signed with, and two relations: `handle_all_urls` (links) and `get_login_creds` (Google Password Manager offers a password saved for getmoyi.app in the app, and the other way round) |
+| `apple-app-site-association` (no extension) | iOS Universal Links, and saved passwords | app `7DUJFVWF7W.app.getmoyi.moyi`: under `applinks`, the three addresses below; under `webcredentials`, the same app, so Passwords ties the app's sign-in to getmoyi.app (the app carries `webcredentials:getmoyi.app`) |
 
 The Apple file lists exactly the three addresses the app routes (moyi-app
 `DeepLink.parse`, `LinkRouting`), and nothing else, so `/`, `/invite` and the
