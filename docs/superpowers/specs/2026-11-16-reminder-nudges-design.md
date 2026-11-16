@@ -114,7 +114,7 @@ Each: the decision; why; what it costs if wrong.
    (*lead ruling 2026-11-16, owner may revise*). How "owed" is computed is ruling C17.
 8. **Quiet hours: a newer nudge supersedes an older one still unsent** for the same member and
    Bond-day, so at most one nudge is released when the hours end. *Cost:* the member sees nudge 2's
-   (or 3's) index on a push that is the first they see that day; §3 C11 keeps its budget hard.
+   (or 3's) index on a push that is the first they see that day; §3 C16 keeps its budget hard.
 9. **Writing calls off all of that Bond-day's nudges**, `REQUESTED` and `HELD`, in the entry's
    transaction. *Cost:* none.
 10. **A nudge that would fall after its Bond-day ends is never scheduled**, nor, therefore, one in

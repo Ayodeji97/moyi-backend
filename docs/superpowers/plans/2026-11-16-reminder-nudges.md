@@ -117,7 +117,7 @@ disagree, the spec wins: stop and report.
 
 **Interfaces:**
 - Consumes: `Nudge.supersedes`, `Nudge.leaveFreeAcrossBonds` (Task 1).
-- Produces: `Notifications.cancel(dedupeKeys: Collection<String>): Int` (replaces `cancel(String): Boolean`; same KDoc, plural); `NotificationStore.cancelOwed(keys: Collection<String>): List<CancelledPush>` where `CancelledPush(category: PushCategory, nudge: Int?, leaveFreeAcrossBonds: Int)`, one `UPDATE … WHERE dedupe_key = ANY(?) AND status IN ('REQUESTED','HELD') RETURNING category, nudge, leave_free_across_bonds`. `PushRequests.request`: when `nudge.supersedes` is non-empty, `cancelOwed` first; the inserted row's leave-free is `min(own, min of returned)`.
+- Produces: `Notifications.cancel(dedupeKeys: Collection<String>): Int` (replaces `cancel(String): Boolean`; same KDoc, plural); `NotificationStore.cancelOwed(keys: Collection<String>): List<CancelledPush>` where `CancelledPush(category: PushCategory, nudge: Int?, leaveFreeAcrossBonds: Int)`, one `UPDATE … WHERE dedupe_key = ANY(?) AND status IN ('REQUESTED','HELD') RETURNING category, nudge, leave_free_across_bonds`. `PushRequests.request`: `insertOnce` first; only when it recorded the row (a re-ask supersedes nothing, ADR-0068 decision 14) and `nudge.supersedes` is non-empty, `cancelOwed`, then the new row's leave-free is lowered to `min(own, min of returned)` (`lowerLeaveFree`), all before the row's event is published.
 
 - [ ] **Step 1: Write the failing tests** in `SupersedeTest` (real ledger, `RequestingConsumer`'s context):
   - `a newer nudge cancels an older one still held, and only one is left owed`: nudge 1 `HELD`; request nudge 2 superseding it → nudge 1 `CANCELLED`, nudge 2 `REQUESTED`.
@@ -128,7 +128,7 @@ disagree, the spec wins: stop and report.
   - `cancel takes a series in one call`: three owed keys → returns 3, all `CANCELLED`; a `SENT` one among them is left `SENT`.
   - `a supersede waits for a send in progress and leaves it sent` (concurrency): a transaction holds `lock(nudge1)`; the request blocks (seen in `pg_locks` as waiting on the row) ; the first settles `SENT` and commits → nudge 2 stored with its own leave-free.
 - [ ] **Step 2:** `./gradlew :modules:notification:test --tests "*SupersedeTest"` → FAIL.
-- [ ] **Step 3:** Implement `cancelOwed`, the plural `cancel` over it, and the supersede in `request` inside the caller's `MANDATORY` transaction, before `insertOnce`.
+- [ ] **Step 3:** Implement `cancelOwed`, the plural `cancel` over it, and the supersede in `request` inside the caller's `MANDATORY` transaction, after `insertOnce` and only when it recorded the row (as built; the first draft had it before the insert).
 - [ ] **Step 4:** same command → PASS; `./gradlew :modules:notification:test :modules:gratitude:test --tests "*DailyRemindersTest"`.
 - [ ] **Step 5:** Mutation: insert with the request's own leave-free (no `min`) → the hard-claim tests go red. Restore.
 - [ ] **Step 6: Commit** `feat(notification): a newer nudge supersedes an unsent one and takes over its budget claim`
