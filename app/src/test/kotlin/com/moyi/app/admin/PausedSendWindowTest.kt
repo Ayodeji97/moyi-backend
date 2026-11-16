@@ -15,7 +15,6 @@ import org.springframework.test.web.servlet.post
 import java.lang.reflect.InvocationTargetException
 import java.sql.Timestamp
 import java.time.Instant
-import java.time.ZoneOffset
 import java.util.UUID
 import javax.sql.DataSource
 import kotlin.random.Random
@@ -135,12 +134,25 @@ class PausedSendWindowTest(
         val member = aCandidate()
         // 08:00 UTC, the day's first nudge; nudge 2 falls three real hours on, at 11:00.
         jdbc.update("UPDATE bond_members SET reminder_time_local = '08:00', reminder_timezone = 'UTC' WHERE user_id = ?", member)
-        switchedOn("DAILY_REMINDERS", tomorrowAt("09:00:00"))
+        switchedOn("DAILY_REMINDERS", at("09:00:00"))
 
-        clock.set(tomorrowAt("11:00:30"))
+        clock.set(at("11:00:30"))
         run("com.moyi.scheduling.service.ReminderJob", "remindOnce")
 
         keysAskedOf(member).map { it.substringAfterLast(':') } shouldBe listOf("2")
+    }
+
+    @Test
+    fun `a nudge that fell before the flag was switched on is not asked for, though inside the look-back`() {
+        val member = aCandidate()
+        jdbc.update("UPDATE bond_members SET reminder_time_local = '08:00', reminder_timezone = 'UTC' WHERE user_id = ?", member)
+        // Nudge 2 fell at 11:00, inside the raw look-back of the 11:10 run, but before the switch.
+        switchedOn("DAILY_REMINDERS", at("11:05:00"))
+
+        clock.set(at("11:10:30"))
+        run("com.moyi.scheduling.service.ReminderJob", "remindOnce")
+
+        keysAskedOf(member) shouldBe emptyList()
     }
 
     @Test
@@ -154,14 +166,14 @@ class PausedSendWindowTest(
             admin,
         )
 
-        clock.set(tomorrowAt("08:00:30"))
+        clock.set(at("08:00:30"))
         run("com.moyi.scheduling.service.ReminderJob", "remindOnce")
 
         keysAskedOf(member) shouldBe emptyList()
     }
 
-    /** A day after the member's bond began (the roster asks nothing before it), at [time] UTC. */
-    private fun tomorrowAt(time: String): Instant = Instant.parse("${start.atZone(ZoneOffset.UTC).toLocalDate().plusDays(1)}T${time}Z")
+    /** A fixed instant on [DAY], long after the member's bond began (the roster asks nothing before it). */
+    private fun at(time: String): Instant = Instant.parse("${DAY}T${time}Z")
 
     private fun keysAskedOf(user: UUID): List<String> =
         jdbc
@@ -203,5 +215,6 @@ class PausedSendWindowTest(
 
     private companion object {
         const val PASSWORD = "correct horse battery"
+        const val DAY = "2030-01-15"
     }
 }

@@ -2,14 +2,11 @@ package com.moyi.scheduling.service
 
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.testing.PostgresIntegrationTest
-import com.moyi.gratitude.api.NudgeCounts
-import com.moyi.gratitude.api.ReminderRun
 import com.moyi.scheduling.infra.RecordingHeldPushes
 import com.moyi.scheduling.infra.RecordingReminders
 import com.moyi.scheduling.infra.SchedulingTestApplication
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
-import io.micrometer.core.instrument.MeterRegistry
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test

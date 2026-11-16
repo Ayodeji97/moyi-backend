@@ -28,7 +28,7 @@ internal class ReminderJobCountersTest(
     @Test
     fun `a run counts each nudge by index and outcome, and the total requested over every index`() {
         clock.set(Instant.parse("2026-10-28T20:00:30Z"))
-        val before = Outcomes.entries.associateWith { (n, o) -> nudges(n, o) }
+        val before = OUTCOMES.associateWith { (n, o) -> nudges(n, o) }
         val requestedBefore = meters.counter(ReminderJob.REQUESTED).count()
         reminders.next = {
             ReminderRun(
@@ -42,7 +42,7 @@ internal class ReminderJobCountersTest(
 
         job.remindOnce()
 
-        (Outcomes.entries.associateWith { (n, o) -> nudges(n, o) - before.getValue(n to o) }) shouldBe
+        (OUTCOMES.associateWith { (n, o) -> nudges(n, o) - before.getValue(n to o) }) shouldBe
             mapOf(
                 (1 to "requested") to 2.0,
                 (1 to "written") to 1.0,
@@ -64,8 +64,6 @@ internal class ReminderJobCountersTest(
         nudge: Int,
         outcome: String,
     ): Double = meters.counter(ReminderJob.NUDGES, "nudge", nudge.toString(), "outcome", outcome).count()
-
-    private object Outcomes {
-        val entries = listOf(1, 2, 3).flatMap { n -> listOf("requested", "written", "already_asked", "failed").map { n to it } }
-    }
 }
+
+private val OUTCOMES = listOf(1, 2, 3).flatMap { n -> listOf("requested", "written", "already_asked", "failed").map { n to it } }
