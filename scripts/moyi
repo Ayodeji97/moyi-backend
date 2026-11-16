@@ -122,6 +122,16 @@
 #                                            (the look is recorded)
 #   moyi support close <ticketId> "<note>"   answered, or nothing to answer: its words are deleted, your note kept
 #
+# And deletion asked for by email (getmoyi.app/delete-account, ADR-0058 amended 2026-11-16), the same way,
+# recorded in audit_log. Only after the person has confirmed from the account's own address
+# (ops/admin/deletion-by-email.md):
+#
+#   moyi account delete "<note>"             asks for the account's email address (read from stdin, so it
+#                                            stays out of your shell history), then opens the same deletion
+#                                            request the app opens: due in 14 days, cancellable in the app
+#                                            until then, carried out by the deletion job. Prints the dates
+#                                            to put in your reply. Asking again changes nothing
+#
 # The session (two tokens and the bond in use) is kept in
 # ~/.config/moyi/<profile>.json, readable by you alone. The password is asked
 # for and never stored. An access token lasts fifteen minutes; when one has
@@ -695,6 +705,38 @@ case "$cmd" in
           CLOSED)   echo "Closed: its subject, body and reference are deleted; your note is kept in support_ticket_log." ;;
           NOT_OPEN) die "that id names no open support message (never sent, or already closed)" ;;
           *)        die "unexpected answer from the database: $result" ;;
+        esac
+        ;;
+      *) die "$usage" ;;
+    esac
+    ;;
+  account)
+    # Deletion asked for by email (ADR-0058, amended 2026-11-16): the operator's, through the database, as
+    # support is. The rule (the window, one pending request, what is audited) is V69's function, not this.
+    usage="usage: moyi account delete \"<note>\"   (the email address is asked for)"
+    action="${1:-}"; shift || true
+    ops_init
+    case "$action" in
+      delete)
+        [ $# -eq 1 ] || die "$usage"
+        [ -n "${1// /}" ] && [ "${#1}" -le 400 ] ||
+          die "a note is required (at most 400 characters): how the person confirmed, e.g. replied from the account address on 2026-11-20"
+        if [ -t 0 ]; then IFS= read -r -p "account email: " email; else IFS= read -r email || true; fi
+        [[ "$email" =~ ^[^[:space:]@]+@[^[:space:]@]+$ ]] || die "that is not an email address"
+        out="$(ops_sql "SELECT outcome, coalesce(user_id::text, '-'), coalesce(requested_at::text, '-'), coalesce(execute_after::text, '-')
+                        FROM account_deletion_request(:'email'::citext, :'actor', :'note');" \
+                 "email=$email" "actor=$OPERATOR" "note=$1")" || die "the database refused (see above)"
+        IFS=$'\t' read -r outcome user requested due <<< "$out"
+        case "$outcome" in
+          REQUESTED)
+            echo "Requested: account $user is deleted from $due (14 days)."
+            echo "Until then they can cancel it in the app (Bond settings, Account). Recorded in audit_log under $OPERATOR."
+            echo "Reply to them now: ops/admin/deletion-by-email.md, step 4." ;;
+          ALREADY_PENDING)
+            echo "Already requested on $requested: account $user is deleted from $due. Nothing changed." ;;
+          NO_ACCOUNT)
+            die "no account has that address (or it was already deleted). Nothing was done: reply with ops/admin/deletion-by-email.md, step 5" ;;
+          *) die "unexpected answer from the database: $out" ;;
         esac
         ;;
       *) die "$usage" ;;

@@ -3934,6 +3934,38 @@ else
 fi
 flush_buckets
 
+echo; echo "account deletion asked for by email — the operator opens the app's own request (ADR-0058, amended 2026-11-16)"
+account_op() {
+  MOYI_OPERATOR=smoke-operator MOYI_OPS_PSQL="docker compose exec -T postgres psql -U moyi -d $MOYI_DB" \
+    scripts/moyi account "$@"
+}
+verified_account "deleted-by-email" "203.0.113.215"; EM_A="$ACCOUNT_ACCESS"; EM_EMAIL="$ACCOUNT_EMAIL"
+flush_buckets
+if docker compose exec -T postgres true >/dev/null 2>&1; then
+  if EM_OUT="$(printf '%s\n' "$EM_EMAIL" | account_op delete "" 2>&1)"; then fail "moyi account delete refuses an empty note" "$EM_OUT"; else
+    case "$EM_OUT" in *"a note is required"*) pass "moyi account delete refuses an empty note";; *) fail "moyi account delete refuses an empty note" "$EM_OUT";; esac; fi
+  if EM_OUT="$(printf '%s\n' "nobody-$RANDOM@example.com" | account_op delete "smoke: confirmed" 2>&1)"; then fail "an address with no account is refused" "$EM_OUT"; else
+    case "$EM_OUT" in *"no account has that address"*) pass "an address with no account is refused, and nothing is done";; *) fail "an address with no account is refused" "$EM_OUT";; esac; fi
+  EM_OUT="$(printf '%s\n' "$EM_EMAIL" | account_op delete "smoke: replied from the account address" 2>&1)" || true
+  case "$EM_OUT" in "Requested: account "*"(14 days)."*) pass "the operator opens the deletion";; *) fail "the operator opens the deletion" "$EM_OUT";; esac
+  expect "GET /me shows it as the app's own pending deletion" 200 '"deletionRequest":{"' -- "$API/me" -H "Authorization: Bearer $EM_A"
+  is "…cancellable for 14 days, done within 30" "$(python3 -c "
+import json, sys
+from datetime import datetime
+b = json.loads(sys.argv[1])['deletionRequest']; p = lambda k: datetime.fromisoformat(b[k].replace('Z', '+00:00'))
+print((p('cancellableUntil') - p('requestedAt')).days, (p('deleteBy') - p('requestedAt')).days)" "$LAST_BODY")" "14 30"
+  EM_OUT="$(printf '%s\n' "$EM_EMAIL" | account_op delete "smoke: again" 2>&1)" || true
+  case "$EM_OUT" in "Already requested on "*"Nothing changed.") pass "asking again changes nothing";; *) fail "asking again changes nothing" "$EM_OUT";; esac
+  EM_USER="$(sql "SELECT id FROM users WHERE email = '$EM_EMAIL'")"
+  db_is "one request, and one audit row naming the account by id and never its address" \
+    "$(sql "SELECT (SELECT count(*) FROM deletion_requests WHERE user_id = '$EM_USER') || '|' || count(*) || '|' || bool_and(metadata::text NOT LIKE '%example.com%') FROM audit_log WHERE target_id = '$EM_USER' AND action = 'ACCOUNT_DELETION_REQUESTED' AND actor_type = 'OPERATOR'")" "1|1|true"
+  expect "the person can still cancel it in the app: 204" 204 "" -- -X DELETE "$API/me/deletion-request" -H "Authorization: Bearer $EM_A"
+  expect "…and GET /me is clear" 200 '"deletionRequest":null' -- "$API/me" -H "Authorization: Bearer $EM_A"
+else
+  skip "account deletion by email (psql not reachable through docker compose)"
+fi
+flush_buckets
+
 echo; echo "data export — asked for, built by the job, downloaded, expired by a withdrawal, limited (FR-009, FR-094, ADR-0059)"
 # The job runs on a five-second schedule here (the boot above; with --attach, start the server with
 # --moyi.scheduling.data-export.cron='*/5 * * * * *'). The first archive is built while the bond is

@@ -271,3 +271,26 @@ decision here:
   deletion request would be a second source for the derived `paused` and for the overlap rule of
   ADR-0066 decision 16. Pausing the partner of someone still signed in and writing is the owner's
   product call.
+
+## Amended 2026-11-16: deletion asked for by email
+
+getmoyi.app/delete-account promises a way without the app (Google Play requires one): email
+hello@getmoyi.app from the account's address; we confirm by replying to that address, then delete
+within 30 days. The owner ruled (2026-11-16) to keep that promise as written.
+
+- **The operator opens the app's own request**, never a second path: V69's
+  `account_deletion_request(email, operator, note)` inserts the same `deletion_requests` row
+  `POST /me/deletion-request` inserts, under the same user-row lock, with `execute_after` exactly
+  336 hours on (`interval '14 days'` would drift by an hour across a clock change, and the job reads
+  the window from `requested_at`). The window, the cancel in the app, the job and every module's
+  consumer are unchanged.
+- **The identity check is the operator's**, by email (ops/admin/deletion-by-email.md): a reply to
+  the address, confirmed from it. The password is not asked for (decision 1): the person may have
+  lost the app and the password with it. This is what the in-app password guards against, so the
+  runbook demands the round trip.
+- **No security email is sent** by the function: the operator's reply, which carries the date, is
+  that notice.
+- **Audited**: `ACCOUNT_DELETION_REQUESTED`, actor `OPERATOR` (V60's operator functions), target the
+  user by id, the note as justification, the operator's name and the request id in metadata; never
+  the address. Withheld from exports by `Disclosure`'s default.
+- `scripts/moyi account delete "<note>"` reads the address from stdin, out of shell history.
