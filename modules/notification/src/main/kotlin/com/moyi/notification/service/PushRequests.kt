@@ -62,6 +62,8 @@ internal class PushRequests(
                     // NotificationPreferences' rule, asked once, here.
                     wanted = request.recipient.preferences.allows(request.category),
                     bondDate = request.bondDate,
+                    nudge = request.nudge?.index,
+                    leaveFreeAcrossBonds = request.nudge?.leaveFreeAcrossBonds ?: 0,
                 ),
             )
         if (recorded) {

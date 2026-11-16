@@ -86,6 +86,8 @@ internal class SendDailyReminders(
                     recipient = reminder.recipient,
                     // The Bond-day it reminds of (#146): the app opens Today when it is the current one.
                     bondDate = reminder.bondDate,
+                    // Task 9 of #200 fills this in.
+                    nudge = null,
                 ),
             )
         return if (asked) Outcome.REQUESTED else Outcome.ALREADY_ASKED

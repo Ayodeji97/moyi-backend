@@ -14,7 +14,7 @@ import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
-/** The `notifications` ledger (V29, V30, V58). */
+/** The `notifications` ledger (V29, V30, V58, V68). */
 @Component
 internal class NotificationStore(
     private val jdbc: JdbcTemplate,
@@ -31,8 +31,8 @@ internal class NotificationStore(
         jdbc.update(
             """
             INSERT INTO notifications (id, user_id, bond_id, category, dedupe_key, not_before, stale_after, status, created_at,
-                                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'REQUESTED', ?, ?, ?, ?, ?, ?)
+                                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date, nudge, leave_free_across_bonds)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'REQUESTED', ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (dedupe_key) DO NOTHING
             """.trimIndent(),
             push.id,
@@ -48,6 +48,8 @@ internal class NotificationStore(
             push.quietHoursEnd?.let(Time::valueOf),
             push.wanted,
             push.bondDate?.let(java.sql.Date::valueOf),
+            push.nudge,
+            push.leaveFreeAcrossBonds,
         ) == 1
 
     /**
@@ -61,7 +63,7 @@ internal class NotificationStore(
             .query(
                 """
                 SELECT id, user_id, bond_id, category, not_before, stale_after, status,
-                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date
+                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date, nudge, leave_free_across_bonds
                   FROM notifications WHERE id = ? FOR UPDATE
                 """.trimIndent(),
                 { row, _ -> storedPush(row) },
@@ -195,6 +197,8 @@ internal class NotificationStore(
             quietHours = if (quietStart != null && quietEnd != null) QuietWindow(quietStart, quietEnd) else null,
             wanted = row.getBoolean("wanted"),
             bondDate = row.getDate("bond_date")?.toLocalDate(),
+            nudge = row.getObject("nudge", Integer::class.java)?.toInt(),
+            leaveFreeAcrossBonds = row.getInt("leave_free_across_bonds"),
         )
     }
 
@@ -216,6 +220,10 @@ internal data class NewPush(
     val wanted: Boolean,
     /** The Bond-day the push is about; `null` for a push about no day. */
     val bondDate: LocalDate?,
+    /** Which nudge of its Bond-day a reminder is; `null` for any other push (V68). */
+    val nudge: Int?,
+    /** How many cross-Bond slots the push must leave free when sent (V68). */
+    val leaveFreeAcrossBonds: Int,
 ) {
     val quietHoursStart: LocalTime? get() = quietHours?.start
     val quietHoursEnd: LocalTime? get() = quietHours?.end
@@ -237,6 +245,10 @@ internal data class StoredPush(
     val wanted: Boolean,
     /** The Bond-day the push is about: `null` for a push about no day, and for a row written before V58. */
     val bondDate: LocalDate?,
+    /** Which nudge of its Bond-day a reminder is: `null` for any other push, and for a row written before V68. */
+    val nudge: Int?,
+    /** How many cross-Bond slots the push must leave free when sent: 0 for a row written before V68. */
+    val leaveFreeAcrossBonds: Int,
 )
 
 /** Quiet hours as two columns hold them. */

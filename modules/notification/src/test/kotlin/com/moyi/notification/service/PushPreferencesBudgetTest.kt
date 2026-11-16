@@ -413,7 +413,7 @@ internal class PushPreferencesBudgetTest(
         preferences: NotificationPreferences = NotificationPreferences.DEFAULTS,
         staleAfter: Instant = evening.plus(Duration.ofDays(2)),
         bondDate: LocalDate? = null,
-    ) = PushRequest(userId, bondId, category, key, staleAfter, PushRecipient(zone, quietHours, preferences), bondDate)
+    ) = PushRequest(userId, bondId, category, key, staleAfter, PushRecipient(zone, quietHours, preferences), bondDate, null)
 
     private fun ask(request: PushRequest) {
         transactions.execute { notifications.request(request) } shouldBe true
