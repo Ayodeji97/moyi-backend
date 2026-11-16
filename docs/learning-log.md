@@ -3483,6 +3483,18 @@ Wrong about: a library's table being only its rows. Some of its state lives in t
          that compares the page's list to the `@SchedulerLock` annotations found it before any page
          did: count from the code, not from the corpus.
 
+## 2026-11-16 · Site · a copied token is not a code, and a button to its own host opens nothing
+Expected: a fallback page could offer the link's token as "the code" to type into the app, and an
+         "Open in the Moyi app" button pointing at the page's own address would hand it to the app.
+Reality: the app's code field takes six digits or a pasted link with `token=` in it
+         (`parseCodeInput`); a bare base64url token pasted there is read for its digits and checked
+         as a wrong code. The emailed 6-digit code is a different value, and the link does not carry
+         it. And iOS opens a universal link only on a tap that leaves the page's host; a button on
+         getmoyi.app to getmoyi.app stays in Safari. The pages now copy the whole link, and the button
+         points at open.getmoyi.app, which the app claims and which redirects back without it.
+Wrong about: "the token" and "the code" being one thing because the email puts them side by side.
+         Read what the receiving field parses before writing the line that tells someone what to paste.
+
 ## 2026-11-16 · Reminder nudges (#200) · a budget kept across Bonds can still be spent inside one
 Expected: if nudges 2 and 3 leave room for every reveal owed across a member's Bonds (six a day),
          the day's reveal push is safe.
