@@ -1,6 +1,5 @@
 package com.moyi.notification.api
 
-import com.moyi.notification.domain.PushBudget
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -134,12 +133,21 @@ data class Nudge(
 ) {
     init {
         require(index >= 1) { "a nudge's index is 1 or more" }
-        require(leaveFreeAcrossBonds in 0 until PushBudget.ACROSS_BONDS) {
-            "a nudge leaves 0 to ${PushBudget.ACROSS_BONDS - 1} cross-Bond slots free"
+        require(leaveFreeAcrossBonds in 0 until ACROSS_BONDS) {
+            "a nudge leaves 0 to ${ACROSS_BONDS - 1} cross-Bond slots free"
         }
         require(supersedes.all { it.length in 1..PushRequest.MAX_DEDUPE_KEY_LENGTH }) {
             "a superseded key is 1 to ${PushRequest.MAX_DEDUPE_KEY_LENGTH} characters"
         }
+    }
+
+    companion object {
+        /**
+         * FR-082's cap on pushes to one member across Bonds in a rolling 24 hours. `api` and
+         * `domain` may depend on nothing (ArchitectureTest), so neither can read the other's
+         * copy; `PushApiTest` pins this to `PushBudget.ACROSS_BONDS`, so they cannot drift.
+         */
+        const val ACROSS_BONDS = 6
     }
 }
 

@@ -1,5 +1,6 @@
 package com.moyi.notification.api
 
+import com.moyi.notification.domain.PushBudget
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotContain
@@ -47,6 +48,11 @@ internal class PushApiTest {
             PushRequest(UUID.randomUUID(), UUID.randomUUID(), PushCategory.REVEAL, "k", at, RECIPIENT, null, Nudge(1, 0, emptySet()))
         }
         PushRequest(UUID.randomUUID(), UUID.randomUUID(), PushCategory.REMINDER, "k", at, RECIPIENT, null, Nudge(1, 0, emptySet()))
+    }
+
+    @Test
+    fun `the nudge's cross-Bond cap is the budget's`() {
+        Nudge.ACROSS_BONDS shouldBe PushBudget.ACROSS_BONDS
     }
 
     @Test
