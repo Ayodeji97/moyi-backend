@@ -22,9 +22,10 @@ package com.moyi.admin.domain
  * (a bond's streak rebuilt from its days, FR-074), `FEATURE_FLAG_CHANGED` (FR-115), and the support inbox's
  * three: `SUPPORT_INBOX_VIEWED`, `SUPPORT_TICKET_READ`, `SUPPORT_TICKET_CLOSED`.
  *
- * V69 (ADR-0058, amended 2026-11-16): `ACCOUNT_DELETION_REQUESTED`, an account deletion opened by the
- * operator for a person who asked by email. Written by the operator's SQL function
- * `account_deletion_request`, never by Kotlin, as `ADMIN_INVITED` is; [Disclosure] withholds it by its
+ * V69 (ADR-0058, amended 2026-11-16): `ACCOUNT_DELETION_REQUESTED` and `ACCOUNT_DELETION_CANCELLED`, an
+ * account deletion opened, or called off, by the operator for a person who asked by email. Written by the
+ * operator's SQL functions `account_deletion_request` and `account_deletion_cancel`, never by Kotlin, as
+ * `ADMIN_INVITED` is; [Disclosure] withholds it by its
  * default, and an export of an account it names cannot follow the deletion anyway.
  */
 internal enum class AuditAction {
@@ -55,4 +56,5 @@ internal enum class AuditAction {
     SUPPORT_TICKET_READ,
     SUPPORT_TICKET_CLOSED,
     ACCOUNT_DELETION_REQUESTED,
+    ACCOUNT_DELETION_CANCELLED,
 }

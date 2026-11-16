@@ -14,7 +14,7 @@ import java.util.UUID
 import javax.sql.DataSource
 
 /**
- * V69's `account_deletion_request`, the operator's half of deletion asked for by email (ADR-0058,
+ * V69's `account_deletion_request` and `account_deletion_cancel`, the operator's half of deletion asked for by email (ADR-0058,
  * amended 2026-11-16), against a real Postgres through the full Flyway chain. The request it opens
  * must be the one the app opens: one pending row in `deletion_requests`, due exactly
  * `DeletionRequest.CANCELLATION_WINDOW` (14 days) after it was made, so the job and the app's cancel
@@ -34,6 +34,8 @@ internal class V69MigrationTest(
 
         row["outcome"] shouldBe "REQUESTED"
         row["user_id"] shouldBe id
+        row["email"] shouldBe email
+        row["status"] shouldBe "ACTIVE"
         val requestedAt = (row["requested_at"] as java.sql.Timestamp).toInstant()
         val executeAfter = (row["execute_after"] as java.sql.Timestamp).toInstant()
         Duration.between(requestedAt, executeAfter) shouldBe Duration.ofDays(14)
@@ -106,10 +108,77 @@ internal class V69MigrationTest(
     }
 
     @Test
-    fun `a suspended account can still be deleted`() {
+    fun `a suspended account can still be deleted, and says so`() {
         val (_, email) = newUser(status = "SUSPENDED")
 
-        request(email, "daniel", "n")["outcome"] shouldBe "REQUESTED"
+        val row = request(email, "daniel", "n")
+
+        row["outcome"] shouldBe "REQUESTED"
+        row["status"] shouldBe "SUSPENDED"
+    }
+
+    @Test
+    fun `an address never confirmed is UNVERIFIED, and nothing is written`() {
+        val (id, email) = newUser(status = "PENDING_VERIFICATION", verified = false)
+
+        val row = request(email, "daniel", "n")
+
+        row["outcome"] shouldBe "UNVERIFIED"
+        row["email"] shouldBe email
+        row["status"] shouldBe "PENDING_VERIFICATION"
+        count("SELECT count(*) FROM deletion_requests WHERE user_id = ?", id) shouldBe 0
+        count("SELECT count(*) FROM audit_log WHERE target_id = ?", id.toString()) shouldBe 0
+    }
+
+    @Test
+    fun `cancel calls the pending request off, audited, and a new request can follow`() {
+        val (id, email) = newUser(status = "SUSPENDED")
+        val opened = request(email, "daniel", "asked by email")
+
+        val row = cancel(email.uppercase(), "daniel", "changed their mind, replied from the account address")
+
+        row["outcome"] shouldBe "CANCELLED"
+        row["user_id"] shouldBe id
+        row["email"] shouldBe email
+        row["requested_at"] shouldBe opened["requested_at"]
+        count("SELECT count(*) FROM deletion_requests WHERE user_id = ? AND cancelled_at IS NOT NULL", id) shouldBe 1
+        val audit =
+            jdbc.queryForMap(
+                "SELECT actor_type, actor_id, justification, metadata::text AS metadata FROM audit_log " +
+                    "WHERE target_id = ? AND action = 'ACCOUNT_DELETION_CANCELLED'",
+                id.toString(),
+            )
+        audit["actor_type"] shouldBe "OPERATOR"
+        audit["actor_id"] shouldBe null
+        audit["justification"] shouldBe "changed their mind, replied from the account address"
+        (audit["metadata"] as String) shouldNotContain email
+
+        cancel(email, "daniel", "again")["outcome"] shouldBe "NOTHING_PENDING"
+        request(email, "daniel", "asked once more")["outcome"] shouldBe "REQUESTED"
+    }
+
+    @Test
+    fun `cancel after the window has closed is NOTHING_PENDING, as the app's 404, and writes nothing`() {
+        val (id, email) = newUser()
+        request(email, "daniel", "n")
+        jdbc.update(
+            "UPDATE deletion_requests SET requested_at = now() - interval '337 hours', " +
+                "execute_after = now() - interval '1 hour' WHERE user_id = ?",
+            id,
+        )
+
+        cancel(email, "daniel", "too late")["outcome"] shouldBe "NOTHING_PENDING"
+
+        count("SELECT count(*) FROM deletion_requests WHERE user_id = ? AND cancelled_at IS NULL", id) shouldBe 1
+        count("SELECT count(*) FROM audit_log WHERE target_id = ? AND action = 'ACCOUNT_DELETION_CANCELLED'", id.toString()) shouldBe 0
+    }
+
+    @Test
+    fun `cancel for an unknown address is NO_ACCOUNT, and checks the note and operator`() {
+        cancel("nobody-${UUID.randomUUID()}@example.com", "daniel", "n")["outcome"] shouldBe "NO_ACCOUNT"
+        val (_, email) = newUser()
+        shouldThrow<Exception> { cancel(email, "daniel", " ") }.message!! shouldContain "a note"
+        shouldThrow<Exception> { cancel(email, "dan iel", "n") }.message!! shouldContain "an operator"
     }
 
     @Test
@@ -135,7 +204,21 @@ internal class V69MigrationTest(
         note: String,
     ): Map<String, Any?> =
         jdbc.queryForMap(
-            "SELECT outcome, user_id, requested_at, execute_after FROM account_deletion_request(CAST(? AS citext), ?, ?)",
+            "SELECT outcome, user_id, email, status, requested_at, execute_after " +
+                "FROM account_deletion_request(CAST(? AS citext), ?, ?)",
+            email,
+            operator,
+            note,
+        )
+
+    private fun cancel(
+        email: String,
+        operator: String,
+        note: String,
+    ): Map<String, Any?> =
+        jdbc.queryForMap(
+            "SELECT outcome, user_id, email, status, requested_at, execute_after " +
+                "FROM account_deletion_cancel(CAST(? AS citext), ?, ?)",
             email,
             operator,
             note,
@@ -146,15 +229,25 @@ internal class V69MigrationTest(
         vararg args: Any,
     ): Int = jdbc.queryForObject(sql, Int::class.java, *args)!!
 
-    private fun newUser(status: String = "ACTIVE"): Pair<UUID, String> {
+    private fun newUser(
+        status: String = "ACTIVE",
+        verified: Boolean = true,
+    ): Pair<UUID, String> {
         val id = UUID.randomUUID()
         val email = "del-$id@example.com"
-        jdbc.update("INSERT INTO users (id, email, display_name, status) VALUES (?, ?, 'Ada', ?)", id, email, status)
+        jdbc.update(
+            "INSERT INTO users (id, email, display_name, status, email_verified_at) " +
+                "VALUES (?, ?, 'Ada', ?, CASE WHEN ? THEN now() END)",
+            id,
+            email,
+            status,
+            verified,
+        )
         return id to email
     }
 
     companion object {
-        /** V69's action, which V61's, V64's, V66's and V67's tests leave out of "every action of the enum". */
-        val V69_ACTIONS = listOf("ACCOUNT_DELETION_REQUESTED")
+        /** V69's actions, which V61's, V64's, V66's and V67's tests leave out of "every action of the enum". */
+        val V69_ACTIONS = listOf("ACCOUNT_DELETION_REQUESTED", "ACCOUNT_DELETION_CANCELLED")
     }
 }

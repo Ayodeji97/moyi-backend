@@ -281,16 +281,36 @@ within 30 days. The owner ruled (2026-11-16) to keep that promise as written.
 - **The operator opens the app's own request**, never a second path: V69's
   `account_deletion_request(email, operator, note)` inserts the same `deletion_requests` row
   `POST /me/deletion-request` inserts, under the same user-row lock, with `execute_after` exactly
-  336 hours on (`interval '14 days'` would drift by an hour across a clock change, and the job reads
-  the window from `requested_at`). The window, the cancel in the app, the job and every module's
-  consumer are unchanged.
+  336 hours on (`interval '14 days'` would drift by an hour across a clock change). The job takes
+  a request when `execute_after <= now`, the app's cancel while `now < requested_at + 14 days`, so
+  the stored gap must be exactly `CANCELLATION_WINDOW`: `V69MigrationTest` checks the gap and
+  `DeletionRequestTest` checks the SQL's interval against the constant. The window, the cancel in
+  the app, the job and every module's consumer are unchanged.
+- **A deliberate exception to module ownership.** The function is admin's and the rows are
+  identity's (`deletion_requests`, read under the `users` row lock), the one place an operator
+  function writes another module's table. The alternative, an identity endpoint for the operator,
+  needs the admin console, which is off in production, and a request by email cannot wait for it. It writes exactly what
+  identity's own request and cancel write and nothing else; a change to identity's rule (the
+  window, the lock, the columns) must change V69 with it.
+- **Only a confirmed address.** An account whose address was never confirmed is refused
+  (`UNVERIFIED`, nothing written): a reply from that address shows less than the runbook needs, and
+  the person can confirm it in the app and delete there. A suspended account is accepted: deletion
+  is the person's right whatever the account's standing.
+- **Cancel by email too.** `account_deletion_cancel(email, operator, note)` calls the request off
+  under the app's own rule (only while the window is open; nothing pending and too late are one
+  answer), audited as `ACCOUNT_DELETION_CANCELLED`. A suspended person cannot sign in to cancel, so
+  their reply says to answer the email instead.
 - **The identity check is the operator's**, by email (ops/admin/deletion-by-email.md): a reply to
   the address, confirmed from it. The password is not asked for (decision 1): the person may have
   lost the app and the password with it. This is what the in-app password guards against, so the
   runbook demands the round trip.
 - **No security email is sent** by the function: the operator's reply, which carries the date, is
   that notice.
-- **Audited**: `ACCOUNT_DELETION_REQUESTED`, actor `OPERATOR` (V60's operator functions), target the
+- **Audited**: `ACCOUNT_DELETION_REQUESTED` (and `ACCOUNT_DELETION_CANCELLED`), actor `OPERATOR` (V60's operator functions), target the
   user by id, the note as justification, the operator's name and the request id in metadata; never
   the address. Withheld from exports by `Disclosure`'s default.
-- `scripts/moyi account delete "<note>"` reads the address from stdin, out of shell history.
+- `scripts/moyi account delete|cancel-deletion "<note>"` reads the address twice from stdin (the
+  runbook: pasted from the From line, never typed), shows the account as stored with its status, and
+  acts only on a typed `yes`. The address reaches `psql` on its stdin (`\set`), never as an argument,
+  so it is in no process list; a failed statement can still put it in the Postgres log. The note must
+  not hold an address.

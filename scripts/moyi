@@ -126,11 +126,18 @@
 # recorded in audit_log. Only after the person has confirmed from the account's own address
 # (ops/admin/deletion-by-email.md):
 #
-#   moyi account delete "<note>"             asks for the account's email address (read from stdin, so it
-#                                            stays out of your shell history), then opens the same deletion
-#                                            request the app opens: due in 14 days, cancellable in the app
-#                                            until then, carried out by the deletion job. Prints the dates
-#                                            to put in your reply. Asking again changes nothing
+#   moyi account delete "<note>"             asks for the account's email address twice (read from stdin,
+#                                            so it stays out of your shell history and off psql's command
+#                                            line; paste it from the email's From line, never type it),
+#                                            shows the account as stored and asks you to type yes, then
+#                                            opens the same deletion request the app opens: due in 14 days,
+#                                            cancellable until then, carried out by the deletion job.
+#                                            Prints the dates to put in your reply. Asking again changes
+#                                            nothing. Refuses an address never confirmed. The note says how
+#                                            the person confirmed; never put the address in it
+#   moyi account cancel-deletion "<note>"    the same questions, then calls that request off while its 14
+#                                            days are open (for a person who cannot sign in to cancel in the
+#                                            app, e.g. a suspended account)
 #
 # The session (two tokens and the bond in use) is kept in
 # ~/.config/moyi/<profile>.json, readable by you alone. The password is asked
@@ -350,6 +357,23 @@ ops_sql() {
   local -a vars=()
   for pair in "$@"; do vars+=(-v "$pair"); done
   printf '%s\n' "$statement" | "${OPS_PSQL[@]}" -X -q -At -F $'\t' -v ON_ERROR_STOP=1 "${vars[@]}"
+}
+
+# As ops_sql, but each name=value goes to psql on stdin as a \set line, never as an argument, so a
+# value (a person's email address) is not in any process's command line. psql reads a single-quoted
+# \set value with backslash escapes and '' for a quote; a newline is written as \n.
+psql_quote() {
+  local v="$1"
+  local q="'"
+  v="${v//\\/\\\\}"; v="${v//$q/$q$q}"; v="${v//$'\n'/\\n}"; v="${v//$'\r'/\\r}"
+  printf "'%s'" "$v"
+}
+ops_sql_stdin() {
+  local statement="$1"; shift
+  {
+    for pair in "$@"; do printf '\\set %s %s\n' "${pair%%=*}" "$(psql_quote "${pair#*=}")"; done
+    printf '%s\n' "$statement"
+  } | "${OPS_PSQL[@]}" -X -q -At -F $'\t' -v ON_ERROR_STOP=1
 }
 
 cmd="${1:-help}"; shift || true
@@ -712,34 +736,57 @@ case "$cmd" in
     ;;
   account)
     # Deletion asked for by email (ADR-0058, amended 2026-11-16): the operator's, through the database, as
-    # support is. The rule (the window, one pending request, what is audited) is V69's function, not this.
-    usage="usage: moyi account delete \"<note>\"   (the email address is asked for)"
+    # support is. The rules (the window, one pending request, what is audited, an unconfirmed address
+    # refused) are V69's functions, not this; this makes sure the account is the one the person meant.
+    usage="usage: moyi account delete \"<note>\" | cancel-deletion \"<note>\"   (the email address is asked for)"
     action="${1:-}"; shift || true
+    case "$action" in delete|cancel-deletion) ;; *) die "$usage" ;; esac
+    [ $# -eq 1 ] || die "$usage"
+    [ -n "${1// /}" ] && [ "${#1}" -le 400 ] ||
+      die "a note is required (at most 400 characters): how the person confirmed, e.g. replied from the account address on 2026-11-20"
+    [[ "$1" == *@* ]] && die "the note must not hold an email address: the audit row names the account by id"
     ops_init
-    case "$action" in
-      delete)
-        [ $# -eq 1 ] || die "$usage"
-        [ -n "${1// /}" ] && [ "${#1}" -le 400 ] ||
-          die "a note is required (at most 400 characters): how the person confirmed, e.g. replied from the account address on 2026-11-20"
-        if [ -t 0 ]; then IFS= read -r -p "account email: " email; else IFS= read -r email || true; fi
-        [[ "$email" =~ ^[^[:space:]@]+@[^[:space:]@]+$ ]] || die "that is not an email address"
-        out="$(ops_sql "SELECT outcome, coalesce(user_id::text, '-'), coalesce(requested_at::text, '-'), coalesce(execute_after::text, '-')
-                        FROM account_deletion_request(:'email'::citext, :'actor', :'note');" \
-                 "email=$email" "actor=$OPERATOR" "note=$1")" || die "the database refused (see above)"
-        IFS=$'\t' read -r outcome user requested due <<< "$out"
-        case "$outcome" in
-          REQUESTED)
-            echo "Requested: account $user is deleted from $due (14 days)."
-            echo "Until then they can cancel it in the app (Bond settings, Account). Recorded in audit_log under $OPERATOR."
-            echo "Reply to them now: ops/admin/deletion-by-email.md, step 4." ;;
-          ALREADY_PENDING)
-            echo "Already requested on $requested: account $user is deleted from $due. Nothing changed." ;;
-          NO_ACCOUNT)
-            die "no account has that address (or it was already deleted). Nothing was done: reply with ops/admin/deletion-by-email.md, step 5" ;;
-          *) die "unexpected answer from the database: $out" ;;
-        esac
-        ;;
-      *) die "$usage" ;;
+    # The address twice, from stdin (a terminal, or the next lines of a pipe): paste it from the From line.
+    # Off a terminal the question is still printed (to stderr), so a scripted run shows what it agreed to.
+    ask_line() { if [ -t 0 ]; then IFS= read -r -p "$1" REPLY; else printf '%s\n' "$1" >&2; IFS= read -r REPLY || REPLY=""; fi; }
+    ask_line "account email (paste it from the email's From line): "; email="$REPLY"
+    ask_line "the same again: "; again="$REPLY"
+    [ "$email" = "$again" ] || die "the two addresses differ. Nothing was done"
+    [[ "$email" =~ ^[^[:space:]@]+@[^[:space:]@]+$ ]] || die "that is not an email address"
+    found="$(ops_sql_stdin "SELECT email::text, status, CASE WHEN email_verified_at IS NULL THEN 'unconfirmed' ELSE 'confirmed' END
+                            FROM users WHERE email = :'email'::citext AND status <> 'DELETED';" "email=$email")" ||
+      die "the database refused (see above)"
+    [ -n "$found" ] ||
+      die "no account has that address (or it was already deleted). Nothing was done: reply with ops/admin/deletion-by-email.md, step 5"
+    IFS=$'\t' read -r stored status confirmed <<< "$found"
+    if [ "$action" = delete ]; then verb="Open the deletion of"; fn=account_deletion_request; else verb="Cancel the deletion of"; fn=account_deletion_cancel; fi
+    ask_line "$verb the account at $stored (status $status, address $confirmed)? Type yes: "
+    [ "$REPLY" = yes ] || die "not confirmed. Nothing was done"
+    out="$(ops_sql_stdin "SELECT outcome, coalesce(user_id::text, '-'), coalesce(email, '-'), coalesce(status, '-'),
+                                 coalesce(requested_at::text, '-'), coalesce(execute_after::text, '-')
+                          FROM $fn(:'email'::citext, :'actor', :'note');" \
+             "email=$email" "actor=$OPERATOR" "note=$1")" || die "the database refused (see above)"
+    IFS=$'\t' read -r outcome user stored status requested due <<< "$out"
+    case "$outcome" in
+      REQUESTED)
+        echo "Requested: account $user ($stored) is deleted from $due (14 days). Recorded in audit_log under $OPERATOR."
+        if [ "$status" = SUSPENDED ]; then
+          echo "The account is suspended, so they cannot cancel in the app: reply with ops/admin/deletion-by-email.md, step 4 (suspended)."
+        else
+          echo "Until then they can cancel it in the app (Bond settings, Account). Reply now: ops/admin/deletion-by-email.md, step 4."
+        fi ;;
+      ALREADY_PENDING)
+        echo "Already requested on $requested: account $user ($stored) is deleted from $due. Nothing changed." ;;
+      UNVERIFIED)
+        die "the account at $stored never confirmed its address, so a reply from it is not enough. Nothing was done: reply with ops/admin/deletion-by-email.md, step 5 (unconfirmed)" ;;
+      CANCELLED)
+        echo "Cancelled: the deletion of account $user ($stored), requested $requested, will not happen. Recorded in audit_log under $OPERATOR."
+        echo "Reply now: ops/admin/deletion-by-email.md, step 6." ;;
+      NOTHING_PENDING)
+        die "account $user ($stored) has no deletion that can still be cancelled (none, or its 14 days have passed). Nothing was done" ;;
+      NO_ACCOUNT)
+        die "no account has that address (or it was already deleted). Nothing was done: reply with ops/admin/deletion-by-email.md, step 5" ;;
+      *) die "unexpected answer from the database: $out" ;;
     esac
     ;;
   notifications)
