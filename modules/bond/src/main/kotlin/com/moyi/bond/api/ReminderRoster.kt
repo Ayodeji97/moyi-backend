@@ -1,6 +1,7 @@
 package com.moyi.bond.api
 
 import com.moyi.notification.api.PushRecipient
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -29,6 +30,14 @@ interface ReminderRoster {
         after: Instant,
         upTo: Instant,
     ): List<DueReminder>
+
+    companion object {
+        /** Reminders a member may be sent in one Bond-day: the first, then two nudges (C12). */
+        const val NUDGES_PER_BOND_DAY = 3
+
+        /** Elapsed time between one reminder and the next, not wall-clock time (C13). */
+        val NUDGE_EVERY: Duration = Duration.ofHours(3)
+    }
 }
 
 /**
