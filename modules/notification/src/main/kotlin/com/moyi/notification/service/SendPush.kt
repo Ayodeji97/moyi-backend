@@ -49,8 +49,8 @@ import java.time.Instant
  *    (ADR-0045). Each holds back this member's copy and no one else's (H-M5
  *    as Q9 reads it):
  *    - the category turned off → `SUPPRESSED`;
- *    - inside quiet hours, or before `not_before` → `HELD` until the hours
- *      end, and the delivery is let go. [HeldPushes] hands it back then, and
+ *    - inside quiet hours, or before `not_before` → `HELD` until the later
+ *      of the two, and the delivery is let go. [HeldPushes] hands it back then, and
  *      it comes through here again: still owed, it is sent; stale by then,
  *      it is `EXPIRED` at step 2. A reveal is held, never dropped (Q7);
  *    - FR-082's budget, decided under the member's budget lock, which the
@@ -94,7 +94,7 @@ internal class SendPush(
 
             is Decision.Hold -> {
                 ledger.hold(push.id, decision.until)
-                settled(push, HELD)
+                settled(push, if (decision.settling) SETTLING else HELD)
             }
 
             is Decision.Drop -> {
@@ -129,7 +129,8 @@ internal class SendPush(
             }
 
             goesAt.isAfter(now) -> {
-                Decision.Hold(goesAt)
+                // Its own not_before is as late as quiet hours would hold it: settling, not quiet hours.
+                Decision.Hold(goesAt, settling = !push.notBefore.isBefore(goesAt))
             }
 
             else -> {
@@ -229,11 +230,15 @@ internal class SendPush(
         /**
          * `notification.push.settled{category, nudge, outcome}`: `nudge` is `none` or 1 to 3.
          *
-         * Counts dispatch decisions, not pushes. A held push contributes `held` once per hold, and
-         * exactly one final outcome later, when [HeldPushes] hands it back and it is decided again,
-         * unless it is cancelled while held (written or superseded): then it has none, and
-         * `notification.push.cancelled` counts it. So the final outcomes (every outcome but `held`)
-         * sum to the pushes that reached a final outcome, and `held` alone is quiet-hours volume.
+         * Counts dispatch decisions, not pushes. A held push contributes `held` or `settling` once
+         * per hold, and exactly one final outcome later, when [HeldPushes] hands it back and it is
+         * decided again, unless it is cancelled while held (for any reason): then it
+         * has none, and `notification.push.cancelled` counts it. So the final outcomes (every
+         * outcome but `held` and `settling`) sum to the pushes that reached a final outcome.
+         *
+         * `settling` is a hold by the push's own `not_before` (a coalescing push's two minutes,
+         * ADR-0069 decisions 7 and 13); `held` is a hold by quiet hours, including one whose end is
+         * later than the push's `not_before`. So `held` alone is quiet-hours volume.
          */
         const val SETTLED = "notification.push.settled"
 
@@ -241,6 +246,7 @@ internal class SendPush(
         const val NO_NUDGE = "none"
         const val SENT = "sent"
         const val HELD = "held"
+        const val SETTLING = "settling"
         const val DROPPED_BUDGET = "dropped_budget"
         const val DROPPED_LEAVING_ROOM = "dropped_leaving_room"
         const val FAILED = "failed"
@@ -261,9 +267,13 @@ internal class SendPush(
             val slot: BudgetDecision,
         ) : Decision
 
-        /** `HELD` until [until], when quiet hours end. */
+        /**
+         * `HELD` until [until]: when quiet hours end, or, if [settling], when the push's own
+         * `not_before` comes and quiet hours would not hold it later.
+         */
         data class Hold(
             val until: Instant,
+            val settling: Boolean,
         ) : Decision
 
         /** To every phone, in the slot the budget gave it. */

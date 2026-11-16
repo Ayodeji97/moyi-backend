@@ -17,6 +17,7 @@ import com.moyi.notification.api.PushToken
 import com.moyi.notification.api.PushTokenRegistration
 import com.moyi.notification.api.PushTokens
 import com.moyi.notification.api.QuietHoursWindow
+import com.moyi.notification.api.SharedChange
 import com.moyi.notification.infra.NotificationTestApplication
 import com.moyi.notification.infra.ScriptedPushSender
 import io.kotest.matchers.shouldBe
@@ -94,6 +95,27 @@ internal class PushMetricsTest(
 
         settled("REMINDER", "1", "held") shouldBe 1.0
         totalSettled() shouldBe 1.0
+    }
+
+    @Test
+    fun `a push held only by its own not_before is counted settling, not held`() {
+        // ADR-0069 decision 13, spec B22: `held` stays quiet-hours volume.
+        ask("shared:1", null, PushCategory.SHARED_SETTING_CHANGED, sharedChange = SharedChange.SETTING)
+        dispatch()
+
+        settled("SHARED_SETTING_CHANGED", "none", "settling") shouldBe 1.0
+        settled("SHARED_SETTING_CHANGED", "none", "held") shouldBe 0.0
+        totalSettled() shouldBe 1.0
+    }
+
+    @Test
+    fun `a settling push that quiet hours would hold longer is counted held`() {
+        val night = recipient(quiet = QuietHoursWindow(LocalTime.of(17, 0), LocalTime.of(23, 0)))
+        ask("shared:1", null, PushCategory.SHARED_SETTING_CHANGED, recipient = night, sharedChange = SharedChange.SETTING)
+        dispatch()
+
+        settled("SHARED_SETTING_CHANGED", "none", "held") shouldBe 1.0
+        settled("SHARED_SETTING_CHANGED", "none", "settling") shouldBe 0.0
     }
 
     @Test
@@ -300,6 +322,7 @@ internal class PushMetricsTest(
         category: PushCategory = PushCategory.REMINDER,
         recipient: PushRecipient = recipient(),
         staleAfter: Instant = start.plus(Duration.ofDays(1)),
+        sharedChange: SharedChange? = null,
     ): Boolean =
         transactions.execute {
             notifications.request(
@@ -312,7 +335,7 @@ internal class PushMetricsTest(
                     recipient = recipient,
                     bondDate = date,
                     nudge = nudge,
-                    sharedChange = null,
+                    sharedChange = sharedChange,
                 ),
             )
         }

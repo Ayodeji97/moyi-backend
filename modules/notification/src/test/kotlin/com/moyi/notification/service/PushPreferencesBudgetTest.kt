@@ -16,6 +16,7 @@ import com.moyi.notification.api.PushToken
 import com.moyi.notification.api.PushTokenRegistration
 import com.moyi.notification.api.PushTokens
 import com.moyi.notification.api.QuietHoursWindow
+import com.moyi.notification.api.SharedChange
 import com.moyi.notification.infra.NotificationTestApplication
 import com.moyi.notification.infra.ScriptedPushSender
 import com.moyi.notification.infra.database.BUDGET_LOCK_NAMESPACE
@@ -279,6 +280,39 @@ internal class PushPreferencesBudgetTest(
     }
 
     @Test
+    fun `spec B19's day in the ledger - a shared change after yesterday's solo-unlock is dropped, and the reveal goes`() {
+        // ADR-0069 decision 10: once the reserved slot is spent today, no non-reveal push takes the Bond's last slot.
+        fun askAt(
+            time: String,
+            request: PushRequest,
+        ) {
+            clock.set(at(time))
+            ask(request)
+            dispatcher.dispatchDue(clock.instant(), BUDGET)
+        }
+        val today = evening.atZone(london).toLocalDate()
+        askAt("08:00", push(ada, PushCategory.REMINDER, key = "nudge-1", bondDate = today, nudge = Nudge(1, 0, emptySet())))
+        askAt("11:00", push(ada, PushCategory.REMINDER, key = "nudge-2", bondDate = today, nudge = Nudge(2, 1, emptySet())))
+        askAt("12:00", push(ada, PushCategory.SOLO_UNLOCK, key = "solo-unlock", bondDate = today.minusDays(1)))
+        askAt("13:00", push(ada, PushCategory.SHARED_SETTING_CHANGED, key = "renamed", sharedChange = SharedChange.SETTING))
+        // Held to settle for two minutes, then handed back and decided.
+        statuses(ada).getValue("renamed") shouldBe ("HELD" to false)
+        clock.set(at("13:02"))
+        held.releaseDue(clock.instant(), LIMIT) shouldBe 1
+        dispatcher.dispatchDue(clock.instant(), BUDGET)
+        askAt("19:00", push(ada, PushCategory.REVEAL, key = "reveal", bondDate = today))
+
+        statuses(ada) shouldBe
+            mapOf(
+                "nudge-1" to ("SENT" to false),
+                "nudge-2" to ("SENT" to false),
+                "solo-unlock" to ("SENT" to true),
+                "renamed" to ("DROPPED_BUDGET" to false),
+                "reveal" to ("SENT" to false),
+            )
+    }
+
+    @Test
     fun `a nudge that would leave no slot for the reveals owed is dropped, and with none owed it is sent`() {
         // Four sent across her Bonds in the last 24 hours; two reveals still owed (ADR-0068 decision 5).
         spend(ada, 4)
@@ -435,7 +469,8 @@ internal class PushPreferencesBudgetTest(
         staleAfter: Instant = evening.plus(Duration.ofDays(2)),
         bondDate: LocalDate? = null,
         nudge: Nudge? = null,
-    ) = PushRequest(userId, bondId, category, key, staleAfter, PushRecipient(zone, quietHours, preferences), bondDate, nudge, null)
+        sharedChange: SharedChange? = null,
+    ) = PushRequest(userId, bondId, category, key, staleAfter, PushRecipient(zone, quietHours, preferences), bondDate, nudge, sharedChange)
 
     private fun ask(request: PushRequest) {
         transactions.execute { notifications.request(request) } shouldBe true

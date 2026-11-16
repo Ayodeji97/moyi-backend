@@ -17,9 +17,9 @@ internal enum class BudgetDecision {
 
     /**
      * Not sent, because it would leave too few of the member's cross-Bond
-     * slots for the reveals still owed (ADR-0068 decision 5), or would take
-     * its Bond's last slot once the reserved one is spent (decision 19): a
-     * soft nudge.
+     * slots for the reveals still owed (ADR-0068 decision 5), or, not being
+     * reveal-class, would take its Bond's last slot once the reserved one is
+     * spent (ADR-0068 decision 19, as ADR-0069 decision 10 widens it).
      * `DROPPED_BUDGET` in the ledger, as [DROPPED] is; told apart only so
      * that it can be counted apart.
      */
@@ -55,12 +55,14 @@ internal data class BudgetDay(
  * the term is today's cross-Bond cap exactly. The caller counts what is owed;
  * this rule only spends against it.
  *
- * The same push leaves room **in its own Bond** too (lead ruling 2026-11-16,
- * ADR-0068 decision 19): once the Bond's reserved slot is spent today (by a
- * solo-unlock or a late reveal of the day before), a soft nudge, one with
- * something to leave free, is not sent into the Bond's last slot, which
- * today's reveal will need. A nudge 1, or a nudge that inherits nothing to
- * leave free, is hard and unchanged.
+ * **Leaving room in its own Bond** (ADR-0068 decision 19, widened to every
+ * non-reveal push by ADR-0069 decision 10): once the Bond's reserved slot is
+ * spent today (by a solo-unlock or a late reveal of the day before, or by
+ * today's own reveal), a non-reveal push, of any category and nudge 1
+ * included, is not sent into the Bond's last slot, which a reveal may need.
+ * Reveal-class pushes are unchanged. Without it, whatever spends the
+ * remainder after the reserved slot went to the day before takes the slot
+ * the day's reveal needs.
  *
  * **Two different days** (spec D-16). The per-Bond cap counts the member's
  * day in **that Bond's** reminder zone, because a member has a zone per Bond
@@ -78,10 +80,10 @@ internal data class BudgetDay(
  * leaving room across Bonds ([BudgetDecision.DROPPED_LEAVING_ROOM]), the
  * per-Bond cap ([BudgetDecision.DROPPED]), then leaving the Bond's last slot
  * ([BudgetDecision.DROPPED_LEAVING_ROOM]). A push that is short of room across
- * Bonds and also over its Bond's four is counted as leaving room; a soft
- * nudge that finds its Bond's four already spent is counted under the cap,
- * so the per-Bond leaving-room count is exactly the nudges held back for a
- * slot the reveal could still use.
+ * Bonds and also over its Bond's four is counted as leaving room; a
+ * non-reveal push that finds its Bond's four already spent is counted under
+ * the cap, so the per-Bond leaving-room count is exactly the non-reveal
+ * pushes held back for a slot a reveal could still use.
  */
 internal object PushBudget {
     const val PER_BOND_PER_DAY = 4
@@ -118,8 +120,8 @@ internal object PushBudget {
             // Four a day in one Bond, the reserved slot among them, whatever the counts say.
             sentInBondToday >= PER_BOND_PER_DAY -> BudgetDecision.DROPPED
 
-            // A soft nudge leaves the Bond's last slot for its reveal once the reserved one is spent.
-            leaveFreeAcrossBonds > 0 && wouldTakeRevealsLastSlot -> BudgetDecision.DROPPED_LEAVING_ROOM
+            // A non-reveal push leaves the Bond's last slot for a reveal once the reserved one is spent.
+            !revealClass && wouldTakeRevealsLastSlot -> BudgetDecision.DROPPED_LEAVING_ROOM
 
             revealClass && !reservedSpentToday -> BudgetDecision.RESERVED
 
