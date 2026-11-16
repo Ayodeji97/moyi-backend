@@ -15,7 +15,9 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -110,9 +112,41 @@ internal class PushRequests(
         since: Instant,
     ): Boolean = ledger.existsSince(userId, bondId, category, LIVE_OR_SENT, since)
 
+    @Transactional(readOnly = true)
+    override fun revealClassSettled(
+        userId: UUID,
+        bondDays: Map<UUID, LocalDate>,
+    ): Set<UUID> {
+        if (bondDays.isEmpty()) return emptySet()
+        return ledger
+            .datedSince(userId, bondDays.keys, REVEAL_CLASS, SETTLED, clock.instant().minus(REVEAL_LOOK_BACK))
+            .filter { (bondId, date) -> bondDays[bondId] == date }
+            .mapTo(mutableSetOf()) { it.bondId }
+    }
+
+    /**
+     * [LIVE_OR_SENT] and [SETTLED] together cover every status but `CANCELLED`, which is in
+     * neither: a push called off reached nobody and never will. They are not quite a partition:
+     * `SENT` is in both, as it reached its member and nothing more will happen to it.
+     */
     internal companion object {
         /** What a push that reached, or may yet reach, its member is: sent, or still owed. */
         val LIVE_OR_SENT = setOf(NotificationStatus.SENT, NotificationStatus.REQUESTED, NotificationStatus.HELD)
+
+        /** What a push that is done with is, other than called off: sent, or gone nowhere for good. */
+        val SETTLED =
+            setOf(
+                NotificationStatus.SENT,
+                NotificationStatus.SUPPRESSED,
+                NotificationStatus.DROPPED_BUDGET,
+                NotificationStatus.EXPIRED,
+                NotificationStatus.FAILED_PERMANENT,
+            )
+
+        private val REVEAL_CLASS = PushCategory.entries.filter { it.isRevealClass }.toSet()
+
+        /** How far back a current Bond-day's reveal can have been asked for (spec C17). */
+        private val REVEAL_LOOK_BACK = Duration.ofHours(72)
 
         const val AGGREGATE = "Notification"
         const val PUSH_REQUESTED = "PushRequested"

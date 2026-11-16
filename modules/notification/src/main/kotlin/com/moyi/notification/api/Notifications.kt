@@ -69,6 +69,23 @@ interface Notifications {
         category: PushCategory,
         since: Instant,
     ): Boolean
+
+    /**
+     * Which Bonds of [bondDays] have a reveal-class push ([PushCategory.isRevealClass]) to
+     * [userId] about that Bond's own date that is **settled**: sent, or gone nowhere for good
+     * (suppressed by a toggle, dropped by the budget, expired, failed). A push still owed
+     * (`REQUESTED`, or `HELD` by quiet hours) is not settled, nor is one called off, nor a day
+     * with no such push at all: those reveals may yet need a slot (spec C17, ADR-0068 decision 6).
+     *
+     * Only pushes asked for in the last 72 hours are looked at: a current Bond-day's reveal is
+     * asked for during that day. For a nudge counting the cross-Bond slots it must leave free;
+     * the caller supplies the Bonds and their current dates, as values, since this module can
+     * read neither. An empty map is answered with an empty set, without a query.
+     */
+    fun revealClassSettled(
+        userId: UUID,
+        bondDays: Map<UUID, LocalDate>,
+    ): Set<UUID>
 }
 
 /**

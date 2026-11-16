@@ -15,6 +15,7 @@ import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /** The `notifications` ledger (V29, V30, V58, V68). */
+@Suppress("TooManyFunctions") // One per statement on the ledger, in the ledger's terms.
 @Component
 internal class NotificationStore(
     private val jdbc: JdbcTemplate,
@@ -173,6 +174,30 @@ internal class NotificationStore(
         ) == true
 
     /**
+     * The Bond and Bond-day of each push to [userId] in one of [bondIds], of one of [categories],
+     * in one of [statuses], asked for after [since]. One read through
+     * `notifications_recipient_idx (user_id, category, created_at)`: the user and each category
+     * are its equality columns and [since] bounds its range; Bond and status are filtered on the
+     * rows it finds. A push about no day is not returned.
+     */
+    fun datedSince(
+        userId: UUID,
+        bondIds: Collection<UUID>,
+        categories: Set<PushCategory>,
+        statuses: Set<NotificationStatus>,
+        since: Instant,
+    ): List<DatedPush> =
+        jdbc.query(
+            DATED_SINCE,
+            { row, _ -> DatedPush(row.getObject("bond_id", UUID::class.java), row.getDate("bond_date").toLocalDate()) },
+            userId,
+            categories.map { it.name }.toTypedArray(),
+            timestamp(since),
+            bondIds.toTypedArray(),
+            statuses.map { it.name }.toTypedArray(),
+        )
+
+    /**
      * Holds a `REQUESTED` push back until [until]: quiet hours (ADR-0045).
      * The push stays owed, and [releaseDue] hands it back when the time comes.
      */
@@ -234,7 +259,23 @@ internal class NotificationStore(
     }
 
     private fun timestamp(instant: Instant): Timestamp = Timestamp.from(instant.truncatedTo(ChronoUnit.MICROS))
+
+    internal companion object {
+        /** [datedSince]'s statement; a test EXPLAINs it to see that the recipient index can serve it. */
+        val DATED_SINCE =
+            """
+            SELECT DISTINCT bond_id, bond_date FROM notifications
+             WHERE user_id = ? AND category = ANY (?) AND created_at > ?
+               AND bond_id = ANY (?) AND status = ANY (?) AND bond_date IS NOT NULL
+            """.trimIndent()
+    }
 }
+
+/** A push's Bond and the Bond-day it is about. */
+internal data class DatedPush(
+    val bondId: UUID,
+    val bondDate: LocalDate,
+)
 
 /** A push about to be recorded, with the member's settings as they stand (ADR-0045). */
 internal data class NewPush(
