@@ -66,7 +66,8 @@ generated with the two `openssl` lines in ADR-0019. Likewise the three
 link bases a verification, reset or invite link is built on:
 `MOYI_IDENTITY_VERIFICATION_LINK_BASE_URL`,
 `MOYI_IDENTITY_VERIFICATION_RESET_LINK_BASE_URL` and
-`MOYI_BOND_INVITE_LINK_BASE_URL`, pages on the marketing site; `local`
+`MOYI_BOND_INVITE_LINK_BASE_URL`, pages on the marketing site (`getmoyi.app`,
+built from the separate `moyi-web` repository since 2026-11-16); `local`
 points them at `localhost:3000`, and nothing else has a default, because a
 token travels in the link (ADR-0018's amendment). Set all three together: a boot
 reports only the first one missing. So are the current legal documents
