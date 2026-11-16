@@ -8,8 +8,9 @@ import com.moyi.notification.api.Notifications
 import com.moyi.notification.api.Nudge
 import com.moyi.notification.api.PushCategory
 import com.moyi.notification.api.PushRequest
+import com.moyi.notification.api.SharedChange
+import com.moyi.notification.domain.Coalescing
 import com.moyi.notification.domain.NotificationStatus
-import com.moyi.notification.infra.database.CancelledPush
 import com.moyi.notification.infra.database.NewPush
 import com.moyi.notification.infra.database.NotificationStore
 import com.moyi.notification.infra.database.QuietWindow
@@ -35,7 +36,9 @@ import java.util.UUID
  *
  * A nudge this call records calls off what it supersedes that is still owed, in
  * the same transaction, and takes over the least of their budget claims
- * (ADR-0068 decision 7).
+ * (ADR-0068 decision 7). A push of a coalescing category is asked for to go
+ * after [Coalescing.SETTLE], and calls off the older pushes of its group still
+ * owed, taking over the earliest of their times (ADR-0069 decision 7).
  *
  * **Every request is published, even one already past `staleAfter`**, and the
  * push consumer records it `EXPIRED`. One path to every final status, and the
@@ -56,6 +59,8 @@ internal class PushRequests(
         // and the ledger is read by time.
         val id = ids.timeOrdered()
         val nudge = request.nudge
+        // A coalescing push waits to see whether more changes follow (ADR-0069 decision 7).
+        val notBefore = if (request.category.coalesces) now.plus(Coalescing.SETTLE) else now
         val recorded =
             ledger.insertOnce(
                 NewPush(
@@ -64,8 +69,8 @@ internal class PushRequests(
                     bondId = request.bondId,
                     category = request.category,
                     dedupeKey = request.dedupeKey,
-                    // May go at once; quiet hours are the consumer's to judge, when it comes to send.
-                    notBefore = now,
+                    // Quiet hours are the consumer's to judge, when it comes to send.
+                    notBefore = notBefore,
                     staleAfter = request.staleAfter,
                     createdAt = now,
                     zone = request.recipient.zone,
@@ -82,6 +87,7 @@ internal class PushRequests(
         // Only a push this call recorded supersedes: a re-ask (the look-back asks up to six
         // times) calls off nothing, not even a push asked for after the first ask.
         if (recorded && nudge != null) supersede(id, nudge)
+        if (recorded && request.category.coalesces) coalesce(id, request, notBefore)
         if (recorded) {
             publisher.publish(OutboxEvent(AGGREGATE, id, PUSH_REQUESTED, mapOf(NOTIFICATION_ID to id), now))
         }
@@ -103,9 +109,31 @@ internal class PushRequests(
     ) {
         if (nudge.supersedes.isEmpty()) return
         val cancelled = ledger.cancelOwed(nudge.supersedes)
-        cancelled.forEach { count(it, SUPERSEDED) }
+        cancelled.forEach { count(it.category, it.nudge, SUPERSEDED) }
         val inherited = cancelled.minOfOrNull { it.leaveFreeAcrossBonds } ?: return
         if (inherited < nudge.leaveFreeAcrossBonds) ledger.lowerLeaveFree(id, inherited)
+    }
+
+    /**
+     * Calls off every older push of the new row [id]'s group (the same member, Bond and category)
+     * that is still owed, and gives the new row the earliest `not_before` of its own and theirs, and
+     * the merged change (ADR-0069 decision 7, spec §3 B17). The earliest, not the newest: a steady
+     * stream of changes is then pushed every [Coalescing.SETTLE] at most, rather than never. A push
+     * already sent is not returned, so it gives nothing; a push the consumer is sending is waited
+     * for. Runs only after the insert recorded the row, in the caller's transaction, before the
+     * row's event is published.
+     */
+    private fun coalesce(
+        id: UUID,
+        request: PushRequest,
+        notBefore: Instant,
+    ) {
+        val cancelled = ledger.cancelOwedInGroup(request.userId, request.bondId, request.category, except = id)
+        if (cancelled.isEmpty()) return
+        cancelled.forEach { count(it.category, it.nudge, SUPERSEDED) }
+        val earliest = minOf(notBefore, cancelled.minOf { it.notBefore })
+        val change = Coalescing.merged(request.sharedChange, cancelled.map { it.sharedChange }, SharedChange.SEVERAL)
+        ledger.retime(id, earliest, change)
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -114,17 +142,25 @@ internal class PushRequests(
         reason: CancelReason,
     ): Int {
         val cancelled = ledger.cancelOwed(dedupeKeys)
-        cancelled.forEach { count(it, reason.name.lowercase()) }
+        cancelled.forEach { count(it.category, it.nudge, reason.name.lowercase()) }
+        return cancelled.size
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    override fun cancelBond(bondId: UUID): Int {
+        val cancelled = ledger.cancelOwedOfBond(bondId)
+        cancelled.forEach { count(it.category, it.nudge, BOND_ENDED) }
         return cancelled.size
     }
 
     /** `notification.push.cancelled{category, nudge, reason}`: what was called off, never whose. */
     private fun count(
-        push: CancelledPush,
+        category: PushCategory,
+        nudge: Int?,
         reason: String,
     ) {
-        val nudge = push.nudge?.toString() ?: SendPush.NO_NUDGE
-        meters.counter(CANCELLED, "category", push.category.name, "nudge", nudge, "reason", reason).increment()
+        val tag = nudge?.toString() ?: SendPush.NO_NUDGE
+        meters.counter(CANCELLED, "category", category.name, "nudge", tag, "reason", reason).increment()
     }
 
     @Transactional(readOnly = true)
@@ -173,8 +209,11 @@ internal class PushRequests(
 
         const val CANCELLED = "notification.push.cancelled"
 
-        /** Called off by a newer nudge of the same Bond-day. */
+        /** Called off by a newer nudge of the same Bond-day, or a newer coalescing push of the same group. */
         const val SUPERSEDED = "superseded"
+
+        /** Called off because its Bond ended (ADR-0069 decision 5). */
+        const val BOND_ENDED = "bond_ended"
 
         const val AGGREGATE = "Notification"
         const val PUSH_REQUESTED = "PushRequested"

@@ -61,6 +61,20 @@ interface Notifications {
     ): Int
 
     /**
+     * Calls off every push of [bondId] still owed, to every member, of every category: each one
+     * still `REQUESTED`, or `HELD` by quiet hours, becomes `CANCELLED` and is never sent. For a
+     * Bond that has ended, so that nothing held past its end reaches a member afterwards
+     * (ADR-0069 decision 5): a push already settled is left as it is. One statement.
+     *
+     * **Joins the caller's transaction and refuses to run without one**, so the pushes are called
+     * off exactly when the ending commits. Calling it twice is calling it once. Every push it calls
+     * off is counted `notification.push.cancelled{reason=bond_ended}`.
+     *
+     * @return how many pushes this call cancelled.
+     */
+    fun cancelBond(bondId: UUID): Int
+
+    /**
      * Whether [userId] has, in [bondId], a push of [category] asked for after
      * [since] that was **sent or is still owed** (`SENT`, `REQUESTED`, or
      * `HELD` by quiet hours). A push that went nowhere (expired, dropped by
@@ -245,6 +259,14 @@ enum class PushCategory {
      * as a day opening with two, at the same moment, so it is the same class.
      */
     val isRevealClass: Boolean get() = this == REVEAL || this == SOLO_UNLOCK
+
+    /**
+     * Coalesces (ADR-0069 decision 7): asked for to go after a short settling time, and a newer
+     * push of the category to the same member in the same Bond calls off every older one still
+     * owed, so that several changes in a minute are one push. A rule of this module's, keyed on
+     * the category; `notification.domain.Coalescing` holds the settling time and the merge.
+     */
+    val coalesces: Boolean get() = this == SHARED_SETTING_CHANGED
 }
 
 /**

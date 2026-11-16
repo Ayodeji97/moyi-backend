@@ -70,6 +70,14 @@ internal class SharedSettingColumnsTest(
     }
 
     @Test
+    fun `several changes on a shared-setting row is accepted by the database`() {
+        // Only coalescing writes SEVERAL (ADR-0069 decision 7), and it must be able to.
+        rawInsert("SHARED_SETTING_CHANGED", "SEVERAL")
+
+        jdbc.queryForObject("SELECT count(*) FROM notifications WHERE shared_change = 'SEVERAL'", Int::class.java) shouldBe 1
+    }
+
+    @Test
     fun `a change the enum does not know is refused by the database`() {
         val e = shouldThrow<DataIntegrityViolationException> { rawInsert("SHARED_SETTING_CHANGED", "BOGUS") }
         e.message!! shouldContain "notifications_shared_change_check"
