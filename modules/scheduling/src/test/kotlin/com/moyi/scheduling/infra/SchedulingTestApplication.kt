@@ -246,7 +246,7 @@ internal class RecordingReminders : DailyReminders {
     val windows = CopyOnWriteArrayList<Pair<Instant, Instant>>()
 
     @Volatile
-    var next: () -> ReminderRun = { ReminderRun(due = 0, requested = 0, alreadyWritten = 0, failed = 0) }
+    var next: () -> ReminderRun = { ReminderRun(due = 0, requested = 0, alreadyWritten = 0, failed = 0, byNudge = emptyMap()) }
 
     override fun remindDue(
         after: Instant,
@@ -258,7 +258,7 @@ internal class RecordingReminders : DailyReminders {
 
     fun reset() {
         windows.clear()
-        next = { ReminderRun(due = 0, requested = 0, alreadyWritten = 0, failed = 0) }
+        next = { ReminderRun(due = 0, requested = 0, alreadyWritten = 0, failed = 0, byNudge = emptyMap()) }
     }
 }
 

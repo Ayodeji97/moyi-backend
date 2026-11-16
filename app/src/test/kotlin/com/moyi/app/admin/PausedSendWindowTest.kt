@@ -15,6 +15,7 @@ import org.springframework.test.web.servlet.post
 import java.lang.reflect.InvocationTargetException
 import java.sql.Timestamp
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 import javax.sql.DataSource
 import kotlin.random.Random
@@ -54,7 +55,7 @@ class PausedSendWindowTest(
     }
 
     /** One member in a bond of their own: a reminder and on-this-day candidate for the real roster. */
-    private fun aCandidate() {
+    private fun aCandidate(): UUID {
         val email = "paused-${UUID.randomUUID().toString().take(8)}@example.com"
         val address = "192.0.2.${Random.nextInt(1, 255)}"
         mockMvc
@@ -90,6 +91,7 @@ class PausedSendWindowTest(
                 "WHERE user_id = (SELECT id FROM users WHERE email = ?::citext)",
             email,
         ) shouldBe 1
+        return jdbc.queryForObject("SELECT id FROM users WHERE email = ?::citext", UUID::class.java, email)!!
     }
 
     @AfterEach
@@ -127,6 +129,47 @@ class PausedSendWindowTest(
 
         lastFinish("daily-reminders") shouldBe Instant.parse("2026-11-14T10:05:30Z")
     }
+
+    @Test
+    fun `DAILY_REMINDERS switched on between nudge 1 and nudge 2 asks for nudge 2 only`() {
+        val member = aCandidate()
+        // 08:00 UTC, the day's first nudge; nudge 2 falls three real hours on, at 11:00.
+        jdbc.update("UPDATE bond_members SET reminder_time_local = '08:00', reminder_timezone = 'UTC' WHERE user_id = ?", member)
+        switchedOn("DAILY_REMINDERS", tomorrowAt("09:00:00"))
+
+        clock.set(tomorrowAt("11:00:30"))
+        run("com.moyi.scheduling.service.ReminderJob", "remindOnce")
+
+        keysAskedOf(member).map { it.substringAfterLast(':') } shouldBe listOf("2")
+    }
+
+    @Test
+    fun `DAILY_REMINDERS off asks for no nudge at the reminder time`() {
+        val member = aCandidate()
+        jdbc.update("UPDATE bond_members SET reminder_time_local = '08:00', reminder_timezone = 'UTC' WHERE user_id = ?", member)
+        jdbc.update(
+            "INSERT INTO feature_flags (key, enabled, updated_at, updated_by) VALUES (?, false, ?, ?)",
+            "DAILY_REMINDERS",
+            Timestamp.from(start),
+            admin,
+        )
+
+        clock.set(tomorrowAt("08:00:30"))
+        run("com.moyi.scheduling.service.ReminderJob", "remindOnce")
+
+        keysAskedOf(member) shouldBe emptyList()
+    }
+
+    /** A day after the member's bond began (the roster asks nothing before it), at [time] UTC. */
+    private fun tomorrowAt(time: String): Instant = Instant.parse("${start.atZone(ZoneOffset.UTC).toLocalDate().plusDays(1)}T${time}Z")
+
+    private fun keysAskedOf(user: UUID): List<String> =
+        jdbc
+            .queryForList(
+                "SELECT dedupe_key FROM notifications WHERE user_id = ? ORDER BY dedupe_key",
+                String::class.java,
+                user,
+            ).filterNotNull()
 
     private fun switchedOn(
         key: String,

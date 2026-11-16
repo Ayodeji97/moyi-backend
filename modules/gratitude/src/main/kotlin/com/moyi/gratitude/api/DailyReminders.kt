@@ -32,15 +32,15 @@ interface DailyReminders {
  * same by nudge index. A nudge asked before, in an earlier sweep of the same
  * window, is counted only in [byNudge] ([NudgeCounts.alreadyAsked]).
  *
- * [byNudge] defaults to empty for a run that did nothing (the job's paused
- * path); a sweep always fills it.
+ * [byNudge] has no default, so a caller cannot drop the per-nudge counts by
+ * leaving it out: a run that did nothing passes `emptyMap()`.
  */
 data class ReminderRun(
     val due: Int,
     val requested: Int,
     val alreadyWritten: Int,
     val failed: Int,
-    val byNudge: Map<Int, NudgeCounts> = emptyMap(),
+    val byNudge: Map<Int, NudgeCounts>,
 )
 
 /** One nudge index's share of a [ReminderRun]. */
