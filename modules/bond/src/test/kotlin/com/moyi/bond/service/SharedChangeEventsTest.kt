@@ -85,6 +85,8 @@ internal class SharedChangeEventsTest(
         patch(ada, bond, """{"name":"Ours"}""").status shouldBe 200
 
         events(BondSettingsChanged.TYPE) shouldBe listOf(mapOf("bondId" to bond, "memberId" to memberId(ada, bond)))
+        // Every key of the payload, not only those holding an id: a setting's name or value would show here.
+        payloadKeys(BondSettingsChanged.TYPE) shouldBe setOf("bondId", "memberId")
         events(ProposalClosed.TYPE).shouldBeEmpty()
     }
 
@@ -138,6 +140,7 @@ internal class SharedChangeEventsTest(
         confirm(bea, bond, proposal).status shouldBe 200
 
         events(ProposalClosed.TYPE) shouldBe listOf(closed(bond, proposal, bea))
+        payloadKeys(ProposalClosed.TYPE) shouldBe setOf("bondId", "proposalId", "memberId")
         events(BondSettingsChanged.TYPE).shouldBeEmpty()
     }
 
@@ -308,6 +311,13 @@ internal class SharedChangeEventsTest(
             .map { payload ->
                 Regex(""""(\w+)":\s*"([0-9a-f-]{36})"""").findAll(payload!!).associate { it.groupValues[1] to it.groupValues[2] }
             }
+
+    /** Every key of every [type] payload, whatever its value: [events] sees only those holding an id. */
+    private fun payloadKeys(type: String): Set<String> =
+        jdbc
+            .queryForList("SELECT jsonb_object_keys(payload) FROM outbox_events WHERE event_type = ?", String::class.java, type)
+            .filterNotNull()
+            .toSet()
 
     private fun clearOutbox() {
         jdbc.execute("TRUNCATE TABLE outbox_deliveries, outbox_events")

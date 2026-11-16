@@ -14,7 +14,8 @@ import java.util.UUID
 /**
  * [PushAudiences] over the member rows (ADR-0046). Reads only, and decides
  * nothing about any one member: whether the bond takes writes is the bond's
- * own rule ([com.moyi.bond.domain.BondStatus.isOpen]), and each member's
+ * own rule ([com.moyi.bond.domain.BondStatus.isOpen], and
+ * [com.moyi.bond.domain.BondStatus.hasEnded] for the shared-setting push), and each member's
  * settings travel with them to `notification`, which applies them to that
  * member's copy alone.
  */
@@ -29,6 +30,7 @@ internal class PushAudiencesAdapter(
         return PushAudience(
             bondId = bondId,
             takesWrites = rows.status.isOpen,
+            hasEnded = rows.status.hasEnded,
             members = rows.members.map { PushAudienceMember(memberId = it.memberId, userId = it.userId, recipient = it.recipient()) },
         )
     }
