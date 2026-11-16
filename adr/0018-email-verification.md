@@ -98,3 +98,13 @@ is the address's own (a name-based UUID of it), so probes of different unknown a
 on each other, and an unknown address does not answer slower than a known one. Issuing a code reads
 the account again under the lock and issues nothing to one that was erased, suspended or (for this
 purpose) verified meanwhile; the request is still answered 202.
+
+## Amendment — 2026-11-16: the link pages left this repository
+
+`site/` is retired. `getmoyi.app`, including `/verify`, `/reset-password`, `/i/<code>`,
+`open.getmoyi.app` and both `.well-known` files, is now built from the separate repository
+`moyi-web` (Cloudflare Pages project `moyi-web`), which carries #207's link script, headers,
+redirects and app-link files byte for byte (moyi-web #16) and this folder's README as
+`docs/link-pages.md` (moyi-web #19). The link bases in `config/deploy.yml` are unchanged: the
+addresses are the same, only the repository that serves them moved. The "Owed, not built"
+paragraph above was settled by #207 and is kept as history.

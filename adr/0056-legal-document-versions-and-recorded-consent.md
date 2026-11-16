@@ -152,3 +152,12 @@ changes name, though every field it had is still there.
 The documents are published (set real versions). A client needs to know *what* changed, not only
 that something did (add a `changedAt` or a summary). A second kind of consent appears (marketing,
 semantic search's provider consent): it is a `ConsentDocument` and a row, by the same rules.
+
+## Amendment — 2026-11-16: the documents are on getmoyi.app, not yet published
+
+`site/` is retired; `getmoyi.app` is built from the `moyi-web` repository, which serves `/terms`,
+`/privacy` and `/data-processing` as drafts whose version label is the sentinel `unpublished`, the
+value production records. Publication is two changes made together: `moyi-web` sets the dated
+version and drops the draft notice, then `config/deploy.yml` sets the same three versions (quoted)
+and is deployed. The site goes first, so a person is never recorded as accepting a version the
+page does not yet show.
