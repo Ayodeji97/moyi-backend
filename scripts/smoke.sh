@@ -2903,14 +2903,14 @@ flush_buckets
 # What this section is for: the two fields of issue #141 as the jar serves them, decided by the
 # real close job. No day ends during a run, so 21 past days are put in by hand, closed and NOT
 # evaluated, and the bond's pairing and zone history are moved back twenty-one days in the same
-# statement (so the calendar draws them, and the job's missing-days step finds nothing to add).
-# Today's row, opened by revealed_bond at the pairing instant, starts at Lagos midnight with them:
-# left at that instant, it is no longer where the moved calendar starts today, and the close job
-# refuses it (BondDay.extendedTo, "a bond-day's start never moves") on every run after it ends.
+# statement (so the calendar draws them, and the job's missing-days step finds nothing to add):
 # the joining day empty, as the job would write it; fourteen days both wrote bank a freeze; a solo day spends it (FROZEN, REST_DAY); a date a zone
 # change stepped over keeps the run (FROZEN, TIMEZONE_SHIFT); an empty day with nothing banked ends
 # the run at sixteen; three more days and today make four. The job, on its five-second schedule,
 # evaluates them; the read is then checked field by field, the same for both members.
+# Today's row, opened by revealed_bond at the pairing instant, starts at Lagos midnight with them:
+# left at that instant, it is no longer where the moved calendar starts today, and the close job
+# refuses it (BondDay.extendedTo, "a bond-day's start never moves") on every run after it ends.
 verified_account "streaker" "203.0.113.140"; SR_A="$ACCOUNT_ACCESS"
 verified_account "streaked" "203.0.113.141"; SR_B="$ACCOUNT_ACCESS"
 revealed_bond "streak" "$SR_A" "$SR_B" "thank you for the long run" "and thank you for starting again"
