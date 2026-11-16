@@ -174,3 +174,12 @@ sourceSets.main {
 tasks.named("processResources") {
     dependsOn(downloadBreachCorpus)
 }
+
+// DeletionRequestTest reads admin's V69 (the operator's deletion window, written in SQL): an input of
+// the test task, so changing that file reruns the test instead of reusing a cached pass.
+tasks.named<Test>("test") {
+    inputs
+        .file(rootProject.file("modules/admin/src/main/resources/db/migration/V69__admin_operator_deletion_request.sql"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("operatorDeletionWindowSql")
+}

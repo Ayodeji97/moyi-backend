@@ -151,7 +151,8 @@ internal class V61MigrationTest : PostgresIntegrationTest() {
 
         /** Added by migrations after V61 (V64, V66); refused here, at V61, by design. */
         val LATER_ACTIONS =
-            listOf("ENTRY_TEXT_READ", "ACCOUNT_SUSPENDED", "ACCOUNT_UNSUSPENDED") + V67MigrationTest.A4_ACTIONS
+            listOf("ENTRY_TEXT_READ", "ACCOUNT_SUSPENDED", "ACCOUNT_UNSUSPENDED") + V67MigrationTest.A4_ACTIONS +
+                V69MigrationTest.V69_ACTIONS
         val A1_ACTIONS =
             listOf("ADMIN_INVITED", "ADMIN_DISABLED", "ADMIN_ENROLLED", "ADMIN_SIGN_IN", "ADMIN_SIGN_OUT", "USER_LOOKED_UP")
     }
