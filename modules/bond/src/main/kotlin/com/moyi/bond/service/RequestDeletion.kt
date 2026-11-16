@@ -125,7 +125,7 @@ internal class RequestDeletion(
 
                 // An unanswered ask: withdraw it, and the bond never changed status.
                 pending != null -> {
-                    proposals.cancel(pending.id, now)
+                    proposals.cancel(pending.id, membership.memberId, now)
                 }
 
                 // Already counting down: this is the escape hatch itself.

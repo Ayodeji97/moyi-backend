@@ -1,5 +1,6 @@
 package com.moyi.bond.infra.database
 
+import com.moyi.bond.domain.CancelCause
 import com.moyi.bond.domain.ProposalKind
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -49,6 +50,9 @@ internal class BondProposalEntity(
     var confirmedByMemberId: UUID?,
     var confirmedAt: Instant?,
     var cancelledAt: Instant?,
+    var cancelledByMemberId: UUID?,
+    @Enumerated(EnumType.STRING)
+    var cancelCause: CancelCause?,
 ) : Persistable<UUID> {
     @Transient
     private var new: Boolean = true

@@ -164,7 +164,7 @@ internal class ChangeTimezone(
         val now = support.clock.instant().truncatedTo(ChronoUnit.MICROS)
         val proposal =
             proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()
-        if (!proposals.cancel(proposal.id, now)) throw ProposalNotFoundException()
+        if (!proposals.cancel(proposal.id, membership.memberId, now)) throw ProposalNotFoundException()
         log.info("A zone change was cancelled on bond {}", membership.bondId.value)
     }
 

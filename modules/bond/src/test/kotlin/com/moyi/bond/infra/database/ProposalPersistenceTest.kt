@@ -4,16 +4,20 @@ import com.moyi.bond.domain.Bond
 import com.moyi.bond.domain.BondDraft
 import com.moyi.bond.domain.BondId
 import com.moyi.bond.domain.BondType
+import com.moyi.bond.domain.Member
 import com.moyi.bond.domain.MemberId
 import com.moyi.bond.domain.Proposal
 import com.moyi.bond.domain.ProposalId
 import com.moyi.bond.domain.ProposalKind
+import com.moyi.bond.domain.ProposalOutcome
 import com.moyi.bond.domain.RegionZone
 import com.moyi.bond.domain.UserId
 import com.moyi.bond.infra.BondTestApplication
 import com.moyi.common.testing.DeterministicIdGenerator
 import com.moyi.common.testing.IntegrationTest
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -26,6 +30,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 import javax.sql.DataSource
 
 /**
@@ -163,8 +168,9 @@ internal class ProposalPersistenceTest(
         transactions.execute { proposals.confirm(lapsed.id, bond.members.single().id, now) } shouldBe false
         // Cancelling has no `expires_at` predicate on purpose: the pending screen
         // may still be showing it, and "cancel" is the honest answer to that.
-        transactions.execute { proposals.cancel(lapsed.id, now) } shouldBe true
-        transactions.execute { proposals.cancel(lapsed.id, now) } shouldBe false
+        val member = bond.members.single().id
+        transactions.execute { proposals.cancel(lapsed.id, member, now) } shouldBe true
+        transactions.execute { proposals.cancel(lapsed.id, member, now) } shouldBe false
     }
 
     @Test
@@ -182,6 +188,179 @@ internal class ProposalPersistenceTest(
 
         jdbc.queryForObject("SELECT count(*) FROM bond_proposals WHERE cancelled_at IS NOT NULL", Int::class.java) shouldBe 1
         jdbc.queryForObject("SELECT count(*) FROM bond_proposals WHERE confirmed_at IS NOT NULL", Int::class.java) shouldBe 1
+    }
+
+    /** A bond with both members in it: who called a proposal off is one of two people. */
+    private fun pairedBond(): Pair<Bond, Member> {
+        val bond = insertedBond()
+        val joiner = Member.member(MemberId(ids.timeOrdered()), bond.id, UserId(UUID.randomUUID()), lagos, now)
+        transactions.executeWithoutResult { bonds.addMember(bond.accept(joiner), joiner) }
+        return bond to joiner
+    }
+
+    private fun reread(proposal: Proposal): Proposal =
+        transactions.execute { proposals.findInBond(proposal.bondId, proposal.id) }.shouldNotBeNull()
+
+    private fun storedEnding(proposal: Proposal): Pair<Any?, Any?> =
+        jdbc
+            .queryForMap("SELECT cancel_cause, cancelled_by_member_id FROM bond_proposals WHERE id = ?", proposal.id.value)
+            .let { it["cancel_cause"] to it["cancelled_by_member_id"] }
+
+    @Test
+    fun `a member's cancel is recorded as theirs, the proposer's a withdrawal, the other's a refusal`() {
+        val (bond, joiner) = pairedBond()
+        val proposer = bond.members.single().id
+        val withdrawn = timezoneProposal(bond)
+        transactions.executeWithoutResult { proposals.insert(withdrawn) }
+        transactions.execute { proposals.cancel(withdrawn.id, proposer, now) } shouldBe true
+        val declined = timezoneProposal(bond, at = now.plusSeconds(1))
+        transactions.executeWithoutResult { proposals.insert(declined) }
+        transactions.execute { proposals.cancel(declined.id, joiner.id, now.plusSeconds(2)) } shouldBe true
+
+        storedEnding(withdrawn) shouldBe ("MEMBER" to proposer.value)
+        reread(withdrawn).outcome shouldBe ProposalOutcome.WITHDRAWN
+        storedEnding(declined) shouldBe ("MEMBER" to joiner.id.value)
+        reread(declined).outcome shouldBe ProposalOutcome.DECLINED
+        reread(declined).closedBy shouldBe joiner.id
+    }
+
+    @Test
+    fun `a cancel that reaches a lapsed row records a lapse and names nobody`() {
+        // C5: the same history V70's backfill reads as LAPSED is never written as a refusal.
+        val (bond, joiner) = pairedBond()
+        val lapsed = timezoneProposal(bond, at = now.minus(Duration.ofDays(8)))
+        transactions.executeWithoutResult { proposals.insert(lapsed) }
+
+        transactions.execute { proposals.cancel(lapsed.id, joiner.id, now) } shouldBe true
+
+        storedEnding(lapsed) shouldBe ("LAPSED" to null)
+        reread(lapsed).outcome shouldBe ProposalOutcome.LAPSED
+    }
+
+    @Test
+    fun `closing a lapsed row records a lapse, naming nobody`() {
+        val bond = insertedBond()
+        val lapsed = timezoneProposal(bond, at = now.minus(Duration.ofDays(8)))
+        transactions.executeWithoutResult { proposals.insert(lapsed) }
+
+        transactions.execute { proposals.closeLapsed(bond.id, ProposalKind.TIMEZONE_CHANGE, now) } shouldBe true
+
+        storedEnding(lapsed) shouldBe ("LAPSED" to null)
+    }
+
+    @Test
+    fun `a bond ending records BOND_ENDED and names no member, a lapsed row a lapse`() {
+        // T-09: whoever's leave or block it was, nobody is recorded as having called it off.
+        val (bond, _) = pairedBond()
+        val proposer = bond.members.single().id
+        val open = Proposal.deletion(ProposalId(ids.timeOrdered()), bond.id, proposer, now)
+        val lapsed = timezoneProposal(bond, at = now.minus(Duration.ofDays(8)))
+        transactions.executeWithoutResult {
+            proposals.insert(open)
+            proposals.insert(lapsed)
+        }
+
+        transactions.execute { proposals.cancelLiveOf(bond.id, now) } shouldBe 2
+
+        storedEnding(open) shouldBe ("BOND_ENDED" to null)
+        reread(open).outcome shouldBe ProposalOutcome.BOND_ENDED
+        reread(open).closedBy.shouldBeNull()
+        storedEnding(lapsed) shouldBe ("LAPSED" to null)
+    }
+
+    @Test
+    fun `turning search off records the request as called off by the member who did it`() {
+        val (bond, joiner) = pairedBond()
+        val proposer = bond.members.single().id
+        val asked = Proposal.semanticSearchOn(ProposalId(ids.timeOrdered()), bond.id, proposer, now)
+        val zone = timezoneProposal(bond)
+        transactions.executeWithoutResult {
+            proposals.insert(asked)
+            proposals.insert(zone)
+        }
+
+        transactions.execute { proposals.cancelLive(bond.id, ProposalKind.SEMANTIC_SEARCH_ON, joiner.id, now) } shouldBe 1
+
+        storedEnding(asked) shouldBe ("MEMBER" to joiner.id.value)
+        reread(asked).outcome shouldBe ProposalOutcome.DECLINED
+        // The other kind is untouched: still open, no cause.
+        storedEnding(zone) shouldBe (null to null)
+    }
+
+    @Test
+    fun `the latest ended proposal of each kind, an unclosed lapse included, and never a live one`() {
+        val (bond, joiner) = pairedBond()
+        val proposer = bond.members.single().id
+        val day = Duration.ofDays(1)
+        // Timezone: an older acceptance, then a newer refusal. The refusal is the latest.
+        val older = timezoneProposal(bond, at = now.minus(day.multipliedBy(20)))
+        val newer = timezoneProposal(bond, at = now.minus(day.multipliedBy(10)))
+        // Deletion: one lapsed and never closed, so its ending is its expiry.
+        val unclosed = Proposal.deletion(ProposalId(ids.timeOrdered()), bond.id, proposer, now.minus(day.multipliedBy(9)))
+        // Semantic search: live, so there is no ended one of that kind to return.
+        val live = Proposal.semanticSearchOn(ProposalId(ids.timeOrdered()), bond.id, proposer, now)
+        transactions.executeWithoutResult {
+            proposals.insert(older)
+            proposals.confirm(older.id, joiner.id, now.minus(day.multipliedBy(19)))
+            proposals.insert(newer)
+            proposals.cancel(newer.id, joiner.id, now.minus(day.multipliedBy(9)))
+            proposals.insert(unclosed)
+            proposals.insert(live)
+        }
+        val other = insertedBond()
+
+        val ended = transactions.execute { proposals.findLatestEndedOf(listOf(bond.id, other.id), now) }.shouldNotBeNull()
+
+        ended.keys shouldBe setOf(bond.id)
+        ended.getValue(bond.id).map { it.id to it.outcome } shouldContainExactlyInAnyOrder
+            listOf(newer.id to ProposalOutcome.DECLINED, unclosed.id to ProposalOutcome.LAPSED)
+        // A second before it lapses, the unclosed deletion is still live and is not returned.
+        transactions
+            .execute { proposals.findLatestEndedOf(listOf(bond.id), unclosed.expiresAt.minusSeconds(1)) }
+            .shouldNotBeNull()
+            .getValue(bond.id)
+            .map { it.id } shouldBe listOf(newer.id)
+        transactions
+            .execute { proposals.findLatestEndedOf(listOf(other.id), now) }
+            .shouldNotBeNull()
+            .keys
+            .shouldBeEmpty()
+    }
+
+    @Test
+    fun `findInBond answers only for the proposal's own bond`() {
+        val bond = insertedBond()
+        val proposal = timezoneProposal(bond)
+        transactions.executeWithoutResult { proposals.insert(proposal) }
+
+        transactions.execute { proposals.findInBond(bond.id, proposal.id) } shouldBe proposal
+        transactions.execute { proposals.findInBond(insertedBond().id, proposal.id) }.shouldBeNull()
+    }
+
+    @Test
+    fun `V70 refuses a cause on an open row, a member beside a bond ending, and a member cancel naming nobody`() {
+        val (bond, joiner) = pairedBond()
+
+        fun insert(
+            cause: String,
+            by: String,
+            cancelledAt: String = "now()",
+        ) = jdbc.update(
+            """
+            INSERT INTO bond_proposals
+                (id, bond_id, kind, payload, proposed_by_member_id, proposed_at, expires_at,
+                 cancelled_at, cancel_cause, cancelled_by_member_id)
+            VALUES ('${ids.timeOrdered()}', '${bond.id.value}', 'DELETION', NULL, '${joiner.id.value}',
+                    now(), now() + interval '7 days', $cancelledAt, $cause, $by)
+            """.trimIndent(),
+        )
+
+        shouldThrow<DataIntegrityViolationException> { insert("'LAPSED'", "NULL", cancelledAt = "NULL") }
+        shouldThrow<DataIntegrityViolationException> { insert("'BOND_ENDED'", "'${joiner.id.value}'") }
+        shouldThrow<DataIntegrityViolationException> { insert("'MEMBER'", "NULL") }
+        shouldThrow<DataIntegrityViolationException> { insert("NULL", "'${joiner.id.value}'") }
+        shouldThrow<DataIntegrityViolationException> { insert("'DECLINED'", "NULL") }
+        jdbc.queryForObject("SELECT count(*) FROM bond_proposals", Int::class.java) shouldBe 0
     }
 
     @Test

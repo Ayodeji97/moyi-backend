@@ -23,6 +23,8 @@ internal fun BondProposalEntity.toDomain(): Proposal =
         confirmedByMemberId = confirmedByMemberId?.let(::MemberId),
         confirmedAt = confirmedAt,
         cancelledAt = cancelledAt,
+        cancelledBy = cancelledByMemberId?.let(::MemberId),
+        cancelCause = cancelCause,
     )
 
 /**
@@ -42,4 +44,6 @@ internal fun Proposal.toEntity(): BondProposalEntity =
         confirmedByMemberId = confirmedByMemberId?.value,
         confirmedAt = confirmedAt,
         cancelledAt = cancelledAt,
+        cancelledByMemberId = cancelledBy?.value,
+        cancelCause = cancelCause,
     )
