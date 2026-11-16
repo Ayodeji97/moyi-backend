@@ -4,8 +4,8 @@
 # Issue #200 (reminder nudges, ADR-0068) adds a section after the daily reminder's: a fresh bond moved
 # back four hours by SQL into a region anchor zone where it is about noon, her reminder three hours
 # before the last boundary, so nudge 2 falls on it and nudge 1 outside the look-back; one row keyed
-# …:2 with nudge 2 and leave-free 1, HELD by her quiet hours, none without the suffix, nothing asked
-# twice, her entry CANCELLING it and asking for no :3, and neither her token nor her member id in a
+# …:2 with nudge 2 and leave-free 1, HELD by her quiet hours, none without the suffix, no second row
+# six seconds on, her entry CANCELLING it and asking for no :3, and neither her token nor her member id in a
 # log line. Last run on 2026-11-16, on feat/reminder-nudges, from a jar of c4be194e's tree, on a
 # fresh database that applied 62 migrations to V68, against its own compose project (moyi-nudge:
 # Postgres 55780, Valkey 56789, MinIO 57780), the jar booted by hand (local profile, the five crons
@@ -3172,13 +3172,14 @@ NN_MADE="$(sql "WITH b AS (UPDATE bonds SET created_at = created_at - interval '
   SELECT (SELECT count(*) FROM b) || '/' || (SELECT count(*) FROM a)")"
 db_is "nudges: the bond begins four hours ago, anchored on $NN_ZONE" "$NN_MADE" "1/1"
 db_is "nudges: …where it is between 10:00 and 14:59" "$(sql "SELECT extract(hour FROM now() AT TIME ZONE '$NN_ZONE') BETWEEN 10 AND 14")" "t"
-NN_AT="$(python3 -c 'import time; t=int(time.time()); t-=t%300; t-=3*3600; print(time.strftime("%H:%M", time.gmtime(t)))')"
 NN_QUIET_FROM="$(python3 -c 'import time; print(time.strftime("%H:%M", time.gmtime(time.time()-3600)))')"
 NN_QUIET_TO="$(python3 -c 'import time; print(time.strftime("%H:%M", time.gmtime(time.time()+3600)))')"
 NN_TOKEN="smoke-push-token-nudge-$RANDOM$RANDOM"
 # He writes first, so only she is owed a nudge.
 expect "nudges: he writes today" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$NN_BOND/entries" -H "Authorization: Bearer $NN_B" -H "Idempotency-Key: $(new_key)" -d '{"text":"thank you for the second nudge I did not need"}'
 expect "nudges: she registers her phone" 204 "" -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $NN_A" -d "{\"token\":\"$NN_TOKEN\"}"
+# Computed immediately before the PUT, so a five-minute boundary cannot fall between the two.
+NN_AT="$(python3 -c 'import time; t=int(time.time()); t-=t%300; t-=3*3600; print(time.strftime("%H:%M", time.gmtime(t)))')"
 expect "nudges: her reminder three hours before the last boundary, quiet hours around now" 200 "\"reminderTimeLocal\":\"$NN_AT\"" -- -X PUT "$API/bonds/$NN_BOND/members/me/settings" -H "Authorization: Bearer $NN_A" -d "{\"reminderTimeLocal\":\"$NN_AT\",\"reminderTimezone\":\"Africa/Abidjan\",\"quietHoursStart\":\"$NN_QUIET_FROM\",\"quietHoursEnd\":\"$NN_QUIET_TO\"}"
 # Her REMINDER rows in this bond, as "<dedupe key's suffix>|<nudge>|<leave-free>|<status>", one per line.
 nn_rows() { sql "SELECT coalesce(string_agg(CASE WHEN n.dedupe_key ~ ':[23]\$' THEN right(n.dedupe_key, 1) ELSE '1' END || '|' || coalesce(n.nudge::text, '-') || '|' || n.leave_free_across_bonds || '|' || n.status, ',' ORDER BY n.dedupe_key), '') FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$NN_BOND' AND n.category = 'REMINDER' AND m.role = 'OWNER'"; }
@@ -3197,7 +3198,7 @@ db_is "nudges: …and none for her without the :2 (nudge 1 fell before the look-
 db_is "nudges: he wrote, so none was asked for him" "$(sql "SELECT count(*) FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$NN_BOND' AND n.category = 'REMINDER' AND m.role = 'MEMBER'")" "0"
 NN_MEMBER="$(sql "SELECT split_part(dedupe_key, ':', 2) FROM notifications WHERE bond_id = '$NN_BOND' AND category = 'REMINDER' AND dedupe_key LIKE '%:2'")"
 sleep 6
-db_is "nudges: the job ran again on the same window and asked for nothing twice" "$(nn_rows)" "2|2|1|HELD"
+db_is "nudges: six seconds on, still her one row (no second row appeared)" "$(nn_rows)" "2|2|1|HELD"
 expect "nudges: she writes" 201 '"status":' -- -X POST "$API/bonds/$NN_BOND/entries" -H "Authorization: Bearer $NN_A" -H "Idempotency-Key: $(new_key)" -d '{"text":"thank you for nudging me, once"}'
 db_is "nudges: her entry called nudge 2 off, CANCELLED, and asked for no nudge 3" "$(nn_rows)" "2|2|1|CANCELLED"
 db_is "nudges: …no :3 row in the bond" "$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$NN_BOND' AND dedupe_key LIKE '%:3'")" "0"
