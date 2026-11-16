@@ -8,9 +8,11 @@ import com.moyi.notification.api.Nudge
 import com.moyi.notification.api.PushCategory
 import com.moyi.notification.api.PushRequest
 import com.moyi.notification.domain.NotificationStatus
+import com.moyi.notification.infra.database.CancelledPush
 import com.moyi.notification.infra.database.NewPush
 import com.moyi.notification.infra.database.NotificationStore
 import com.moyi.notification.infra.database.QuietWindow
+import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
@@ -44,6 +46,7 @@ internal class PushRequests(
     private val publisher: EventPublisher,
     private val ids: IdGenerator,
     private val clock: Clock,
+    private val meters: MeterRegistry,
 ) : Notifications {
     @Transactional(propagation = Propagation.MANDATORY)
     override fun request(request: PushRequest): Boolean {
@@ -97,12 +100,26 @@ internal class PushRequests(
         nudge: Nudge,
     ) {
         if (nudge.supersedes.isEmpty()) return
-        val inherited = ledger.cancelOwed(nudge.supersedes).minOfOrNull { it.leaveFreeAcrossBonds } ?: return
+        val cancelled = ledger.cancelOwed(nudge.supersedes)
+        cancelled.forEach { count(it, SUPERSEDED) }
+        val inherited = cancelled.minOfOrNull { it.leaveFreeAcrossBonds } ?: return
         if (inherited < nudge.leaveFreeAcrossBonds) ledger.lowerLeaveFree(id, inherited)
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
-    override fun cancel(dedupeKeys: Collection<String>): Int = ledger.cancelOwed(dedupeKeys).size
+    override fun cancel(dedupeKeys: Collection<String>): Int {
+        val cancelled = ledger.cancelOwed(dedupeKeys)
+        cancelled.forEach { count(it, WRITTEN) }
+        return cancelled.size
+    }
+
+    /** `notification.push.cancelled{category, nudge, reason}`: what was called off, never whose. */
+    private fun count(
+        push: CancelledPush,
+        reason: String,
+    ) {
+        meters.counter(CANCELLED, "category", push.category.name, "nudge", push.nudge?.toString() ?: NO_NUDGE, "reason", reason).increment()
+    }
 
     @Transactional(readOnly = true)
     override fun hasLiveOrSent(
@@ -147,6 +164,15 @@ internal class PushRequests(
 
         /** How far back a current Bond-day's reveal can have been asked for (spec C17). */
         private val REVEAL_LOOK_BACK = Duration.ofHours(72)
+
+        const val CANCELLED = "notification.push.cancelled"
+        const val NO_NUDGE = "none"
+
+        /** Called off by `cancel`: what its writer no longer owes. */
+        const val WRITTEN = "written"
+
+        /** Called off by a newer nudge of the same Bond-day. */
+        const val SUPERSEDED = "superseded"
 
         const val AGGREGATE = "Notification"
         const val PUSH_REQUESTED = "PushRequested"

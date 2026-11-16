@@ -18,6 +18,7 @@ import com.moyi.notification.infra.database.NotificationStore
 import com.moyi.notification.infra.database.PushBudgetLedger
 import com.moyi.notification.infra.database.PushTokenStore
 import com.moyi.notification.infra.database.StoredPush
+import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
@@ -72,6 +73,7 @@ internal class SendPush(
     private val tokens: PushTokenStore,
     private val sender: PushSender,
     private val clock: Clock,
+    private val meters: MeterRegistry,
 ) : EventConsumer {
     /** The key the delivery state is kept under: never to be changed. */
     override val id = "notification.push"
@@ -85,10 +87,24 @@ internal class SendPush(
         val push = ledger.lock(notificationId)?.takeIf { it.status == NotificationStatus.REQUESTED } ?: return
         val now = clock.instant()
         when (val decision = decide(push, now)) {
-            is Decision.Settle -> ledger.settle(push.id, decision.status, now)
-            is Decision.Hold -> ledger.hold(push.id, decision.until)
-            is Decision.Drop -> ledger.settle(push.id, NotificationStatus.DROPPED_BUDGET, now)
-            is Decision.Send -> send(push, decision.slot)
+            is Decision.Settle -> {
+                ledger.settle(push.id, decision.status, now)
+                settled(push, decision.status.name.lowercase())
+            }
+
+            is Decision.Hold -> {
+                ledger.hold(push.id, decision.until)
+                settled(push, HELD)
+            }
+
+            is Decision.Drop -> {
+                ledger.settle(push.id, NotificationStatus.DROPPED_BUDGET, now)
+                settled(push, if (decision.slot == BudgetDecision.DROPPED_LEAVING_ROOM) DROPPED_LEAVING_ROOM else DROPPED_BUDGET)
+            }
+
+            is Decision.Send -> {
+                send(push, decision.slot)
+            }
         }
     }
 
@@ -145,6 +161,7 @@ internal class SendPush(
                     providerMessageId = accepted.providerMessageId,
                     reserved = slot == BudgetDecision.RESERVED,
                 )
+                settled(push, SENT)
             }
 
             // Rolls back this delivery, the forgotten tokens with it: the retry will find and forget them again.
@@ -154,8 +171,22 @@ internal class SendPush(
 
             is Settlement.Failed -> {
                 ledger.settle(push.id, NotificationStatus.FAILED_PERMANENT, clock.instant(), errorClass = settlement.errorClass)
+                settled(push, FAILED)
             }
         }
+    }
+
+    /**
+     * Counts how a push was settled, by what is asked of it and never by who: category, which
+     * nudge of its day, and the outcome. A retry throws and counts nothing.
+     */
+    private fun settled(
+        push: StoredPush,
+        outcome: String,
+    ) {
+        meters
+            .counter(SETTLED, "category", push.category.name, "nudge", push.nudge?.toString() ?: NO_NUDGE, "outcome", outcome)
+            .increment()
     }
 
     /**
@@ -192,6 +223,17 @@ internal class SendPush(
             revealClass = push.category.isRevealClass,
             leaveFreeAcrossBonds = push.leaveFreeAcrossBonds,
         )
+    }
+
+    internal companion object {
+        /** `notification.push.settled{category, nudge, outcome}`: `nudge` is `none` or 1 to 3. */
+        const val SETTLED = "notification.push.settled"
+        const val NO_NUDGE = "none"
+        const val SENT = "sent"
+        const val HELD = "held"
+        const val DROPPED_BUDGET = "dropped_budget"
+        const val DROPPED_LEAVING_ROOM = "dropped_leaving_room"
+        const val FAILED = "failed"
     }
 
     /** What the consumer does with a push before any phone is tried. */
