@@ -3,12 +3,20 @@ package com.moyi.bond.web
 import com.moyi.bond.domain.InviteCode
 import com.moyi.bond.infra.BondTestApplication
 import com.moyi.bond.infra.FakeUserDirectory
+import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.api.UserDirectory
+import com.moyi.notification.api.NotificationPreferences
+import com.moyi.notification.api.Notifications
+import com.moyi.notification.api.PushCategory
+import com.moyi.notification.api.PushRecipient
+import com.moyi.notification.api.PushRequest
+import com.moyi.notification.api.QuietHoursWindow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.micrometer.core.instrument.MeterRegistry
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -20,7 +28,13 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
+import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
+import java.time.Clock
+import java.time.Duration
+import java.time.ZoneId
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -55,13 +69,20 @@ internal class DiscreetExitTest(
     @Autowired private val tokens: AccessTokenIssuer,
     @Autowired directory: UserDirectory,
     @Autowired dataSource: DataSource,
+    @Autowired private val dispatcher: OutboxDispatcher,
+    @Autowired private val notifications: Notifications,
+    @Autowired private val meters: MeterRegistry,
+    @Autowired private val clock: Clock,
+    @Autowired transactionManager: PlatformTransactionManager,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
+    private val transactions = TransactionTemplate(transactionManager)
 
     @AfterEach
     fun clear() {
-        jdbc.execute("TRUNCATE TABLE blocks, bond_invites, bond_members, bonds CASCADE")
+        jdbc.execute("TRUNCATE TABLE notifications, outbox_deliveries, outbox_events")
+        jdbc.execute("TRUNCATE TABLE bond_proposals, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
     }
 
@@ -246,6 +267,222 @@ internal class DiscreetExitTest(
         withdrawalsIn(bondId) shouldBe 1
     }
 
+    @Test
+    fun `a leave and a block each ask no shared-setting push, close the proposal alike and call off every owed push`() {
+        val left = endedWithPushesOwed { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/leave") }
+        val blocked = endedWithPushesOwed { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block", """{"withdrawEntries":true}""") }
+
+        listOf(left, blocked).forEach { run ->
+            // The fixture is what it says: Ben was owed all three, held, when the bond ended.
+            run.owedBefore shouldBe
+                mapOf("PROPOSAL_OPENED" to "HELD", "REVEAL" to "HELD", "SHARED_SETTING_CHANGED" to "HELD")
+
+            withClue("no SHARED_SETTING_CHANGED row for anyone but the one asked before the ending") {
+                run.sharedRowsAfter shouldBe run.sharedRowsBefore
+            }
+            withClue("the pending proposal, closed by the ending and by no member") {
+                run.proposals shouldBe listOf(Triple("BOND_ENDED", null, true))
+                run.closedProposals shouldBe listOf("BOND_ENDED" to null)
+            }
+            withClue("every owed row of the bond") {
+                run.ledgerAfter.map { it["status"] } shouldBe List(run.ledgerAfter.size) { "CANCELLED" }
+                run.cancelledBondEnded shouldBe 3.0
+            }
+        }
+    }
+
+    @Test
+    fun `the remaining member's ledger and bond read the same after a leave and after a block`() {
+        val left = endedWithPushesOwed { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/leave") }
+        val blocked = endedWithPushesOwed { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block", """{"withdrawEntries":true}""") }
+
+        // Both are real: three rows to compare, and a bond that names how its proposal ended.
+        left.ledgerAfter.size shouldBe 3
+        left.detail.contentAsString shouldContain "\"outcome\":\"BOND_ENDED\""
+
+        withClue("the ledger: every column but ids and times, and the metric it moved") {
+            blocked.ledgerAfter shouldBe left.ledgerAfter
+            blocked.cancelledBondEnded shouldBe left.cancelledBondEnded
+        }
+        withClue("GET /bonds/{id} as the remaining member") {
+            blocked.detail.status shouldBe left.detail.status
+            blocked.detail.getHeader(HttpHeaders.ETAG)!!.substringBefore('-') shouldBe
+                left.detail.getHeader(HttpHeaders.ETAG)!!.substringBefore('-')
+            normalise(blocked.detail.contentAsString) shouldBe normalise(left.detail.contentAsString)
+        }
+        withClue("GET /bonds as the remaining member") {
+            normalise(blocked.list.contentAsString) shouldBe normalise(left.list.contentAsString)
+        }
+    }
+
+    /**
+     * What the remaining member and the ledger show once Ada's ending has been delivered, on a bond
+     * where Ada has a zone proposal pending and Ben (Bea here) is owed three pushes, all `HELD` by
+     * his quiet hours: the opening of Ada's proposal, a reveal, and the push for Ada's name change.
+     */
+    private data class Exit(
+        val owedBefore: Map<String, String>,
+        val sharedRowsBefore: List<Map<String, Any?>>,
+        val sharedRowsAfter: List<Map<String, Any?>>,
+        val proposals: List<Triple<String?, UUID?, Boolean>>,
+        val closedProposals: List<Pair<String, String?>>,
+        val ledgerAfter: List<Map<String, Any?>>,
+        val cancelledBondEnded: Double,
+        val detail: MockHttpServletResponse,
+        val list: MockHttpServletResponse,
+    )
+
+    private fun endedWithPushesOwed(ending: (UUID, String) -> MockHttpServletResponse): Exit {
+        jdbc.execute("TRUNCATE TABLE notifications, outbox_deliveries, outbox_events")
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        accept(bea, codeOf(created)).status shouldBe 200
+        dispatchAll()
+        jdbc.execute("TRUNCATE TABLE notifications, outbox_deliveries, outbox_events")
+        inQuietHours(bea, bondId)
+
+        // Ada's name change: Bea's SETTING push is asked for, and held.
+        patchName(ada, bondId, "Ours").status shouldBe 200
+        // Ada's pending zone proposal: Bea's opening push, held.
+        mockMvc
+            .patch("/api/v1/bonds/$bondId/timezone") {
+                header(HttpHeaders.AUTHORIZATION, bearer(ada))
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"anchorTimezone":"Europe/London"}"""
+            }.andReturn()
+            .response.status shouldBe 200
+        // A reveal, held by the same quiet hours.
+        transactions.executeWithoutResult { notifications.request(heldReveal(bea, bondId)) }
+        dispatchAll()
+
+        val owedBefore = statusByCategory()
+        val sharedBefore = sharedRows()
+        val cancelled = cancelledBondEndedCount()
+        val response = ending(ada, bondId)
+        response.status shouldBe 204
+        dispatchAll()
+
+        return Exit(
+            owedBefore = owedBefore,
+            sharedRowsBefore = sharedBefore,
+            sharedRowsAfter = sharedRows(),
+            proposals =
+                jdbc.query(
+                    "SELECT cancel_cause, cancelled_by_member_id, expires_at > now() FROM bond_proposals WHERE bond_id = ?",
+                    { row, _ -> Triple(row.getString(1), row.getObject(2, UUID::class.java), row.getBoolean(3)) },
+                    UUID.fromString(bondId),
+                ),
+            closedProposals = closedProposalsOf(getBond(bea, bondId).contentAsString),
+            ledgerAfter = ledger(ada, bea),
+            cancelledBondEnded = cancelledBondEndedCount() - cancelled,
+            detail = getBond(bea, bondId),
+            list = listBonds(bea),
+        )
+    }
+
+    private fun closedProposalsOf(body: String): List<Pair<String, String?>> =
+        Regex(""""outcome":"(\w+)","closedByMemberId":(null|"[^"]+")""")
+            .findAll(body)
+            .map { it.groupValues[1] to it.groupValues[2].takeIf { id -> id != "null" } }
+            .toList()
+
+    private fun statusByCategory(): Map<String, String> =
+        jdbc.queryForList("SELECT category, status FROM notifications").associate { it["category"] as String to it["status"] as String }
+
+    private fun sharedRows(): List<Map<String, Any?>> =
+        jdbc.queryForList("SELECT id, user_id, status FROM notifications WHERE category = 'SHARED_SETTING_CHANGED' ORDER BY id")
+            .map { it - "status" }
+
+    /** Every column of the bond's ledger but its ids and its times, the users named by who they are. */
+    private fun ledger(
+        ada: UUID,
+        bea: UUID,
+    ): List<Map<String, Any?>> {
+        val ids = mutableMapOf<String, String>()
+        val uuid = Regex("""[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}""")
+        return jdbc
+            .queryForList("SELECT * FROM notifications ORDER BY category, user_id")
+            .map { row ->
+                (row - setOf("id", "bond_id", "created_at", "sent_at", "not_before", "stale_after"))
+                    .mapValues { (column, value) ->
+                        when (column) {
+                            "user_id" -> if (value == ada) "ada" else if (value == bea) "bea" else "other"
+                            "dedupe_key" -> uuid.replace(value as String) { ids.getOrPut(it.value) { "id-${ids.size}" } }
+                            else -> value
+                        }
+                    }
+            }.sortedBy { "${it["category"]}/${it["user_id"]}" }
+    }
+
+    private fun cancelledBondEndedCount(): Double =
+        PushCategory.entries.sumOf {
+            meters
+                .counter("notification.push.cancelled", "category", it.name, "nudge", "none", "reason", "bond_ended")
+                .count()
+        }
+
+    private fun heldReveal(
+        userId: UUID,
+        bondId: String,
+    ): PushRequest {
+        val now = clock.instant().atZone(ZoneId.of(QUIET_ZONE)).toLocalTime()
+        return PushRequest(
+            userId = userId,
+            bondId = UUID.fromString(bondId),
+            category = PushCategory.REVEAL,
+            dedupeKey = "reveal:discreet-exit:$userId",
+            staleAfter = clock.instant().plus(Duration.ofHours(STALE_HOURS)),
+            recipient =
+                PushRecipient(
+                    zone = ZoneId.of(QUIET_ZONE),
+                    quietHours = QuietHoursWindow(now.minusHours(1).withNano(0), now.plusHours(1).withNano(0)),
+                    preferences = NotificationPreferences(),
+                ),
+            bondDate = null,
+            nudge = null,
+            sharedChange = null,
+        )
+    }
+
+    /** Quiet hours around now in [userId]'s reminder zone, so a push to them is held. */
+    private fun inQuietHours(
+        userId: UUID,
+        bondId: String,
+    ) {
+        val now = clock.instant().atZone(ZoneId.of(QUIET_ZONE)).toLocalTime()
+        jdbc.update(
+            "UPDATE bond_members SET reminder_timezone = ?, quiet_hours_start = ?, quiet_hours_end = ? WHERE bond_id = ? AND user_id = ?",
+            QUIET_ZONE,
+            java.sql.Time.valueOf(now.minusHours(1).withNano(0)),
+            java.sql.Time.valueOf(now.plusHours(1).withNano(0)),
+            UUID.fromString(bondId),
+            userId,
+        )
+    }
+
+    private fun patchName(
+        userId: UUID,
+        bondId: String,
+        name: String,
+    ): MockHttpServletResponse {
+        val etag = getBond(userId, bondId).getHeader(HttpHeaders.ETAG)!!
+        return mockMvc
+            .patch("/api/v1/bonds/$bondId") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                header(HttpHeaders.IF_MATCH, etag)
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"name":"$name"}"""
+            }.andReturn()
+            .response
+    }
+
+    /** Runs the outbox until it has nothing due: the change, then the pushes it asked for. */
+    private fun dispatchAll() {
+        repeat(DISPATCH_ROUNDS) { dispatcher.dispatchDue(clock.instant().plusSeconds(1), BUDGET) }
+    }
+
     /**
      * A bond built the same way every time: Ada creates it, Bea joins, and then
      * [ending] finishes it. The display names are fixed so that two of these
@@ -346,4 +583,13 @@ internal class DiscreetExitTest(
 
     private fun codeOf(response: MockHttpServletResponse): String =
         Regex(""""code":"([A-Z0-9]{${InviteCode.LENGTH}})"""").find(response.contentAsString)!!.groupValues[1]
+
+    private companion object {
+        const val BUDGET = 100
+        const val DISPATCH_ROUNDS = 3
+        const val STALE_HOURS = 24L
+
+        /** A region zone (a member's zone must be one) that has no daylight saving. */
+        const val QUIET_ZONE = "Atlantic/Reykjavik"
+    }
 }
