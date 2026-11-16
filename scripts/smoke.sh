@@ -14,6 +14,18 @@
 # read back through RegionZone, which refuses it: every write a 500), and a poll that read the row
 # REQUESTED before the consumer held it (1940 passed, 1 failed).
 #
+# The streak section moved a bond's timeline back 21 days but left today's row, opened at the
+# pairing instant, where it was: once that day ended, the close job refused it on every run
+# (BondDay.extendedTo, "a bond-day's start never moves") and the bond's streak stopped there. Today's
+# row now moves with the calendar, and both sections that move a timeline (streak, late entries)
+# check that no open day starts off it. Last run on 2026-11-16, on test/smoke-streak-joining-day,
+# from a jar of the branch's tree on 4ee23dd0, on a fresh database, against its own compose project
+# (moyi-sst: Postgres 55770, Valkey 56779, MinIO 57770), the jar booted by hand (local profile, the
+# five crons at */5, ports 18770/18771) and --attach: 1919 passed, 1 failed (data export's "emailed
+# that it is ready", the mail logged after the probe's five-second wait, on a host shared with
+# another build); again on the same server: 1920 passed, 0 failed, 0 skipped. The close job logged
+# no failed day in either run.
+#
 # The follow-up to #162 (ADR-0059 decision 13: an archive's object deleted after the commit that
 # forgets it, from a debt V54 holds) adds no probe; the data-export section's "its URL no longer
 # downloads it" after a withdrawal is the one that would show the deletion moved too late. Last run
@@ -1850,6 +1862,16 @@ sql() {
   rm -f "$err"
 }
 new_key() { python3 -c 'import uuid; print(uuid.uuid4())'; }
+# misplaced_open_days <bond> — the SQL counting that bond's unclosed days whose stored start is neither
+# midnight in the day's own zone nor the start of one of the bond's anchor intervals. A section that moves
+# a bond's timeline back by hand must move its open rows with it: a row the calendar no longer starts
+# where it says fails BondDay.extendedTo's "a bond-day's start never moves" in the close job, on every
+# run, and the streak is never evaluated past it.
+misplaced_open_days() {
+  printf '%s' "SELECT count(*) FROM bond_days d WHERE d.bond_id = '$1' AND d.closed_at IS NULL
+    AND d.starts_at <> (d.date::timestamp AT TIME ZONE d.anchor_timezone)
+    AND NOT EXISTS (SELECT 1 FROM bond_anchor_intervals a WHERE a.bond_id = d.bond_id AND a.effective_from = d.starts_at)"
+}
 
 # revealed_bond <label> <a's token> <b's token> <a's text> <b's text> — a bond
 # both have written in today, so each has read the other. Leaves its id in
@@ -2899,6 +2921,9 @@ flush_buckets
 # change stepped over keeps the run (FROZEN, TIMEZONE_SHIFT); an empty day with nothing banked ends
 # the run at sixteen; three more days and today make four. The job, on its five-second schedule,
 # evaluates them; the read is then checked field by field, the same for both members.
+# Today's row, opened by revealed_bond at the pairing instant, starts at Lagos midnight with them:
+# left at that instant, it is no longer where the moved calendar starts today, and the close job
+# refuses it (BondDay.extendedTo, "a bond-day's start never moves") on every run after it ends.
 verified_account "streaker" "203.0.113.140"; SR_A="$ACCOUNT_ACCESS"
 verified_account "streaked" "203.0.113.141"; SR_B="$ACCOUNT_ACCESS"
 revealed_bond "streak" "$SR_A" "$SR_B" "thank you for the long run" "and thank you for starting again"
@@ -2909,6 +2934,7 @@ case "$SR_TODAY" in
   *) SR_MADE="$(sql "WITH m AS (UPDATE bond_members SET joined_at = joined_at - interval '21 days' WHERE bond_id = '$SR_BOND' RETURNING 1),
     b AS (UPDATE bonds SET created_at = created_at - interval '21 days' WHERE id = '$SR_BOND' RETURNING 1),
     a AS (UPDATE bond_anchor_intervals SET effective_from = effective_from - interval '21 days', first_label = first_label - 21 WHERE bond_id = '$SR_BOND' RETURNING 1),
+    j AS (UPDATE bond_days SET starts_at = date::timestamp AT TIME ZONE 'Africa/Lagos' WHERE bond_id = '$SR_BOND' AND date = '$SR_TODAY' RETURNING 1),
     d AS (INSERT INTO bond_days (id, bond_id, date, status, anchor_timezone, starts_at, ends_at, entry_count, created_at, closed_at, version)
       SELECT gen_random_uuid(), '$SR_BOND', g.d, s.status, 'Africa/Lagos', g.d::timestamp AT TIME ZONE 'Africa/Lagos',
              (g.d + 1)::timestamp AT TIME ZONE 'Africa/Lagos', s.n, now(), (g.d + 1)::timestamp AT TIME ZONE 'Africa/Lagos', 0
@@ -2916,9 +2942,10 @@ case "$SR_TODAY" in
       CROSS JOIN LATERAL (SELECT CASE g.k WHEN 21 THEN 'EMPTY' WHEN 6 THEN 'SOLO' WHEN 5 THEN 'FROZEN' WHEN 4 THEN 'EMPTY' ELSE 'REVEALED' END AS status,
                                  CASE g.k WHEN 21 THEN 0 WHEN 6 THEN 1 WHEN 5 THEN 0 WHEN 4 THEN 0 ELSE 2 END AS n) s
       RETURNING 1)
-    SELECT (SELECT count(*) FROM m) || '/' || (SELECT count(*) FROM b) || '/' || (SELECT count(*) FROM a) || '/' || (SELECT count(*) FROM d)")" ;;
+    SELECT (SELECT count(*) FROM m) || '/' || (SELECT count(*) FROM b) || '/' || (SELECT count(*) FROM a) || '/' || (SELECT count(*) FROM j) || '/' || (SELECT count(*) FROM d)")" ;;
 esac
-if [ "$SR_MADE" = "2/1/1/21" ]; then
+if [ "$SR_MADE" = "2/1/1/1/21" ]; then
+  db_is "streak: no open day of the moved bond starts off its calendar" "$(sql "$(misplaced_open_days "$SR_BOND")")" "0"
   SR_BROKEN="$(sql "SELECT '$SR_TODAY'::date - 4")"
   SR_REST="$(sql "SELECT '$SR_TODAY'::date - 6")"
   SR_SHIFT="$(sql "SELECT '$SR_TODAY'::date - 5")"
@@ -3024,6 +3051,7 @@ if [ "$LE_MADE" = "2/1/1" ]; then
   # The archive lists an unsettled day only for a member who wrote on it (ADR-0036): to the partner it is not there yet.
   expect "late entries: …so the partner cannot read the lone entry yet: the day is not in their archive" 404 '"title":"Day not found"' -- "$API/bonds/$LE_BOND/days/$LE_YDAY" -H "Authorization: Bearer $LE_B"
   [[ "$LAST_BODY" == *"written last night"* ]] && fail "late entries: lone entry" "readable to the partner inside the grace: ${LAST_BODY:0:200}" || pass "late entries: …its words are not in the partner's view of the day"
+  db_is "late entries: no open day of the moved bond starts off its calendar" "$(sql "$(misplaced_open_days "$LE_BOND")")" "0"
 else
   skip "late entries: the grace on the wire (the bond could not be moved by hand: ${LE_ZONE:-no zone at 01-05h}, $LE_MADE)"
 fi
