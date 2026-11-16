@@ -11,24 +11,24 @@
 <main>
 <p class="brand">Moyi</p>
 <h1>Confirm your email</h1>
-<div id="found">
-<p>Your confirmation code is below. Run the command in a terminal, from the <code class=inline>moyi-backend</code> folder, to confirm this address.</p>
+<div id="found" hidden>
+<p>Open this link in the Moyi app to confirm your address.</p>
+<p><a id="open" class="action" href="/">Open in the Moyi app</a></p>
+<p class="note">If the app doesn't open, it may not be on this phone yet. On a computer, open the email on your phone instead.</p>
+<h2>Don't have the app yet?</h2>
+<p>Moyi is coming soon to the App Store and Google Play.</p>
+<h2>If the button doesn't work</h2>
+<p>Copy this link, then open Moyi and paste it where the app asks for the code from the email. The 6-digit code in the email works there too, for 15 minutes.</p>
 <div class="card">
-<p class="label">Code</p>
 <code id="value"></code>
-<button type="button" data-copy="value">Copy code</button>
+<button type="button" data-copy="value">Copy link</button>
 </div>
-<div class="card">
-<p class="label">Command</p>
-<code id="command"></code>
-<button type="button" data-copy="command">Copy command</button>
-</div>
-<p class="note">Opening this page confirmed nothing yet: it only shows you the code.</p>
+<p class="note">This link works once and expires in 24 hours. Opening this page hasn't confirmed anything yet.</p>
 </div>
 <div id="missing" hidden>
-<p>This link looks incomplete. Open it again from the email, or copy the whole link, including everything after the last <code class="inline">=</code> or <code class="inline">/</code>.</p>
+<p>This link looks incomplete. Open it again from the email, or copy the whole link, including everything after the last <code class="inline">=</code>.</p>
 </div>
-<noscript><p>This page needs JavaScript to read the code from its own address. Nothing is sent anywhere.</p></noscript>
+<noscript><p>This page needs JavaScript to read the link from its own address. Nothing is sent anywhere.</p></noscript>
 </main>
 <script src="/link.js"></script>
 </body>

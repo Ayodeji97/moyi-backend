@@ -47,6 +47,8 @@ main {
 
 h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 0.75rem; }
 
+h2 { font-size: 1.1rem; line-height: 1.3; margin: 2rem 0 0.5rem; }
+
 p { margin: 0 0 1rem; color: var(--muted); }
 
 .card {
@@ -81,7 +83,23 @@ button {
   cursor: pointer;
 }
 
-button:focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
+/* "Open in the Moyi app": a link that looks like the page's one main action,
+   at least 48px tall so it is an easy target on a phone. */
+a.action {
+  display: inline-block;
+  min-height: 48px;
+  padding: 0.75rem 1.25rem;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+button { min-height: 44px; }
+
+button:focus-visible,
+a.action:focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
 
 .note { font-size: 0.9rem; }
 
