@@ -34,6 +34,7 @@ import com.moyi.gratitude.infra.database.redacted
 import com.moyi.gratitude.infra.database.violates
 import com.moyi.media.api.AttachableKind
 import com.moyi.media.api.MediaAttachments
+import com.moyi.notification.api.CancelReason
 import com.moyi.notification.api.Notifications
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
@@ -544,7 +545,10 @@ internal class SubmitEntry(
         // who wrote at 06:45 (ADR-0045). In this transaction, so it is called off exactly when
         // the entry commits. Their own reminders only: the other member's are about their writing.
         // The whole day's series in one statement (#200): whichever nudge is still unsent, by any index.
-        notifications.cancel(ReminderKey.series(membership.memberId, day.date, ReminderRoster.NUDGES_PER_BOND_DAY))
+        notifications.cancel(
+            ReminderKey.series(membership.memberId, day.date, ReminderRoster.NUDGES_PER_BOND_DAY),
+            CancelReason.WRITTEN,
+        )
         events.publish(OutboxEvent("Entry", entry.id.value, "EntrySubmitted", mapOf("bondId" to bondId, "bondDayId" to day.id.value), now))
         val updated = reveal.apply(day.withEntry(), membership.revealTimeLocal, now)
         if (joiningDate != null && joiningDate.isAfter(claimed.date)) joining.underBondLock(membership, now)

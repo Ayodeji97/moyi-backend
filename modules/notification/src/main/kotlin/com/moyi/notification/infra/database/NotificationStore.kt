@@ -1,6 +1,7 @@
 package com.moyi.notification.infra.database
 
 import com.moyi.notification.api.PushCategory
+import com.moyi.notification.api.SharedChange
 import com.moyi.notification.domain.NotificationStatus
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
@@ -14,7 +15,7 @@ import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
-/** The `notifications` ledger (V29, V30, V58, V68). */
+/** The `notifications` ledger (V29, V30, V58, V68, V71). */
 @Suppress("TooManyFunctions") // One per statement on the ledger, in the ledger's terms.
 @Component
 internal class NotificationStore(
@@ -32,8 +33,8 @@ internal class NotificationStore(
         jdbc.update(
             """
             INSERT INTO notifications (id, user_id, bond_id, category, dedupe_key, not_before, stale_after, status, created_at,
-                                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date, nudge, leave_free_across_bonds)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'REQUESTED', ?, ?, ?, ?, ?, ?, ?, ?)
+                                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date, nudge, leave_free_across_bonds, shared_change)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'REQUESTED', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (dedupe_key) DO NOTHING
             """.trimIndent(),
             push.id,
@@ -51,6 +52,7 @@ internal class NotificationStore(
             push.bondDate?.let(java.sql.Date::valueOf),
             push.nudge,
             push.leaveFreeAcrossBonds,
+            push.sharedChange?.name,
         ) == 1
 
     /**
@@ -64,7 +66,7 @@ internal class NotificationStore(
             .query(
                 """
                 SELECT id, user_id, bond_id, category, not_before, stale_after, status,
-                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date, nudge, leave_free_across_bonds
+                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date, nudge, leave_free_across_bonds, shared_change
                   FROM notifications WHERE id = ? FOR UPDATE
                 """.trimIndent(),
                 { row, _ -> storedPush(row) },
@@ -255,6 +257,7 @@ internal class NotificationStore(
             bondDate = row.getDate("bond_date")?.toLocalDate(),
             nudge = row.getObject("nudge", Integer::class.java)?.toInt(),
             leaveFreeAcrossBonds = row.getInt("leave_free_across_bonds"),
+            sharedChange = row.getString("shared_change")?.let(SharedChange::valueOf),
         )
     }
 
@@ -296,6 +299,8 @@ internal data class NewPush(
     val nudge: Int?,
     /** How many cross-Bond slots the push must leave free when sent (V68). */
     val leaveFreeAcrossBonds: Int,
+    /** Which shared change a shared-setting push is about; `null` for any other push (V71). */
+    val sharedChange: SharedChange?,
 ) {
     val quietHoursStart: LocalTime? get() = quietHours?.start
     val quietHoursEnd: LocalTime? get() = quietHours?.end
@@ -321,6 +326,8 @@ internal data class StoredPush(
     val nudge: Int?,
     /** How many cross-Bond slots the push must leave free when sent: 0 for a row written before V68. */
     val leaveFreeAcrossBonds: Int,
+    /** Which shared change a shared-setting push is about: `null` for any other push (V71). */
+    val sharedChange: SharedChange?,
 )
 
 /** A push [NotificationStore.cancelOwed] has just called off: what a superseding nudge inherits from. */

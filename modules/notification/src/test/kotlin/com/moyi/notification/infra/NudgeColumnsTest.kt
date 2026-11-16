@@ -90,6 +90,7 @@ internal class NudgeColumnsTest(
                     recipient = PushRecipient(ZoneId.of("Africa/Lagos"), null, NotificationPreferences.DEFAULTS),
                     bondDate = null,
                     nudge = nudge,
+                    sharedChange = null,
                 ),
             )
         }

@@ -48,13 +48,17 @@ interface Notifications {
      * the pushes are called off exactly when the fact that made them pointless
      * commits. Calling it twice is calling it once.
      *
-     * Its only caller is an entry's write, so every push it calls off is
-     * counted with the reason `written` (`notification.push.cancelled`). A
-     * caller with another reason needs that reason in this API first.
+     * Every push it calls off is counted with [reason]
+     * (`notification.push.cancelled`): a closed set, so that a metric tag is
+     * never a caller's free text. A caller with another reason needs that
+     * reason in [CancelReason] first.
      *
      * @return how many pushes this call cancelled.
      */
-    fun cancel(dedupeKeys: Collection<String>): Int
+    fun cancel(
+        dedupeKeys: Collection<String>,
+        reason: CancelReason,
+    ): Int
 
     /**
      * Whether [userId] has, in [bondId], a push of [category] asked for after
@@ -93,6 +97,34 @@ interface Notifications {
 }
 
 /**
+ * Why a push was called off by its caller, as `notification.push.cancelled` tags it (the name
+ * in lower case). A closed set: a tag is never free text (ADR-0069 decision 13).
+ */
+enum class CancelReason {
+    /** The member wrote, so the reminder is pointless (ADR-0045, ADR-0068). */
+    WRITTEN,
+
+    /** The proposal the push announced was answered or withdrawn before the push went (ADR-0069). */
+    PROPOSAL_CLOSED,
+}
+
+/**
+ * Which shared change a [PushCategory.SHARED_SETTING_CHANGED] push is about (ADR-0069): what the
+ * phone's words depend on. Kept on the ledger row (V71), because a held push is sent again from
+ * its row alone.
+ */
+enum class SharedChange {
+    /** A shared setting was changed by the other member. */
+    SETTING,
+    PROPOSAL_ACCEPTED,
+    PROPOSAL_DECLINED,
+    PROPOSAL_WITHDRAWN,
+
+    /** Several changes in one push. Written only by coalescing (ADR-0069 decision 7); never asked for. */
+    SEVERAL,
+}
+
+/**
  * One push to one member.
  *
  * @property dedupeKey Names the push, not the request: the same fact asked
@@ -115,6 +147,10 @@ interface Notifications {
  * @property nudge Which nudge of its Bond-day a reminder is, and what it supersedes (issue #200,
  *   ADR-0068); `null` for every other push. Only a [PushCategory.REMINDER] may carry one.
  *   Required, with no default, so that every caller decides.
+ * @property sharedChange Which change a [PushCategory.SHARED_SETTING_CHANGED] push is about
+ *   (ADR-0069): required on that category and refused on every other, and never
+ *   [SharedChange.SEVERAL], which only coalescing writes. Required, with no default, so that every
+ *   caller decides.
  */
 data class PushRequest(
     val userId: UUID,
@@ -125,10 +161,15 @@ data class PushRequest(
     val recipient: PushRecipient,
     val bondDate: LocalDate?,
     val nudge: Nudge?,
+    val sharedChange: SharedChange?,
 ) {
     init {
         require(dedupeKey.length in 1..MAX_DEDUPE_KEY_LENGTH) { "a dedupe key must be 1 to $MAX_DEDUPE_KEY_LENGTH characters" }
         require(nudge == null || category == PushCategory.REMINDER) { "only a reminder may be a nudge" }
+        require((sharedChange != null) == (category == PushCategory.SHARED_SETTING_CHANGED)) {
+            "a shared change is required on a shared-setting push, and on no other"
+        }
+        require(sharedChange != SharedChange.SEVERAL) { "several changes is written by coalescing, never asked for" }
     }
 
     companion object {
@@ -190,6 +231,12 @@ enum class PushCategory {
 
     /** A two-party proposal waiting on the other member (Q13). */
     PROPOSAL_OPENED,
+
+    /**
+     * The other member changed a shared setting, or answered or withdrew a proposal (issue #205,
+     * ADR-0069). Not reveal-class: it takes no slot that a reveal could.
+     */
+    SHARED_SETTING_CHANGED,
     ;
 
     /**
@@ -235,7 +282,8 @@ data class QuietHoursWindow(
  * opt-in. [proposal] is a sixth toggle beyond the spec's five: Q13 rules the
  * pending-proposal push in, and FR-081 gives a member control of *which
  * categories they receive*, so a push with no toggle would be the one
- * category a member could not turn off (ADR-0045).
+ * category a member could not turn off (ADR-0045). [sharedSettings] is the
+ * seventh, on by default, for the same reason (ADR-0069).
  */
 data class NotificationPreferences(
     val reminder: Boolean = true,
@@ -244,6 +292,7 @@ data class NotificationPreferences(
     val milestone: Boolean = true,
     val onThisDay: Boolean = false,
     val proposal: Boolean = true,
+    val sharedSettings: Boolean = true,
 ) {
     /** Whether this member wants a push of [category]. A day opening with one entry is governed by [reveal]. */
     fun allows(category: PushCategory): Boolean =
@@ -254,6 +303,7 @@ data class NotificationPreferences(
             PushCategory.MILESTONE -> milestone
             PushCategory.ON_THIS_DAY -> onThisDay
             PushCategory.PROPOSAL_OPENED -> proposal
+            PushCategory.SHARED_SETTING_CHANGED -> sharedSettings
         }
 
     companion object {

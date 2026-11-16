@@ -3,6 +3,7 @@ package com.moyi.notification.service
 import com.moyi.common.core.IdGenerator
 import com.moyi.common.events.EventPublisher
 import com.moyi.common.events.OutboxEvent
+import com.moyi.notification.api.CancelReason
 import com.moyi.notification.api.Notifications
 import com.moyi.notification.api.Nudge
 import com.moyi.notification.api.PushCategory
@@ -75,6 +76,7 @@ internal class PushRequests(
                     bondDate = request.bondDate,
                     nudge = nudge?.index,
                     leaveFreeAcrossBonds = nudge?.leaveFreeAcrossBonds ?: 0,
+                    sharedChange = request.sharedChange,
                 ),
             )
         // Only a push this call recorded supersedes: a re-ask (the look-back asks up to six
@@ -107,9 +109,12 @@ internal class PushRequests(
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
-    override fun cancel(dedupeKeys: Collection<String>): Int {
+    override fun cancel(
+        dedupeKeys: Collection<String>,
+        reason: CancelReason,
+    ): Int {
         val cancelled = ledger.cancelOwed(dedupeKeys)
-        cancelled.forEach { count(it, WRITTEN) }
+        cancelled.forEach { count(it, reason.name.lowercase()) }
         return cancelled.size
     }
 
@@ -167,9 +172,6 @@ internal class PushRequests(
         private val REVEAL_LOOK_BACK = Duration.ofHours(72)
 
         const val CANCELLED = "notification.push.cancelled"
-
-        /** Called off by `cancel`: what its writer no longer owes. */
-        const val WRITTEN = "written"
 
         /** Called off by a newer nudge of the same Bond-day. */
         const val SUPERSEDED = "superseded"

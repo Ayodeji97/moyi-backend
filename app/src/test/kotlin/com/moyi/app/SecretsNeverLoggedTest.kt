@@ -452,6 +452,7 @@ abstract class SecretsNeverLoggedTest(
                     PushRecipient(ZoneId.of("UTC"), null, NotificationPreferences.DEFAULTS),
                     null,
                     null,
+                    null,
                 ),
             ) shouldBe true
         }

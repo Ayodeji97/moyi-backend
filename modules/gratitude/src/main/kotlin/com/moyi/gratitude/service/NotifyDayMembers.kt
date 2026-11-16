@@ -166,6 +166,7 @@ internal class NotifyDayMembers(
                 recipient = member.recipient,
                 bondDate = bondDate,
                 nudge = null,
+                sharedChange = null,
             ),
         )
     }

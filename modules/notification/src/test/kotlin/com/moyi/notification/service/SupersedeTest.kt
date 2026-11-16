@@ -2,6 +2,7 @@ package com.moyi.notification.service
 
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.notification.api.CancelReason
 import com.moyi.notification.api.NotificationPreferences
 import com.moyi.notification.api.Notifications
 import com.moyi.notification.api.Nudge
@@ -146,8 +147,8 @@ internal class SupersedeTest(
         ask(sent, Nudge(1, 0, emptySet()))
         send(sent)
 
-        transactions.execute { notifications.cancel(listOf(first, second, third, sent)) } shouldBe 3
-        transactions.execute { notifications.cancel(listOf(first, second, third, sent)) } shouldBe 0
+        transactions.execute { notifications.cancel(listOf(first, second, third, sent), CancelReason.WRITTEN) } shouldBe 3
+        transactions.execute { notifications.cancel(listOf(first, second, third, sent), CancelReason.WRITTEN) } shouldBe 0
 
         listOf(first, second, third).map(::status) shouldBe List(3) { "CANCELLED" }
         status(sent) shouldBe "SENT"
@@ -210,6 +211,7 @@ internal class SupersedeTest(
                     recipient = PushRecipient(ZoneId.of("Europe/London"), null, NotificationPreferences.DEFAULTS),
                     bondDate = date,
                     nudge = nudge,
+                    sharedChange = null,
                 ),
             )
         }!!

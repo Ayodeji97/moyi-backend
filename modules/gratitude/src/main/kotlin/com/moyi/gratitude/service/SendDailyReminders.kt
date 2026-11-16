@@ -109,6 +109,7 @@ internal class SendDailyReminders(
                             leaveFreeAcrossBonds = leaveFree(due),
                             supersedes = ReminderKey.before(reminder.memberId, reminder.bondDate, due.index),
                         ),
+                    sharedChange = null,
                 ),
             )
         return if (asked) Outcome.REQUESTED else Outcome.ALREADY_ASKED

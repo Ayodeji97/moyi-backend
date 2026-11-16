@@ -125,6 +125,7 @@ internal class FcmPushSenderTest {
                 PushCategory.MILESTONE to "milestone",
                 PushCategory.ON_THIS_DAY to "on_this_day",
                 PushCategory.PROPOSAL_OPENED to "proposal_opened",
+                PushCategory.SHARED_SETTING_CHANGED to "shared_setting_changed",
             )
     }
 

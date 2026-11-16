@@ -3,6 +3,7 @@ package com.moyi.notification.service
 import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.notification.api.CancelReason
 import com.moyi.notification.api.HeldPushes
 import com.moyi.notification.api.NotificationPreferences
 import com.moyi.notification.api.Notifications
@@ -205,10 +206,10 @@ internal class PushPreferencesBudgetTest(
         statuses(ada).getValue("held").first shouldBe "HELD"
         ask(push(ada, PushCategory.REMINDER, key = "requested"))
 
-        transactions.execute { notifications.cancel(listOf("held")) } shouldBe 1
-        transactions.execute { notifications.cancel(listOf("held")) } shouldBe 0
+        transactions.execute { notifications.cancel(listOf("held"), CancelReason.WRITTEN) } shouldBe 1
+        transactions.execute { notifications.cancel(listOf("held"), CancelReason.WRITTEN) } shouldBe 0
         // "requested" is still owed to the outbox; its delivery runs and finds nothing to send.
-        transactions.execute { notifications.cancel(listOf("requested")) } shouldBe 1
+        transactions.execute { notifications.cancel(listOf("requested"), CancelReason.WRITTEN) } shouldBe 1
         dispatcher.dispatchDue(clock.instant(), BUDGET)
         held.releaseDue(Instant.parse("2026-10-15T06:00:00Z"), LIMIT) shouldBe 0
 
@@ -221,12 +222,12 @@ internal class PushPreferencesBudgetTest(
         ask(push(ada, PushCategory.REMINDER, key = "sent"))
         dispatcher.dispatchDue(evening, BUDGET)
 
-        transactions.execute { notifications.cancel(listOf("sent")) } shouldBe 0
-        transactions.execute { notifications.cancel(listOf("never-asked")) } shouldBe 0
+        transactions.execute { notifications.cancel(listOf("sent"), CancelReason.WRITTEN) } shouldBe 0
+        transactions.execute { notifications.cancel(listOf("never-asked"), CancelReason.WRITTEN) } shouldBe 0
         statuses(ada).getValue("sent").first shouldBe "SENT"
         // And a cancelled key stays spent: asking again records nothing new.
         ask(push(ada, PushCategory.REMINDER, key = "cancelled"))
-        transactions.execute { notifications.cancel(listOf("cancelled")) } shouldBe 1
+        transactions.execute { notifications.cancel(listOf("cancelled"), CancelReason.WRITTEN) } shouldBe 1
         transactions.execute { notifications.request(push(ada, PushCategory.REMINDER, key = "cancelled")) } shouldBe false
     }
 
@@ -234,7 +235,7 @@ internal class PushPreferencesBudgetTest(
     fun `calling a push off refuses to run outside the caller's transaction`() {
         ask(push(ada, PushCategory.REMINDER, key = "owed"))
         io.kotest.assertions.throwables.shouldThrow<org.springframework.transaction.IllegalTransactionStateException> {
-            notifications.cancel(listOf("owed"))
+            notifications.cancel(listOf("owed"), CancelReason.WRITTEN)
         }
         statuses(ada).getValue("owed").first shouldBe "REQUESTED"
     }
@@ -434,7 +435,7 @@ internal class PushPreferencesBudgetTest(
         staleAfter: Instant = evening.plus(Duration.ofDays(2)),
         bondDate: LocalDate? = null,
         nudge: Nudge? = null,
-    ) = PushRequest(userId, bondId, category, key, staleAfter, PushRecipient(zone, quietHours, preferences), bondDate, nudge)
+    ) = PushRequest(userId, bondId, category, key, staleAfter, PushRecipient(zone, quietHours, preferences), bondDate, nudge, null)
 
     private fun ask(request: PushRequest) {
         transactions.execute { notifications.request(request) } shouldBe true

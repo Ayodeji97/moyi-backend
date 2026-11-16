@@ -50,6 +50,7 @@ internal class RequestingConsumer(
                 recipient = PushRecipient(ZoneId.of("UTC"), null, NotificationPreferences.DEFAULTS),
                 bondDate = null,
                 nudge = null,
+                sharedChange = null,
             ),
         )
     }
