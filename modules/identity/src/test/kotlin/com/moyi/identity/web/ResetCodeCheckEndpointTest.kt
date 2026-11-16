@@ -72,7 +72,8 @@ internal class ResetCodeCheckEndpointTest(
         login(NEW_PASSWORD).status shouldBe 200
         // Spent by the reset, so a later check is refused like any other dead code.
         check(ADA, code).status shouldBe 422
-        output.all shouldNotContain code
+        // As a number of its own: six random digits can turn up inside a longer number in the log.
+        output.all shouldNotContain Regex("(?<![0-9A-Za-z])$code(?![0-9A-Za-z])")
     }
 
     @Test

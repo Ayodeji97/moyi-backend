@@ -73,7 +73,8 @@ internal class EmailCodeEndpointTest(
         response.contentAsString shouldBe ""
         jdbc.queryForObject("SELECT status FROM users", String::class.java) shouldBe "ACTIVE"
         jdbc.queryForObject("SELECT consumed_at IS NOT NULL FROM verification_tokens", Boolean::class.java) shouldBe true
-        output.all shouldNotContain code
+        // As a number of its own: six random digits can turn up inside a longer number in the log.
+        output.all shouldNotContain Regex("(?<![0-9A-Za-z])$code(?![0-9A-Za-z])")
     }
 
     @Test

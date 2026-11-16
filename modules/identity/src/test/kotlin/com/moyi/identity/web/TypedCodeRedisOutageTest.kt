@@ -70,7 +70,8 @@ internal class TypedCodeRedisOutageTest(
         refused.status shouldBe 503
         refused.contentType!! shouldContain MediaType.APPLICATION_PROBLEM_JSON_VALUE
         refused.contentAsString shouldContain "\"code\":\"CODE_CHECK_UNAVAILABLE\""
-        refused.contentAsString shouldNotContain code
+        // Without the trace id: thirty-two random hex digits can hold six that match the code.
+        withoutTraceId(refused.contentAsString) shouldNotContain code
         refused.getHeader(HttpHeaders.RETRY_AFTER) shouldBe "60"
         refused.getHeader("X-RateLimit-Limit") shouldBe null
         jdbc.queryForObject("SELECT code_attempts FROM verification_tokens", Int::class.java) shouldBe 0
