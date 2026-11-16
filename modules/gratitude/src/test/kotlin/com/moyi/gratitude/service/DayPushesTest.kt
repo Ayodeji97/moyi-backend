@@ -146,8 +146,11 @@ internal class DayPushesTest(
         reveals.forEach { it.bondId shouldBe UUID.fromString(bond) }
         // No content: the message is the token, the category, the bond and its deadline (#96), and
         // nothing else can carry words.
-        // The Bond-day's date (#146) directs the app to the day and says nothing of what was written.
-        PushMessage::class.memberProperties.map { it.name }.toSet() shouldBe setOf("token", "category", "bondId", "staleAfter", "bondDate")
+        // The Bond-day's date (#146) directs the app to the day and says nothing of what was written;
+        // a reminder's nudge index (#200, ADR-0068) is a number, and null on every other push.
+        PushMessage::class.memberProperties.map { it.name }.toSet() shouldBe
+            setOf("token", "category", "bondId", "staleAfter", "bondDate", "nudge")
+        reveals.forEach { it.nudge shouldBe null }
         reveals.forEach { it.staleAfter shouldBe Instant.parse("2026-09-02T23:00:00Z") }
         reveals.forEach { it.bondDate shouldBe LocalDate.parse("2026-09-01") }
         val everythingSent = sender.sent.joinToString { "${it.category}|${it.bondId}" }

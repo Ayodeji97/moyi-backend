@@ -281,8 +281,11 @@ nudge 2 at 08:00 supersedes the held nudge 1, inherits its zero, and alone is re
   the reminder's Android `tag`).
 - **`scheduling`:** `ReminderJob` registers the per-nudge counter from `ReminderRun`; the job's
   registry line in `JobConsole` reads "the daily reminder and its nudges".
-- **`ArchitectureTest`:** `declaredIn` gains `DueNudge`, `RevealDay`, `Nudge`; the rule that only the
-  reminder sweep names `ReminderRoster` is unchanged.
+- **`ArchitectureTest`:** unchanged (*lead ruling 2026-11-16*). Its `declaredIn` map backs the rule
+  that only `admin` may import the types it lists from another module, so listing `DueNudge`,
+  `RevealDay` and `Nudge` there would forbid `gratitude` the very imports this design needs; they
+  stay out of it. The rule that only the reminder sweep names `ReminderRoster`'s unguarded read is
+  unchanged too.
 
 ## 6. Data model: V68 (`modules/notification`)
 
