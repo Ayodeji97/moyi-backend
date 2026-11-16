@@ -11,6 +11,7 @@ import com.moyi.identity.domain.VerificationToken
 import com.moyi.identity.domain.VerificationTokenExpiredException
 import com.moyi.identity.domain.VerificationTokenInvalidException
 import com.moyi.identity.infra.database.AccountStore
+import com.moyi.identity.infra.database.RefreshTokenStore
 import com.moyi.identity.infra.database.VerificationTokenStore
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -44,6 +45,7 @@ internal class VerifyEmail(
     private val clock: Clock,
     private val codes: VerificationCodeCheck,
     private val transactions: TransactionTemplate,
+    private val sessions: RefreshTokenStore,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -57,6 +59,11 @@ internal class VerifyEmail(
         val now = clock.instant()
         val hash = presented.hash()
         val token = liveTokenFor(hash, now)
+        // The account's sessions lock before the token row: the deletion job holds it while it
+        // deletes this person's tokens, so a consume first would hold a row the job waits for while
+        // this waits for the job (ADR-0066, amended 2026-11-14). After it, a job that erased the
+        // account first has left nothing to consume.
+        sessions.lockSessionsOf(token.userId)
 
         // The point of no return, and the only statement that decides who won.
         if (!tokens.consume(hash, now)) throw VerificationTokenExpiredException()

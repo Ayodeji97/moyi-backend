@@ -68,3 +68,11 @@ The app asks for the code and the new password on one screen, so a mistyped code
 
 **What it costs.** One more request on the reset screen, and one more of the ten a day. **Revisit when** a typed code ever needs to be checked by another purpose (verification answers by spending, so it has no need), or the app wants the check to hold the code for it, which would be the grant rejected above.
 
+## Amendment — 2026-11-14: the sessions lock before the consume
+
+`ApplyPasswordReset` took the token row (the consume) and then the account's sessions lock; the
+deletion job takes that lock and then deletes the row, so the two could deadlock. It now takes the
+sessions lock first, then consumes. A second presentation of the same link or code waits for the
+first and finds the row consumed, the same `false` as before. The typed-code check (2026-11-10,
+decision 2) does one more statement, the same lock, in every branch. ADR-0066, amendment of
+2026-11-14, has the whole order.

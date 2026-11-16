@@ -6,6 +6,8 @@ import com.moyi.identity.domain.User
 import com.moyi.identity.domain.VerificationPurpose
 import com.moyi.identity.domain.VerificationRequested
 import com.moyi.identity.domain.VerificationToken
+import com.moyi.identity.infra.database.CurrentAccounts
+import com.moyi.identity.infra.database.RefreshTokenStore
 import com.moyi.identity.infra.database.VerificationTokenStore
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Component
@@ -28,6 +30,7 @@ import java.time.Clock
  * seven tests fail (docs/learning-log.md, 2026-09-23).
  */
 @Component
+@Suppress("LongParameterList") // The stores, the minting, the clock, the events, the sessions lock and the re-read: each named.
 internal class RequestVerification(
     private val tokens: VerificationTokenStore,
     private val generator: TokenGenerator,
@@ -35,12 +38,28 @@ internal class RequestVerification(
     private val clock: Clock,
     private val events: ApplicationEventPublisher,
     private val codes: VerificationCodeIssuer,
+    private val sessions: RefreshTokenStore,
+    private val accounts: CurrentAccounts,
 ) {
+    /**
+     * Issues nothing, and publishes nothing, when the account read again under the lock may no
+     * longer have one: erased or suspended since the caller read it, or, for a verification,
+     * verified since. The caller answers as it always does (202 for every address).
+     */
     fun request(
-        user: User,
+        found: User,
         purpose: VerificationPurpose,
     ) {
         val now = clock.instant()
+        // The account's sessions lock first: retiring a code holds that row, and the insert then
+        // waits on the `users` row the deletion job holds while it waits to delete the row this
+        // holds (ADR-0066, amended 2026-11-14).
+        sessions.lockSessionsOf(found.id)
+        // Then the account again, under the lock: the caller read it before, and an erasure or a
+        // suspension that committed while this waited would otherwise get a token on its row and an
+        // email to the address it had (ADR-0058 decision 5: nothing is sent after an erasure). The
+        // re-read's address and name go in the email, never the earlier read's.
+        val user = accounts.reread(found)?.takeIf { it.mayBeSent(purpose) } ?: return
         // A new email retires the code in the last one (#135); its link stays live
         // (ADR-0018 decision 6, amended 2026-11-08). Under a per-person lock, so two
         // emails asked for at once cannot both hold a code.
@@ -76,4 +95,8 @@ internal class RequestVerification(
             ),
         )
     }
+
+    /** The callers' own conditions, asked again: an account that can sign in, and for a verification, an address not yet confirmed. */
+    private fun User.mayBeSent(purpose: VerificationPurpose): Boolean =
+        canAuthenticate && (purpose != VerificationPurpose.EMAIL_VERIFICATION || !isEmailVerified)
 }

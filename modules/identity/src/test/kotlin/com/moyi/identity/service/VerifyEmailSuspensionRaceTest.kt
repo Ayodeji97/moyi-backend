@@ -4,6 +4,7 @@ import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
 import com.moyi.identity.api.AccountSuspension
 import com.moyi.identity.api.SuspensionOutcome
+import com.moyi.identity.api.SuspensionResult
 import com.moyi.identity.domain.CodeHash
 import com.moyi.identity.domain.VerificationCode
 import com.moyi.identity.domain.VerificationCodeHasher
@@ -12,6 +13,7 @@ import com.moyi.identity.infra.Gate
 import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.security.HmacVerificationCodeHasher
 import com.moyi.identity.infra.security.TestBreachCorpus
+import com.moyi.identity.infra.sessionsLockWaitersOf
 import com.moyi.identity.web.LoginEndpointTest
 import com.moyi.identity.web.RecordingEmailSender
 import com.moyi.identity.web.SessionsEndpointTest
@@ -48,13 +50,17 @@ import javax.sql.DataSource
 /**
  * A verification that straddles a suspension (admin console A3, found while building Task 1).
  * The typed-code path reads the account, then checks the code, then marks the address
- * verified, all in one transaction that holds no lock on the user's row until it writes. A
- * suspension that commits in between must survive the verification: the address is recorded
- * as verified, and nothing else of the row is written back from the earlier read.
+ * verified, all in one transaction. A suspension must survive the verification: the address
+ * is recorded as verified, and nothing else of the row is written back from the earlier read.
+ *
+ * Since ADR-0066's amendment of 2026-11-14 the check takes the account's sessions lock before
+ * the code's row, so a suspension (which takes that lock first) can no longer commit in the
+ * middle: it waits for the verification and then suspends. The conditional `UPDATE` in
+ * `AccountStore.markEmailVerified` stays, as the second guard; this test now pins the first.
  *
  * The code hasher is wrapped with a [Gate]: the verification stops there, after its read of
- * the account and before its write. Synchronised on that latch, with deadlines that fail the
- * test; never a sleep.
+ * the account and before its write. Synchronised on that latch and on Postgres showing the
+ * suspension waiting for the lock, with deadlines that fail the test; never a sleep.
  */
 @SpringBootTest(classes = [IdentityTestApplication::class])
 @AutoConfigureMockMvc
@@ -79,7 +85,7 @@ internal class VerifyEmailSuspensionRaceTest(
     @BeforeEach
     fun start() {
         clock.set(Instant.parse("2026-11-13T10:00:00.123456Z"))
-        pool = Executors.newSingleThreadExecutor()
+        pool = Executors.newFixedThreadPool(2)
     }
 
     @AfterEach
@@ -100,14 +106,19 @@ internal class VerifyEmailSuspensionRaceTest(
         val stopped = codeHasher.gate.arm()
 
         val verified = pool.submit<MockHttpServletResponse> { verifyByCode(email, code) }
-        // The verification has read the account, PENDING_VERIFICATION, and holds its code's row.
+        // The verification has read the account, PENDING_VERIFICATION, and holds the sessions lock
+        // and its code's row.
         stopped.awaitReached()
-        transactions.execute { suspension.suspend(ada) }.outcome shouldBe SuspensionOutcome.SUSPENDED
-        val bump = tokensInvalidBefore(ada)
-        bump shouldNotBe null
+        val suspended = pool.submit<SuspensionResult> { transactions.execute { suspension.suspend(ada) } }
+        // The suspension waits for the lock rather than committing in the middle of the verification.
+        await().atMost(WAIT).until { jdbc.sessionsLockWaitersOf(ada) > 0 }
+        status(ada) shouldBe "PENDING_VERIFICATION"
         stopped.release()
 
         verified.get(WAIT.seconds, TimeUnit.SECONDS).status shouldBe 200
+        suspended.get(WAIT.seconds, TimeUnit.SECONDS).outcome shouldBe SuspensionOutcome.SUSPENDED
+        val bump = tokensInvalidBefore(ada)
+        bump shouldNotBe null
         status(ada) shouldBe "SUSPENDED"
         tokensInvalidBefore(ada) shouldBe bump
         openSpans(ada) shouldBe 1

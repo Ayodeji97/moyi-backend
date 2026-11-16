@@ -135,12 +135,15 @@ internal class ApplyPasswordReset(
         newPasswordHash: PasswordHash,
         now: Instant,
     ): Boolean {
+        // The sessions lock first, before the token row and anything of the account: the order
+        // sign-in, logout-all, suspension and the deletion job take (spec A3 §8, ADR-0066 amended
+        // 2026-11-14). Taken after the consume, the token row was held while this waited for the
+        // lock, and the deletion job, holding the lock, waited for the row to delete it: a deadlock.
+        // So what is read below is read after any of them that held it has committed, and a job
+        // that erased the account first leaves no row to consume.
+        refreshTokens.lockSessionsOf(token.userId)
         // The single race winner. A second presentation finds the row consumed.
         if (!tokens.consume(token.id, now)) return false
-        // The sessions lock before anything of the account is read or written: the order sign-in,
-        // logout-all and suspension take (spec A3 §8), so what is read below is read after any of
-        // them that held it has committed.
-        refreshTokens.lockSessionsOf(token.userId)
         val user = accounts.findById(token.userId) ?: throw PasswordResetTokenInvalidException()
         // A link or code issued before a suspension (admin console A3): re-read under the lock, so
         // a suspension that committed after the link was sent is seen here. The refusal is the
