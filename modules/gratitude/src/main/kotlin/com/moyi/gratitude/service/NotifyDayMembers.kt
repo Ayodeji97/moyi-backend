@@ -165,6 +165,7 @@ internal class NotifyDayMembers(
                 staleAfter = staleAfter,
                 recipient = member.recipient,
                 bondDate = bondDate,
+                nudge = null,
             ),
         )
     }

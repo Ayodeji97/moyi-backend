@@ -18,6 +18,7 @@ import com.moyi.notification.infra.database.NotificationStore
 import com.moyi.notification.infra.database.PushBudgetLedger
 import com.moyi.notification.infra.database.PushTokenStore
 import com.moyi.notification.infra.database.StoredPush
+import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
@@ -72,6 +73,7 @@ internal class SendPush(
     private val tokens: PushTokenStore,
     private val sender: PushSender,
     private val clock: Clock,
+    private val meters: MeterRegistry,
 ) : EventConsumer {
     /** The key the delivery state is kept under: never to be changed. */
     override val id = "notification.push"
@@ -85,9 +87,24 @@ internal class SendPush(
         val push = ledger.lock(notificationId)?.takeIf { it.status == NotificationStatus.REQUESTED } ?: return
         val now = clock.instant()
         when (val decision = decide(push, now)) {
-            is Decision.Settle -> ledger.settle(push.id, decision.status, now)
-            is Decision.Hold -> ledger.hold(push.id, decision.until)
-            is Decision.Send -> send(push, decision.slot)
+            is Decision.Settle -> {
+                ledger.settle(push.id, decision.status, now)
+                settled(push, decision.status.name.lowercase())
+            }
+
+            is Decision.Hold -> {
+                ledger.hold(push.id, decision.until)
+                settled(push, HELD)
+            }
+
+            is Decision.Drop -> {
+                ledger.settle(push.id, NotificationStatus.DROPPED_BUDGET, now)
+                settled(push, if (decision.slot == BudgetDecision.DROPPED_LEAVING_ROOM) DROPPED_LEAVING_ROOM else DROPPED_BUDGET)
+            }
+
+            is Decision.Send -> {
+                send(push, decision.slot)
+            }
         }
     }
 
@@ -117,8 +134,8 @@ internal class SendPush(
 
             else -> {
                 when (val slot = budgetSlot(push)) {
-                    BudgetDecision.DROPPED -> Decision.Settle(NotificationStatus.DROPPED_BUDGET)
-                    else -> Decision.Send(slot)
+                    BudgetDecision.DROPPED, BudgetDecision.DROPPED_LEAVING_ROOM -> Decision.Drop(slot)
+                    BudgetDecision.RESERVED, BudgetDecision.REMAINDER -> Decision.Send(slot)
                 }
             }
         }
@@ -130,7 +147,7 @@ internal class SendPush(
     ) {
         val answers =
             tokens.heldBy(push.userId).map { held ->
-                val answer = sender.send(PushMessage(held.token, push.category, push.bondId, push.staleAfter, push.bondDate))
+                val answer = sender.send(PushMessage(held.token, push.category, push.bondId, push.staleAfter, push.bondDate, push.nudge))
                 if (answer is PushDelivery.TokenInvalid) tokens.deleteIfStillHeld(held)
                 answer
             }
@@ -144,6 +161,7 @@ internal class SendPush(
                     providerMessageId = accepted.providerMessageId,
                     reserved = slot == BudgetDecision.RESERVED,
                 )
+                settled(push, SENT)
             }
 
             // Rolls back this delivery, the forgotten tokens with it: the retry will find and forget them again.
@@ -153,8 +171,22 @@ internal class SendPush(
 
             is Settlement.Failed -> {
                 ledger.settle(push.id, NotificationStatus.FAILED_PERMANENT, clock.instant(), errorClass = settlement.errorClass)
+                settled(push, FAILED)
             }
         }
+    }
+
+    /**
+     * Counts how a push was settled, by what is asked of it and never by who: category, which
+     * nudge of its day, and the outcome. A retry throws and counts nothing.
+     */
+    private fun settled(
+        push: StoredPush,
+        outcome: String,
+    ) {
+        meters
+            .counter(SETTLED, "category", push.category.name, "nudge", push.nudge?.toString() ?: NO_NUDGE, "outcome", outcome)
+            .increment()
     }
 
     /**
@@ -189,14 +221,44 @@ internal class SendPush(
             reservedSpentToday = inBond.reservedSpent,
             sentAcrossBonds = budget.sentSince(push.userId, now.minus(PushBudget.ACROSS_BONDS_WINDOW)),
             revealClass = push.category.isRevealClass,
+            leaveFreeAcrossBonds = push.leaveFreeAcrossBonds,
         )
+    }
+
+    internal companion object {
+        /**
+         * `notification.push.settled{category, nudge, outcome}`: `nudge` is `none` or 1 to 3.
+         *
+         * Counts dispatch decisions, not pushes. A held push contributes `held` once per hold, and
+         * exactly one final outcome later, when [HeldPushes] hands it back and it is decided again,
+         * unless it is cancelled while held (written or superseded): then it has none, and
+         * `notification.push.cancelled` counts it. So the final outcomes (every outcome but `held`)
+         * sum to the pushes that reached a final outcome, and `held` alone is quiet-hours volume.
+         */
+        const val SETTLED = "notification.push.settled"
+
+        /** The `nudge` tag of a push that is not a nudge, here and on `notification.push.cancelled`. */
+        const val NO_NUDGE = "none"
+        const val SENT = "sent"
+        const val HELD = "held"
+        const val DROPPED_BUDGET = "dropped_budget"
+        const val DROPPED_LEAVING_ROOM = "dropped_leaving_room"
+        const val FAILED = "failed"
     }
 
     /** What the consumer does with a push before any phone is tried. */
     private sealed interface Decision {
-        /** Into a final status, unsent: expired, suppressed or over budget. */
+        /** Into a final status, unsent: expired or suppressed. */
         data class Settle(
             val status: NotificationStatus,
+        ) : Decision
+
+        /**
+         * `DROPPED_BUDGET`, unsent. A soft nudge's drop is the budget too (ADR-0068 decision 5), so one
+         * status; [slot] keeps which of FR-082's lines dropped it, for counting the two apart.
+         */
+        data class Drop(
+            val slot: BudgetDecision,
         ) : Decision
 
         /** `HELD` until [until], when quiet hours end. */

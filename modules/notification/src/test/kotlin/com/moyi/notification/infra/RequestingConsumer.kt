@@ -49,6 +49,7 @@ internal class RequestingConsumer(
                 staleAfter = event.occurredAt.plus(Duration.ofDays(1)),
                 recipient = PushRecipient(ZoneId.of("UTC"), null, NotificationPreferences.DEFAULTS),
                 bondDate = null,
+                nudge = null,
             ),
         )
     }

@@ -54,8 +54,10 @@ import java.util.Base64
  * **What a phone is sent.** Localisation keys chosen by category for both
  * platforms (`title_loc_key`/`body_loc_key` on Android, `title-loc-key`/
  * `loc-key` on iOS), the Android channel of the category ([channelId]),
- * `data: {bondId, kind, date}` (`date` the Bond-day's ISO date, only for a
- * push about a day: issue #146), and a collapse key of category
+ * `data: {bondId, kind, date, nudge}` (`date` the Bond-day's ISO date, only for a
+ * push about a day: issue #146; `nudge` the reminder's ordinal, only on one that has it, ADR-0068), for a
+ * `REMINDER` an Android `tag` of Bond and Bond-day ([androidTag], so each nudge replaces the last in the
+ * shade), and a collapse key of category
  * and Bond, so that a push held back and then sent replaces its predecessor
  * rather than stacking (spec N1, Q6). No text authored here, no name.
  *
@@ -326,6 +328,17 @@ internal class FcmPushSender(
         fun collapseKey(message: PushMessage): String = "${message.category.name}:${message.bondId}"
 
         /**
+         * What a reminder replaces on Android: the same Bond and Bond-day, so each nudge takes the
+         * last one's place in the shade. No member is named (the phone is the member's), and the
+         * Bond-day keeps tomorrow's first nudge from replacing yesterday's. Every other category,
+         * and a reminder about no day, has none (ADR-0068 decision 8).
+         */
+        fun androidTag(message: PushMessage): String? =
+            message.bondDate
+                ?.takeIf { message.category == PushCategory.REMINDER }
+                ?.let { "REMINDER:${message.bondId}:$it" }
+
+        /**
          * FCM v1's `messages:send` body. Maps, because the wire names mix snake case and hyphens.
          *
          * **The deadline travels with it.** Android's `ttl` is the push's remaining lifetime at
@@ -354,7 +367,7 @@ internal class FcmPushSender(
                                         "title_loc_key" to title,
                                         "body_loc_key" to body,
                                         "channel_id" to channelId(message.category),
-                                    ),
+                                    ) + androidTag(message)?.let { mapOf("tag" to it) }.orEmpty(),
                             ),
                         "apns" to
                             mapOf(
@@ -380,6 +393,7 @@ internal class FcmPushSender(
                 put("bondId", message.bondId.toString())
                 put("kind", message.category.name)
                 message.bondDate?.let { put("date", it.toString()) }
+                message.nudge?.takeIf { message.category == PushCategory.REMINDER }?.let { put("nudge", it.toString()) }
             }
 
         private fun bytes(content: ByteArray) = StreamingHttpOutputMessage.Body { it.write(content) }

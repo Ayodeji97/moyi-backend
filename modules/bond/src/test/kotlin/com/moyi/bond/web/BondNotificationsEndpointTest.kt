@@ -149,7 +149,7 @@ internal class BondNotificationsEndpointTest(
         )
         put(ada, bondId, """{"categories":{"milestone":false}}""").status shouldBe 200
 
-        val due = roster.remindersDueBetween(tomorrowAt("15:10"), tomorrowAt("15:15"))
+        val due = roster.remindersDueBetween(tomorrowAt("15:10"), tomorrowAt("15:15")).map { it.reminder }
 
         due.map { it.userId } shouldBe listOf(ada)
         val reminder = due.single()
@@ -163,7 +163,7 @@ internal class BondNotificationsEndpointTest(
         reminder.recipient.preferences shouldBe NotificationPreferences(milestone = false)
 
         // Bea's 20:00 in Lagos is 19:00Z.
-        roster.remindersDueBetween(tomorrowAt("18:55"), tomorrowAt("19:00")).map { it.userId } shouldBe
+        roster.remindersDueBetween(tomorrowAt("18:55"), tomorrowAt("19:00")).map { it.reminder.userId } shouldBe
             listOf(bea)
     }
 
@@ -188,7 +188,7 @@ internal class BondNotificationsEndpointTest(
             UUID.fromString(late),
         )
 
-        val due = roster.remindersDueBetween(windowEnd.minusSeconds(300), windowEnd)
+        val due = roster.remindersDueBetween(windowEnd.minusSeconds(300), windowEnd).map { it.reminder }
 
         due.map { it.userId } shouldContainExactlyInAnyOrder listOf(ada, bea)
     }
@@ -202,7 +202,7 @@ internal class BondNotificationsEndpointTest(
             .andReturn()
             .response.status shouldBe 204
 
-        val due = roster.remindersDueBetween(tomorrowAt("18:55"), tomorrowAt("19:00"))
+        val due = roster.remindersDueBetween(tomorrowAt("18:55"), tomorrowAt("19:00")).map { it.reminder }
 
         due.map { it.userId } shouldContainExactlyInAnyOrder listOf(cal, dee)
         due.map { it.bondId.toString() }.toSet() shouldBe setOf(open)

@@ -26,8 +26,9 @@ internal enum class NotificationStatus {
 
     /**
      * Called off before it went, because what it was about no longer holds:
-     * a reminder to write, for a member who has written since (ADR-0045).
-     * Not `SUPPRESSED`, which says the member turned the category off.
+     * a reminder to write, for a member who has written since (ADR-0045),
+     * or superseded by a newer nudge of the same Bond-day (ADR-0068
+     * decision 7). Not `SUPPRESSED`, which says the member turned the category off.
      */
     CANCELLED,
 

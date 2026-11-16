@@ -51,10 +51,13 @@ class PausedSendWindowTest(
             "paused-$admin@example.com",
         )
         aCandidate()
+        // Every case runs on [DAY], after the bonds made here began: a day before them would ask
+        // nobody, and a case could pass without the roster ever being asked.
+        start.isBefore(at("00:00:00")) shouldBe true
     }
 
     /** One member in a bond of their own: a reminder and on-this-day candidate for the real roster. */
-    private fun aCandidate() {
+    private fun aCandidate(): UUID {
         val email = "paused-${UUID.randomUUID().toString().take(8)}@example.com"
         val address = "192.0.2.${Random.nextInt(1, 255)}"
         mockMvc
@@ -90,6 +93,7 @@ class PausedSendWindowTest(
                 "WHERE user_id = (SELECT id FROM users WHERE email = ?::citext)",
             email,
         ) shouldBe 1
+        return jdbc.queryForObject("SELECT id FROM users WHERE email = ?::citext", UUID::class.java, email)!!
     }
 
     @AfterEach
@@ -100,33 +104,116 @@ class PausedSendWindowTest(
 
     @Test
     fun `DAILY_REMINDERS switched on after the last boundary is an empty run that finishes, not a failed one`() {
-        switchedOn("DAILY_REMINDERS", Instant.parse("2026-11-14T10:05:10Z"))
-        clock.set(Instant.parse("2026-11-14T10:05:30Z"))
+        val member = aCandidate()
+        // 08:05 UTC: inside the run's raw look-back, but before the switch.
+        remindedAt(member, "08:05")
+        switchedOn("DAILY_REMINDERS", at("08:05:10"))
+        clock.set(at("08:05:30"))
 
         run("com.moyi.scheduling.service.ReminderJob", "remindOnce")
 
-        lastFinish("daily-reminders") shouldBe Instant.parse("2026-11-14T10:05:30Z")
+        lastFinish("daily-reminders") shouldBe at("08:05:30")
+        keysAskedOf(member) shouldBe emptyList()
     }
 
     @Test
     fun `ON_THIS_DAY_PUSHES switched on after the last boundary is an empty run that finishes, not a failed one`() {
-        switchedOn("ON_THIS_DAY_PUSHES", Instant.parse("2026-11-14T10:15:20Z"))
-        clock.set(Instant.parse("2026-11-14T10:15:45Z"))
+        val member = aCandidate()
+        switchedOn("ON_THIS_DAY_PUSHES", at("08:15:20"))
+        clock.set(at("08:15:45"))
 
         run("com.moyi.scheduling.service.OnThisDayJob", "pushOnce")
 
-        lastFinish("on-this-day-pushes") shouldBe Instant.parse("2026-11-14T10:15:45Z")
+        lastFinish("on-this-day-pushes") shouldBe at("08:15:45")
+        keysAskedOf(member) shouldBe emptyList()
     }
 
     @Test
     fun `switched on inside the look-back, the real roster is asked about the bounded window and the run finishes`() {
-        switchedOn("DAILY_REMINDERS", Instant.parse("2026-11-14T10:02:30Z"))
-        clock.set(Instant.parse("2026-11-14T10:05:30Z"))
+        // Both inside the run's raw look-back, (07:35, 08:05]; only the later one after the switch.
+        val before = aCandidate()
+        remindedAt(before, "08:00")
+        val after = aCandidate()
+        remindedAt(after, "08:05")
+        switchedOn("DAILY_REMINDERS", at("08:02:30"))
+        clock.set(at("08:05:30"))
 
         run("com.moyi.scheduling.service.ReminderJob", "remindOnce")
 
-        lastFinish("daily-reminders") shouldBe Instant.parse("2026-11-14T10:05:30Z")
+        lastFinish("daily-reminders") shouldBe at("08:05:30")
+        keysAskedOf(before) shouldBe emptyList()
+        keysAskedOf(after).map { it.substringAfterLast(':') } shouldBe listOf(DAY)
     }
+
+    @Test
+    fun `DAILY_REMINDERS switched on between nudge 1 and nudge 2 asks for nudge 2 only`() {
+        val member = aCandidate()
+        // 08:00 UTC, the day's first nudge; nudge 2 falls three real hours on, at 11:00.
+        remindedAt(member, "08:00")
+        switchedOn("DAILY_REMINDERS", at("09:00:00"))
+
+        clock.set(at("11:00:30"))
+        run("com.moyi.scheduling.service.ReminderJob", "remindOnce")
+
+        keysAskedOf(member).map { it.substringAfterLast(':') } shouldBe listOf("2")
+    }
+
+    @Test
+    fun `a nudge that fell before the flag was switched on is not asked for, though inside the look-back`() {
+        val member = aCandidate()
+        remindedAt(member, "08:00")
+        // Nudge 2 fell at 11:00, inside the raw look-back of the 11:10 run, but before the switch.
+        switchedOn("DAILY_REMINDERS", at("11:05:00"))
+
+        clock.set(at("11:10:30"))
+        run("com.moyi.scheduling.service.ReminderJob", "remindOnce")
+
+        keysAskedOf(member) shouldBe emptyList()
+    }
+
+    @Test
+    fun `DAILY_REMINDERS off asks for no nudge at the reminder time`() {
+        val member = aCandidate()
+        remindedAt(member, "08:00")
+        jdbc.update(
+            "INSERT INTO feature_flags (key, enabled, updated_at, updated_by) VALUES (?, false, ?, ?)",
+            "DAILY_REMINDERS",
+            Timestamp.from(start),
+            admin,
+        )
+
+        clock.set(at("08:00:30"))
+        run("com.moyi.scheduling.service.ReminderJob", "remindOnce")
+
+        keysAskedOf(member) shouldBe emptyList()
+    }
+
+    /**
+     * [user]'s reminder at [time] UTC, in the bond of their own. Reykjavik keeps UTC all year and is a
+     * region zone: `UTC` itself is not one, and a member row holding it breaks every later read of the
+     * bond in this shared database (`RegionZone`), as it broke `SecretsNeverLogged*Test`.
+     */
+    private fun remindedAt(
+        user: UUID,
+        time: String,
+    ) {
+        jdbc.update(
+            "UPDATE bond_members SET reminder_time_local = ?::time, reminder_timezone = 'Atlantic/Reykjavik' WHERE user_id = ?",
+            time,
+            user,
+        ) shouldBe 1
+    }
+
+    /** A fixed instant on [DAY], long after the member's bond began (the roster asks nothing before it). */
+    private fun at(time: String): Instant = Instant.parse("${DAY}T${time}Z")
+
+    private fun keysAskedOf(user: UUID): List<String> =
+        jdbc
+            .queryForList(
+                "SELECT dedupe_key FROM notifications WHERE user_id = ? ORDER BY dedupe_key",
+                String::class.java,
+                user,
+            ).filterNotNull()
 
     private fun switchedOn(
         key: String,
@@ -160,5 +247,6 @@ class PausedSendWindowTest(
 
     private companion object {
         const val PASSWORD = "correct horse battery"
+        const val DAY = "2030-01-15"
     }
 }

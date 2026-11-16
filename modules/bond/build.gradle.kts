@@ -65,4 +65,7 @@ dependencies {
     // stops the schema before V13, inserts bonds, and then migrates on — the
     // only way to run V13's backfill against rows that exist.
     testImplementation("org.flywaydb:flyway-core")
+    // A registry for the test context: `notification`'s push request counts what it settles
+    // (#200), and this context has no actuator to supply one.
+    testImplementation("io.micrometer:micrometer-core")
 }

@@ -46,14 +46,14 @@ internal class ReminderJob(
     private val flags: FeatureFlags,
     private val runs: JobRuns,
     private val clock: Clock,
-    meters: MeterRegistry,
+    private val meters: MeterRegistry,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val lastSuccess = AtomicLong(0)
     private val requested: Counter =
         Counter
             .builder(REQUESTED)
-            .description("Daily reminders asked for: members whose reminder fell and who had not written")
+            .description("Reminder nudges asked for, every index")
             .register(meters)
 
     init {
@@ -83,10 +83,11 @@ internal class ReminderJob(
         if (after == null) {
             if (flag == FlagReading.Off) log.debug("reminders: switched off")
             finished(now)
-            return ReminderRun(due = 0, requested = 0, alreadyWritten = 0, failed = 0)
+            return ReminderRun(due = 0, requested = 0, alreadyWritten = 0, failed = 0, byNudge = emptyMap())
         }
         val run = reminders.remindDue(after, upTo)
         requested.increment(run.requested.toDouble())
+        countByNudge(run)
         finished(now)
         if (run.failed > 0) {
             log.warn("reminders: due {}, asked for {}, had written {}, FAILED {}", run.due, run.requested, run.alreadyWritten, run.failed)
@@ -95,6 +96,30 @@ internal class ReminderJob(
             log.debug("reminders: due {}, asked for {}, had written {}", run.due, run.requested, run.alreadyWritten)
         }
         return run
+    }
+
+    /** Per nudge index and outcome; the index is one of at most three, so the tag set is small. */
+    private fun countByNudge(run: ReminderRun) {
+        run.byNudge.forEach { (index, counts) ->
+            count(index, "requested", counts.requested)
+            count(index, "written", counts.written)
+            count(index, "already_asked", counts.alreadyAsked)
+            count(index, "failed", counts.failed)
+        }
+    }
+
+    private fun count(
+        index: Int,
+        outcome: String,
+        by: Int,
+    ) {
+        Counter
+            .builder(NUDGES)
+            .description("Reminder nudges that fell due, by nudge index and what became of them")
+            .tag("nudge", index.toString())
+            .tag("outcome", outcome)
+            .register(meters)
+            .increment(by.toDouble())
     }
 
     private fun finished(now: Instant) {
@@ -121,6 +146,7 @@ internal class ReminderJob(
         /** `gratitude_reminder_job_last_success_timestamp` once exported (doc 11). */
         const val LAST_SUCCESS = "gratitude.reminder.job.last.success.timestamp"
         const val REQUESTED = "gratitude.reminders.requested"
+        const val NUDGES = "gratitude.reminders.nudges"
 
         /** [now] rounded down to a multiple of [WINDOW] since the epoch. */
         fun windowEndingBefore(now: Instant): Instant =

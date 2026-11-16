@@ -452,7 +452,7 @@ class SuspensionTest(
             }
         }
         val window = at.minus(Duration.ofMinutes(1)) to at
-        roster.remindersDueBetween(window.first, window.second).map { it.userId } shouldContainExactlyInAnyOrder
+        roster.remindersDueBetween(window.first, window.second).map { it.reminder.userId } shouldContainExactlyInAnyOrder
             bonds.flatMap { (_, members) -> members.map { it.id } }
         return window
     }

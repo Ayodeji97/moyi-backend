@@ -285,7 +285,7 @@ counted day". Each is a `STREAK_RECALCULATED` row with the figures before and af
 
 | Flag | Off pauses | While off |
 |---|---|---|
-| `DAILY_REMINDERS` | the daily reminder push | a reminder that falls due is **never sent**, not even once it is on again |
+| `DAILY_REMINDERS` | the daily reminder and its nudges (ADR-0068) | a reminder or nudge that falls due is **never sent**, not even once it is on again |
 | `ON_THIS_DAY_PUSHES` | the on-this-day push | a push that falls due is **never sent**, not even once it is on again |
 | `AI_EMBEDDINGS` | every call to the embedding provider | search is keywords only; entries wait and are embedded once it is on; nothing stored is erased |
 

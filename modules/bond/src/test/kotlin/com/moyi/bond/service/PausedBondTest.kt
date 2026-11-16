@@ -185,18 +185,39 @@ internal class PausedBondTest(
                 .plus(Duration.ofDays(1))
                 .plus(Duration.ofHours(19))
         val after = windowEnd.minusSeconds(300)
-        roster.remindersDueBetween(after, windowEnd).map { it.userId } shouldContainExactlyInAnyOrder users.ids(paused, cal, dee)
+        roster.remindersDueBetween(after, windowEnd).map { it.reminder.userId } shouldContainExactlyInAnyOrder users.ids(paused, cal, dee)
 
         spans.suspend(bea, NOW)
 
         // Ada and Bea's bond is paused: neither is reminded. Cal and Dee still are.
-        roster.remindersDueBetween(after, windowEnd).map { it.userId } shouldContainExactlyInAnyOrder listOf(cal, dee)
+        roster.remindersDueBetween(after, windowEnd).map { it.reminder.userId } shouldContainExactlyInAnyOrder listOf(cal, dee)
         // The on-this-day push is not the reminder: both of the paused bond's members still have it.
         audiences.onThisDayDueBetween(LocalTime.of(20, 0), after, windowEnd).map { it.userId } shouldContainExactlyInAnyOrder
             users.ids(paused, cal, dee)
 
         spans.lift(bea, NOW.plusSeconds(60))
         roster.remindersDueBetween(after, windowEnd).size shouldBe 4
+    }
+
+    @Test
+    fun `a paused bond's member gets no nudge 2 either`() {
+        val (paused, _, bea) = pairedBond("Ada" to "Bea")
+        val (_, cal, dee) = pairedBond("Cal" to "Dee")
+        // The default reminder, 20:00 in Lagos, is 19:00Z; its nudge 2 is three hours later, 22:00Z.
+        val nudgeTwo =
+            Instant
+                .now()
+                .truncatedTo(ChronoUnit.DAYS)
+                .plus(Duration.ofDays(1))
+                .plus(Duration.ofHours(22))
+        val after = nudgeTwo.minusSeconds(300)
+        roster.remindersDueBetween(after, nudgeTwo).map { it.index }.toSet() shouldBe setOf(2)
+        roster.remindersDueBetween(after, nudgeTwo).map { it.reminder.userId } shouldContainExactlyInAnyOrder
+            users.ids(paused, cal, dee)
+
+        spans.suspend(bea, NOW)
+
+        roster.remindersDueBetween(after, nudgeTwo).map { it.reminder.userId } shouldContainExactlyInAnyOrder listOf(cal, dee)
     }
 
     @Test

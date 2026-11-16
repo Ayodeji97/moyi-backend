@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# Issue #200 (reminder nudges, ADR-0068) adds a section after the daily reminder's: a fresh bond moved
+# back four hours by SQL into a region anchor zone where it is about noon, her reminder three hours
+# before the last boundary, so nudge 2 falls on it and nudge 1 outside the look-back; one row keyed
+# …:2 with nudge 2 and leave-free 1, HELD by her quiet hours, none without the suffix, no second row
+# six seconds on, her entry CANCELLING it and asking for no :3, and neither her token nor her member id in a
+# log line. Last run on 2026-11-16, on feat/reminder-nudges, from a jar of c4be194e's tree, on a
+# fresh database that applied 62 migrations to V68, against its own compose project (moyi-nudge:
+# Postgres 55780, Valkey 56789, MinIO 57780), the jar booted by hand (local profile, the five crons
+# at */5, ports 18780/18781) and --attach: 1941 passed, 0 failed, 0 skipped. Two runs before it
+# found two faults in the section's own probes: an Etc/GMT anchor written by SQL (the bond's row is
+# read back through RegionZone, which refuses it: every write a 500), and a poll that read the row
+# REQUESTED before the consumer held it (1940 passed, 1 failed).
+#
 # The streak section moved a bond's timeline back 21 days but left today's row, opened at the
 # pairing instant, where it was: once that day ended, the close job refused it on every run
 # (BondDay.extendedTo, "a bond-day's start never moves") and the bond's streak stopped there. Today's
@@ -3154,6 +3167,72 @@ done
 db_is "reminder: released when her hours end, and taken by the logging provider, out of the remainder" "$NB_SENT" "SENT|not-sent:log|false"
 if grep -q "$NB_TOKEN" "$MOYI_LOG"; then fail "reminder: the token is in no log line" "found in $MOYI_LOG"; else pass "reminder: the token is in no log line"; fi
 if grep -qE '"quietHours|quiet_hours' "$MOYI_LOG"; then fail "reminder: her quiet hours are in no log line" "found in $MOYI_LOG"; else pass "reminder: her quiet hours are in no log line"; fi
+
+# Reminder nudges (issue #200, ADR-0068): nudge n falls three real hours after nudge n - 1 while
+# the member has not written that Bond-day. The job cannot wait three hours, so a fresh bond is made
+# to have begun four hours ago, by SQL on its first anchor interval and its row (as the late-entries
+# section moves a bond back), in a region anchor zone where it is between 10:00 and 14:59, so nudges
+# 1 and 2 lie in one Bond-day. Not an Etc/GMT offset: a bond's row is read back through RegionZone,
+# which refuses one, and every write to the bond is then a 500 (found by this section's first run). Her reminder is the
+# last five-minute boundary minus three hours, in Africa/Abidjan (UTC, no DST; a reminder zone must
+# be a region zone): nudge 2 falls on that boundary, inside the job's look-back, and nudge 1 three
+# hours before it, outside. Her quiet hours hold nudge 2, so her entry finds it unsent.
+flush_buckets
+verified_account "nudged" "203.0.113.196"; NN_A="$ACCOUNT_ACCESS"
+verified_account "nudge-partner" "203.0.113.197"; NN_B="$ACCOUNT_ACCESS"
+expect "nudges: a bond" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $NN_A" -d "$(bond_body "Us")"
+NN_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+NN_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "nudges: …joined, so ACTIVE" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$NN_CODE/accept" -H "Authorization: Bearer $NN_B"
+NN_ZONE="$(python3 -c '
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, available_timezones
+now = datetime.now(timezone.utc)
+for z in sorted(available_timezones()):
+    if "/" not in z or z.startswith(("Etc/", "SystemV/", "US/", "posix/", "right/")):
+        continue
+    if 10 <= now.astimezone(ZoneInfo(z)).hour <= 14:
+        print(z)
+        break' 2>/dev/null || true)"
+NN_MADE="$(sql "WITH b AS (UPDATE bonds SET created_at = created_at - interval '4 hours', anchor_timezone = '$NN_ZONE' WHERE id = '$NN_BOND' RETURNING 1),
+  a AS (UPDATE bond_anchor_intervals SET zone = '$NN_ZONE', effective_from = effective_from - interval '4 hours',
+          first_label = ((effective_from - interval '4 hours') AT TIME ZONE '$NN_ZONE')::date WHERE bond_id = '$NN_BOND' RETURNING 1)
+  SELECT (SELECT count(*) FROM b) || '/' || (SELECT count(*) FROM a)")"
+db_is "nudges: the bond begins four hours ago, anchored on $NN_ZONE" "$NN_MADE" "1/1"
+db_is "nudges: …where it is between 10:00 and 14:59" "$(sql "SELECT extract(hour FROM now() AT TIME ZONE '$NN_ZONE') BETWEEN 10 AND 14")" "t"
+NN_QUIET_FROM="$(python3 -c 'import time; print(time.strftime("%H:%M", time.gmtime(time.time()-3600)))')"
+NN_QUIET_TO="$(python3 -c 'import time; print(time.strftime("%H:%M", time.gmtime(time.time()+3600)))')"
+NN_TOKEN="smoke-push-token-nudge-$RANDOM$RANDOM"
+# He writes first, so only she is owed a nudge.
+expect "nudges: he writes today" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$NN_BOND/entries" -H "Authorization: Bearer $NN_B" -H "Idempotency-Key: $(new_key)" -d '{"text":"thank you for the second nudge I did not need"}'
+expect "nudges: she registers her phone" 204 "" -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $NN_A" -d "{\"token\":\"$NN_TOKEN\"}"
+# Computed immediately before the PUT, so a five-minute boundary cannot fall between the two.
+NN_AT="$(python3 -c 'import time; t=int(time.time()); t-=t%300; t-=3*3600; print(time.strftime("%H:%M", time.gmtime(t)))')"
+expect "nudges: her reminder three hours before the last boundary, quiet hours around now" 200 "\"reminderTimeLocal\":\"$NN_AT\"" -- -X PUT "$API/bonds/$NN_BOND/members/me/settings" -H "Authorization: Bearer $NN_A" -d "{\"reminderTimeLocal\":\"$NN_AT\",\"reminderTimezone\":\"Africa/Abidjan\",\"quietHoursStart\":\"$NN_QUIET_FROM\",\"quietHoursEnd\":\"$NN_QUIET_TO\"}"
+# Her REMINDER rows in this bond, as "<dedupe key's suffix>|<nudge>|<leave-free>|<status>", one per line.
+nn_rows() { sql "SELECT coalesce(string_agg(CASE WHEN n.dedupe_key ~ ':[23]\$' THEN right(n.dedupe_key, 1) ELSE '1' END || '|' || coalesce(n.nudge::text, '-') || '|' || n.leave_free_across_bonds || '|' || n.status, ',' ORDER BY n.dedupe_key), '') FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$NN_BOND' AND n.category = 'REMINDER' AND m.role = 'OWNER'"; }
+NN_ROWS=""
+# Up to forty seconds, as above: the job's ShedLock holds for at least thirty. Until it is HELD, not
+# merely there: the row is written REQUESTED and held by the consumer a moment later (the first run
+# of this section read it in between).
+for _ in $(seq 1 80); do
+  NN_ROWS="$(nn_rows)"
+  [[ "$NN_ROWS" == *HELD* ]] || [ "$NN_ROWS" = "psql-unavailable" ] && break
+  sleep 0.5
+done
+db_is "nudges: one row, nudge 2, leaving one slot free across bonds, held by her quiet hours" "$NN_ROWS" "2|2|1|HELD"
+db_is "nudges: …keyed reminder:{member}:{bond-day}:2, the day in the anchor zone" "$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$NN_BOND' AND category = 'REMINDER' AND dedupe_key LIKE 'reminder:%:' || to_char(now() AT TIME ZONE '$NN_ZONE', 'YYYY-MM-DD') || ':2'")" "1"
+db_is "nudges: …and none for her without the :2 (nudge 1 fell before the look-back)" "$(sql "SELECT count(*) FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$NN_BOND' AND n.category = 'REMINDER' AND m.role = 'OWNER' AND n.dedupe_key NOT LIKE '%:2'")" "0"
+db_is "nudges: he wrote, so none was asked for him" "$(sql "SELECT count(*) FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$NN_BOND' AND n.category = 'REMINDER' AND m.role = 'MEMBER'")" "0"
+NN_MEMBER="$(sql "SELECT split_part(dedupe_key, ':', 2) FROM notifications WHERE bond_id = '$NN_BOND' AND category = 'REMINDER' AND dedupe_key LIKE '%:2'")"
+sleep 6
+db_is "nudges: six seconds on, still her one row (no second row appeared)" "$(nn_rows)" "2|2|1|HELD"
+expect "nudges: she writes" 201 '"status":' -- -X POST "$API/bonds/$NN_BOND/entries" -H "Authorization: Bearer $NN_A" -H "Idempotency-Key: $(new_key)" -d '{"text":"thank you for nudging me, once"}'
+db_is "nudges: her entry called nudge 2 off, CANCELLED, and asked for no nudge 3" "$(nn_rows)" "2|2|1|CANCELLED"
+db_is "nudges: …no :3 row in the bond" "$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$NN_BOND' AND dedupe_key LIKE '%:3'")" "0"
+if grep -q "$NN_TOKEN" "$MOYI_LOG"; then fail "nudges: her token is in no log line" "found in $MOYI_LOG"; else pass "nudges: her token is in no log line"; fi
+if [ -z "$NN_MEMBER" ] || [[ "$NN_MEMBER" == psql-* ]]; then skip "nudges: her member id is in no log line (no id read)"
+elif grep -q "$NN_MEMBER" "$MOYI_LOG"; then fail "nudges: her member id is in no log line" "found in $MOYI_LOG"; else pass "nudges: her member id is in no log line"; fi
 flush_buckets
 
 echo; echo "the pushes a reveal and a join make (Phase 4 N3, ADR-0046)"

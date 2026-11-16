@@ -100,7 +100,7 @@ internal class ScheduledJobsConsole(
                 ),
                 Job(
                     ReminderJob.LOCK,
-                    "Asks for the daily reminders due in the last half hour.",
+                    "Asks for the daily reminders and their nudges due in the last half hour.",
                     "$P.reminders.cron",
                     ReminderJob.EVERY_FIVE_MINUTES,
                 ),
