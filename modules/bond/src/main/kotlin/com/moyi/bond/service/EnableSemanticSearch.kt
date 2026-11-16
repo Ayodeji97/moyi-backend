@@ -65,6 +65,7 @@ internal class EnableSemanticSearch(
         val pending = proposals.findLive(membership.bondId, ProposalKind.SEMANTIC_SEARCH_ON, now)
         // Under the lock nothing can cancel or confirm between the read and this; `cancel`'s CAS is the backstop.
         if (pending == null || !proposals.cancel(pending.id, membership.memberId, now)) throw ProposalNotFoundException()
+        support.events.publish(ProposalClosed.of(pending, membership.memberId, now))
         log.info("A request for semantic search was called off on bond {}", membership.bondId.value)
     }
 
@@ -109,6 +110,7 @@ internal class EnableSemanticSearch(
     ) {
         if (proposals.confirm(proposal.id, membership.memberId, now)) {
             bonds.update(bond.withSemanticSearch(true))
+            support.events.publish(ProposalClosed.of(proposal, membership.memberId, now))
             log.info("Semantic search was turned on for bond {} by agreement", bond.id.value)
         }
     }
