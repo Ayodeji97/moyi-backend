@@ -3482,3 +3482,18 @@ Wrong about: a library's table being only its rows. Some of its state lives in t
          jobs from memory; the code has eleven (the export job holds two locks). The registry test
          that compares the page's list to the `@SchedulerLock` annotations found it before any page
          did: count from the code, not from the corpus.
+
+## 2026-11-16 · Reminder nudges (#200) · a budget kept across Bonds can still be spent inside one
+Expected: if nudges 2 and 3 leave room for every reveal owed across a member's Bonds (six a day),
+         the day's reveal push is safe.
+Reality: the final whole-branch review found the per-Bond case the cross-Bond rule never sees. Each
+         Bond keeps one slot of its four for a reveal-class push, but a member who skipped yesterday
+         spends it at midday on yesterday's solo-unlock; nudges 2 and 3 then took the last two slots
+         and the evening reveal was dropped, never retried. Every task review passed, because each
+         looked at one task. A soft nudge now leaves its Bond's last slot when that slot is spent
+         (ADR-0068 decision 19). Separately, three modules' test contexts broke when Task 6 gave
+         `PushRequests` a meter registry, and each task's gate ran only its own module, so the break
+         stayed invisible until the whole build.
+Wrong about: a rule checked at one scope covering the scopes inside it. A limit with a reserve must be
+         checked at every level that has its own reserve. And a task gate is a claim about the
+         modules it ran; only `./gradlew build` speaks for the branch.
