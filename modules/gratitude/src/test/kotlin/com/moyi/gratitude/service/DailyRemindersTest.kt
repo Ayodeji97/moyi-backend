@@ -25,10 +25,15 @@ import com.moyi.notification.api.PushTokens
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.context.annotation.Import
 import org.springframework.http.HttpHeaders
@@ -62,6 +67,7 @@ import javax.sql.DataSource
 @SpringBootTest(classes = [GratitudeTestApplication::class])
 @AutoConfigureMockMvc
 @Import(StreakEvaluationTest.TimeConfiguration::class)
+@ExtendWith(OutputCaptureExtension::class)
 @Suppress("LongParameterList") // A test's collaborators, each named.
 internal class DailyRemindersTest(
     @Autowired private val reminders: DailyReminders,
@@ -502,6 +508,53 @@ internal class DailyRemindersTest(
     }
 
     @Test
+    fun `one nudge that cannot be asked for costs only itself, and its warning names no one`(output: CapturedOutput) {
+        listOf(ada, bea).forEach(::morningReminder)
+        sweepAt(NUDGE_1)
+        // Ada's nudge 2 alone is refused by the database; Bea's, in the same run, is not.
+        jdbc.execute(
+            """
+            CREATE OR REPLACE FUNCTION $FAILING_NUDGE() RETURNS trigger LANGUAGE plpgsql AS ${'$'}${'$'}
+            BEGIN
+                RAISE EXCEPTION 'refused by the test' USING ERRCODE = 'check_violation';
+            END ${'$'}${'$'}
+            """.trimIndent(),
+        )
+        jdbc.execute(
+            """
+            CREATE TRIGGER $FAILING_NUDGE BEFORE INSERT ON notifications FOR EACH ROW
+            WHEN (NEW.user_id = '$ada' AND NEW.nudge = 2) EXECUTE FUNCTION $FAILING_NUDGE()
+            """.trimIndent(),
+        )
+        val logged = output.all.length
+        val run =
+            try {
+                sweepAt(NUDGE_2)
+            } finally {
+                jdbc.execute("DROP TRIGGER IF EXISTS $FAILING_NUDGE ON notifications")
+                jdbc.execute("DROP FUNCTION IF EXISTS $FAILING_NUDGE()")
+            }
+        val duringTheRun = output.all.substring(logged).lines()
+
+        run.byNudge shouldBe mapOf(2 to NudgeCounts(requested = 1, written = 0, alreadyAsked = 0, failed = 1))
+        run.failed shouldBe 1
+        // Bea's nudge 2 superseded her unsent nudge 1 (C16); Ada's failed with its whole transaction, nudge 1 untouched.
+        nudgesOf(bea).map { it.nudge to it.status } shouldBe listOf(1 to "CANCELLED", 2 to "REQUESTED")
+        nudgesOf(ada).map { it.nudge to it.status } shouldBe listOf(1 to "REQUESTED")
+        // The next nudge is asked for as if nothing had happened: a failure is not retried, and stops nothing after it.
+        sweepAt(NUDGE_3).byNudge shouldBe mapOf(3 to NudgeCounts(requested = 2, written = 0, alreadyAsked = 0, failed = 0))
+        nudgesOf(ada).map { it.nudge to it.status } shouldBe listOf(1 to "CANCELLED", 3 to "REQUESTED")
+        val warning = duringTheRun.single { "one nudge could not be asked for" in it }
+        warning shouldContain "WARN"
+        warning shouldContain "index=2"
+        // Above DEBUG, no line the failing run wrote names the member, the user or the bond (the DEBUG line may).
+        val ids = listOf(ada.toString(), memberIdOf(ada).toString(), bond)
+        duringTheRun.filterNot { " DEBUG " in it || " TRACE " in it }.forEach { line ->
+            ids.forEach { line shouldNotContain it }
+        }
+    }
+
+    @Test
     fun `a run counts each index`() {
         listOf(ada, bea).forEach(::morningReminder)
         clock.set(Instant.parse("2026-09-02T06:00:00Z"))
@@ -726,6 +779,7 @@ internal class DailyRemindersTest(
     private companion object {
         const val DISPATCH = 100
         const val SWEEP_SECONDS = 300L
+        const val FAILING_NUDGE = "daily_reminders_test_failing_nudge"
         val NUDGE_1: Instant = Instant.parse("2026-09-02T07:00:00Z")
         val NUDGE_2: Instant = Instant.parse("2026-09-02T10:00:00Z")
         val NUDGE_3: Instant = Instant.parse("2026-09-02T13:00:00Z")
