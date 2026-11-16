@@ -14,3 +14,8 @@ ALTER TABLE notifications ADD CONSTRAINT notifications_shared_change_check CHECK
     AND (shared_change IS NULL OR shared_change IN
          ('SETTING', 'PROPOSAL_ACCEPTED', 'PROPOSAL_DECLINED', 'PROPOSAL_WITHDRAWN', 'SEVERAL'))
 );
+
+-- Ending a Bond calls off every push of it still owed, inside the leave's own transaction
+-- (ADR-0069 decision 5): this reads the Bond's owed rows, not the whole ledger. Partial, so it
+-- stays as small as what is owed.
+CREATE INDEX notifications_bond_owed_idx ON notifications (bond_id) WHERE status IN ('REQUESTED', 'HELD');

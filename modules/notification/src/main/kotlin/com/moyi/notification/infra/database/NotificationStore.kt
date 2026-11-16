@@ -111,6 +111,12 @@ internal class NotificationStore(
      * (and left alone) or still owed (and cancelled): never both sent and
      * cancelled.
      *
+     * **Every statement here that cancels several rows locks them in id order**
+     * (`ORDER BY id FOR UPDATE`), so two of them racing (a leave's [cancelOwedOfBond]
+     * and a coalescing [cancelOwedInGroup], say) cannot take two rows in opposite
+     * orders and deadlock. The subquery's status test is read again on each row it
+     * waited for, so a row settled meanwhile is passed over.
+     *
      * @return what this call cancelled, and only that: a push already settled,
      *   cancelled before, or never asked for is not returned, so nothing is
      *   counted or inherited from twice (spec C16, ADR-0068 decision 7).
@@ -119,7 +125,9 @@ internal class NotificationStore(
         jdbc.query(
             """
             UPDATE notifications SET status = 'CANCELLED'
-             WHERE dedupe_key = ANY (?) AND status IN ('REQUESTED', 'HELD')
+             WHERE id IN (SELECT id FROM notifications
+                           WHERE dedupe_key = ANY (?) AND status IN ('REQUESTED', 'HELD')
+                           ORDER BY id FOR UPDATE)
             RETURNING category, nudge, leave_free_across_bonds
             """.trimIndent(),
             { row, _ -> cancelledPush(row) },
@@ -146,7 +154,9 @@ internal class NotificationStore(
         jdbc.query(
             """
             UPDATE notifications SET status = 'CANCELLED'
-             WHERE user_id = ? AND bond_id = ? AND category = ? AND id <> ? AND status IN ('REQUESTED', 'HELD')
+             WHERE id IN (SELECT id FROM notifications
+                           WHERE user_id = ? AND bond_id = ? AND category = ? AND id <> ? AND status IN ('REQUESTED', 'HELD')
+                           ORDER BY id FOR UPDATE)
             RETURNING category, nudge, not_before, shared_change
             """.trimIndent(),
             { row, _ ->
@@ -181,22 +191,13 @@ internal class NotificationStore(
 
     /**
      * `CANCELLED` for every push of [bondId] still owed (`REQUESTED` or `HELD`), every member's and
-     * every category's: a Bond that has ended (ADR-0069 decision 5). One statement over the Bond's
-     * rows, at most a few hundred (spec §6.2). A push the consumer has locked is waited for, as in
-     * [cancelOwed].
+     * every category's: a Bond that has ended (ADR-0069 decision 5). One statement, through the
+     * partial `notifications_bond_owed_idx` (V71), so the leave's transaction reads the Bond's owed
+     * rows and not the ledger. A push the consumer has locked is waited for, as in [cancelOwed].
      *
      * @return what this call cancelled, and only that.
      */
-    fun cancelOwedOfBond(bondId: UUID): List<CancelledPush> =
-        jdbc.query(
-            """
-            UPDATE notifications SET status = 'CANCELLED'
-             WHERE bond_id = ? AND status IN ('REQUESTED', 'HELD')
-            RETURNING category, nudge, leave_free_across_bonds
-            """.trimIndent(),
-            { row, _ -> cancelledPush(row) },
-            bondId,
-        )
+    fun cancelOwedOfBond(bondId: UUID): List<CancelledPush> = jdbc.query(CANCEL_OWED_OF_BOND, { row, _ -> cancelledPush(row) }, bondId)
 
     /**
      * Lowers the leave-free of the push [id] to [leaveFree], never raises it: a superseding nudge
@@ -337,6 +338,16 @@ internal class NotificationStore(
     private fun timestamp(instant: Instant): Timestamp = Timestamp.from(instant.truncatedTo(ChronoUnit.MICROS))
 
     internal companion object {
+        /** [cancelOwedOfBond]'s statement; a test EXPLAINs it to see that the partial owed index serves it. */
+        val CANCEL_OWED_OF_BOND =
+            """
+            UPDATE notifications SET status = 'CANCELLED'
+             WHERE id IN (SELECT id FROM notifications
+                           WHERE bond_id = ? AND status IN ('REQUESTED', 'HELD')
+                           ORDER BY id FOR UPDATE)
+            RETURNING category, nudge, leave_free_across_bonds
+            """.trimIndent()
+
         /** [datedSince]'s statement; a test EXPLAINs it to see that the recipient index can serve it. */
         val DATED_SINCE =
             """

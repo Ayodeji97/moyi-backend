@@ -209,6 +209,57 @@ internal class CoalescingLedgerTest(
         superseded() shouldBe 0.0
     }
 
+    @Test
+    fun `two requests at once leave both owed, the older cancelled once`() {
+        // Spec §7: each group UPDATE sees only committed rows, so two changes in flight may both
+        // survive. Never zero, and what they both reached for is cancelled and counted once.
+        ask("shared:r0:$member")
+        val r0NotBefore = notBefore("shared:r0:$member")
+        val firstAsk = first.plusSeconds(FIFTEEN_SECONDS)
+        val secondAsk = first.plusSeconds(2 * FIFTEEN_SECONDS)
+
+        val asked = CountDownLatch(1)
+        val letFirstCommit = CountDownLatch(1)
+        val firstPid = CompletableFuture<Int>()
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            clock.set(firstAsk)
+            // e1: recorded, R0 cancelled under its row lock, not yet committed.
+            val one =
+                pool.submit<Boolean> {
+                    transactions.execute {
+                        val recorded = request("shared:e1:$member")
+                        firstPid.complete(jdbc.queryForObject("SELECT pg_backend_pid()", Int::class.java)!!)
+                        asked.countDown()
+                        letFirstCommit.await(WAIT_SECONDS, TimeUnit.SECONDS)
+                        recorded
+                    }
+                }
+            asked.await(WAIT_SECONDS, TimeUnit.SECONDS) shouldBe true
+            val pid = firstPid.get()
+            clock.set(secondAsk)
+            val two = pool.submit<Boolean> { ask("shared:e2:$member") }
+
+            // e2's group UPDATE reaches for R0 and waits on e1's lock: seen in Postgres, not assumed.
+            await().atMost(Duration.ofSeconds(WAIT_SECONDS)).until { two.isDone || waitsOnRowLockOf(pid) }
+            two.isDone shouldBe false
+
+            letFirstCommit.countDown()
+            one.get(WAIT_SECONDS, TimeUnit.SECONDS) shouldBe true
+            two.get(WAIT_SECONDS, TimeUnit.SECONDS) shouldBe true
+        } finally {
+            letFirstCommit.countDown()
+            pool.shutdownNow()
+        }
+
+        status("shared:r0:$member") shouldBe "CANCELLED"
+        status("shared:e1:$member") shouldBe "REQUESTED"
+        status("shared:e2:$member") shouldBe "REQUESTED"
+        superseded() shouldBe 1.0
+        notBefore("shared:e1:$member") shouldBe r0NotBefore
+        notBefore("shared:e2:$member") shouldBe secondAsk.plus(Duration.ofMinutes(2))
+    }
+
     @Suppress("LongParameterList") // A request's varying fields, each defaulted for the common case.
     private fun ask(
         key: String,
@@ -216,22 +267,30 @@ internal class CoalescingLedgerTest(
         bondId: UUID = bond,
         category: PushCategory = PushCategory.SHARED_SETTING_CHANGED,
         change: SharedChange? = SharedChange.SETTING,
+    ): Boolean = transactions.execute { request(key, user, bondId, category, change) }!!
+
+    /** A request in the caller's transaction. */
+    @Suppress("LongParameterList") // As [ask].
+    private fun request(
+        key: String,
+        user: UUID = member,
+        bondId: UUID = bond,
+        category: PushCategory = PushCategory.SHARED_SETTING_CHANGED,
+        change: SharedChange? = SharedChange.SETTING,
     ): Boolean =
-        transactions.execute {
-            notifications.request(
-                PushRequest(
-                    userId = user,
-                    bondId = bondId,
-                    category = category,
-                    dedupeKey = key,
-                    staleAfter = clock.instant().plus(Duration.ofDays(1)),
-                    recipient = PushRecipient(ZoneId.of("Europe/London"), null, NotificationPreferences.DEFAULTS),
-                    bondDate = null,
-                    nudge = null,
-                    sharedChange = change,
-                ),
-            )
-        }!!
+        notifications.request(
+            PushRequest(
+                userId = user,
+                bondId = bondId,
+                category = category,
+                dedupeKey = key,
+                staleAfter = clock.instant().plus(Duration.ofDays(1)),
+                recipient = PushRecipient(ZoneId.of("Europe/London"), null, NotificationPreferences.DEFAULTS),
+                bondDate = null,
+                nudge = null,
+                sharedChange = change,
+            ),
+        )
 
     private fun idOf(key: String): UUID = jdbc.queryForObject("SELECT id FROM notifications WHERE dedupe_key = ?", UUID::class.java, key)!!
 

@@ -14,6 +14,7 @@ import com.moyi.notification.infra.NotificationTestApplication
 import com.moyi.notification.infra.database.NotificationStore
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.micrometer.core.instrument.MeterRegistry
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -90,6 +91,18 @@ internal class CancelBondTest(
         shouldThrow<IllegalTransactionStateException> { notifications.cancelBond(bond) }
 
         status("proposal:ben") shouldBe "REQUESTED"
+    }
+
+    @Test
+    fun `the statement reads the Bond's owed rows through the partial index`() {
+        // In the leave's own transaction: it must not read the whole ledger (V71).
+        val plan =
+            transactions.execute {
+                jdbc.execute("SET LOCAL enable_seqscan = off")
+                jdbc.queryForList("EXPLAIN " + NotificationStore.CANCEL_OWED_OF_BOND, String::class.java, bond).joinToString("\n")
+            }!!
+
+        plan shouldContain "notifications_bond_owed_idx"
     }
 
     @Suppress("LongParameterList") // A request's varying fields.

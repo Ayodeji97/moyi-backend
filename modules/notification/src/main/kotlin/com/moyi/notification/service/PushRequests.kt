@@ -133,7 +133,7 @@ internal class PushRequests(
         cancelled.forEach { count(it.category, it.nudge, SUPERSEDED) }
         val earliest = minOf(notBefore, cancelled.minOf { it.notBefore })
         val change = Coalescing.merged(request.sharedChange, cancelled.map { it.sharedChange }, SharedChange.SEVERAL)
-        ledger.retime(id, earliest, change)
+        check(ledger.retime(id, earliest, change)) { "the push this call recorded is gone" }
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
