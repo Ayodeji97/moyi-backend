@@ -23,6 +23,7 @@ import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
 import org.springframework.test.web.servlet.put
+import tools.jackson.databind.json.JsonMapper
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -132,6 +133,21 @@ internal class BondDeletionEndpointTest(
         // cooling-off rather than a disappearance.
         getBond(ada, bondId).status shouldBe 200
         getBond(bea, bondId).status shouldBe 200
+    }
+
+    @Test
+    fun `the pending request carries an id, the same one its ending shows`() {
+        val (ada, bea, bondId) = pairedBond()
+        request(ada, bondId).status shouldBe 202
+        val pendingId = JsonMapper().readTree(getBond(bea, bondId).contentAsString)["pendingDeletionRequest"]["id"].asString()
+
+        cancel(ada, bondId).status shouldBe 204
+
+        val closed = JsonMapper().readTree(getBond(bea, bondId).contentAsString)["closedProposals"]
+        closed.size() shouldBe 1
+        closed[0]["id"].asString() shouldBe pendingId
+        closed[0]["kind"].asString() shouldBe "DELETION"
+        closed[0]["outcome"].asString() shouldBe "WITHDRAWN"
     }
 
     @Test

@@ -4,6 +4,8 @@ import com.moyi.bond.domain.BondStatus
 import com.moyi.bond.domain.BondType
 import com.moyi.bond.domain.MemberRole
 import com.moyi.bond.domain.Proposal
+import com.moyi.bond.domain.ProposalKind
+import com.moyi.bond.domain.ProposalOutcome
 import com.moyi.bond.service.BondView
 import com.moyi.bond.service.InviteView
 import com.moyi.bond.service.MemberView
@@ -66,6 +68,11 @@ internal data class BondResponse(
      * both of them.
      */
     val paused: Boolean,
+    /**
+     * How each kind of proposal last ended, at most one per kind, however long ago (spec B14).
+     * A bond that ended names nobody on its proposals (T-09).
+     */
+    val closedProposals: List<ClosedProposalResponse>,
 ) {
     companion object {
         private val HH_MM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
@@ -94,6 +101,7 @@ internal data class BondResponse(
                 pendingDeletionRequest = view.deletion?.let(PendingDeletionRequestResponse::from),
                 pendingSemanticSearchRequest = view.semanticSearchOn?.let(PendingSemanticSearchRequestResponse::from),
                 paused = view.paused,
+                closedProposals = view.closedProposals.map(ClosedProposalResponse::from),
             )
 
         /** The `ETag` for a bond: an opaque validator of this caller’s public representation. */
@@ -175,6 +183,7 @@ internal data class PendingTimezoneChangeResponse(
 
 /** A deletion request waiting for the other member (FR-028). No payload: the request *is* the content. */
 internal data class PendingDeletionRequestResponse(
+    val id: UUID,
     val requestedByMemberId: UUID,
     val requestedAt: Instant,
     val expiresAt: Instant,
@@ -182,6 +191,7 @@ internal data class PendingDeletionRequestResponse(
     companion object {
         fun from(proposal: Proposal) =
             PendingDeletionRequestResponse(
+                id = proposal.id.value,
                 requestedByMemberId = proposal.proposedByMemberId.value,
                 requestedAt = proposal.proposedAt,
                 expiresAt = proposal.expiresAt,
@@ -191,6 +201,7 @@ internal data class PendingDeletionRequestResponse(
 
 /** A request to turn semantic search back on, waiting for the other member (FR-204). No payload, as for a deletion. */
 internal data class PendingSemanticSearchRequestResponse(
+    val id: UUID,
     val requestedByMemberId: UUID,
     val requestedAt: Instant,
     val expiresAt: Instant,
@@ -198,9 +209,38 @@ internal data class PendingSemanticSearchRequestResponse(
     companion object {
         fun from(proposal: Proposal) =
             PendingSemanticSearchRequestResponse(
+                id = proposal.id.value,
                 requestedByMemberId = proposal.proposedByMemberId.value,
                 requestedAt = proposal.proposedAt,
                 expiresAt = proposal.expiresAt,
+            )
+    }
+}
+
+/**
+ * A proposal that has ended, and how (spec B14). [closedByMemberId] is the member who agreed,
+ * declined or withdrew; `null` for a lapse and for a bond that ended, which name nobody.
+ * [closedAt] is when it was confirmed or cancelled, or, if it lapsed unclosed, when it expired.
+ */
+internal data class ClosedProposalResponse(
+    val id: UUID,
+    val kind: ProposalKind,
+    val proposedByMemberId: UUID,
+    val proposedAt: Instant,
+    val outcome: ProposalOutcome,
+    val closedByMemberId: UUID?,
+    val closedAt: Instant,
+) {
+    companion object {
+        fun from(proposal: Proposal) =
+            ClosedProposalResponse(
+                id = proposal.id.value,
+                kind = proposal.kind,
+                proposedByMemberId = proposal.proposedByMemberId.value,
+                proposedAt = proposal.proposedAt,
+                outcome = proposal.outcome,
+                closedByMemberId = proposal.closedBy?.value,
+                closedAt = proposal.confirmedAt ?: proposal.cancelledAt ?: proposal.expiresAt,
             )
     }
 }

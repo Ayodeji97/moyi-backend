@@ -328,6 +328,25 @@ internal class ProposalPersistenceTest(
     }
 
     @Test
+    fun `at exactly its expiry a proposal is no longer live, is ended, and a cancel writes a lapse`() {
+        // The one instant the two predicates could disagree about: `expires_at > now` is live, so
+        // `now == expires_at` is not, and the complement must take it (ADR-0030).
+        val (bond, joiner) = pairedBond()
+        val proposal = timezoneProposal(bond, at = now.minus(Proposal.TTL))
+        proposal.expiresAt shouldBe now
+        transactions.executeWithoutResult { proposals.insert(proposal) }
+
+        transactions.execute { proposals.findLive(bond.id, ProposalKind.TIMEZONE_CHANGE, now) }.shouldBeNull()
+        transactions
+            .execute { proposals.findLatestEndedOf(listOf(bond.id), now) }
+            .shouldNotBeNull()
+            .getValue(bond.id)
+            .map { it.id to it.outcome } shouldBe listOf(proposal.id to ProposalOutcome.LAPSED)
+        transactions.execute { proposals.cancel(proposal.id, joiner.id, now) } shouldBe true
+        storedEnding(proposal) shouldBe ("LAPSED" to null)
+    }
+
+    @Test
     fun `findInBond answers only for the proposal's own bond`() {
         val bond = insertedBond()
         val proposal = timezoneProposal(bond)

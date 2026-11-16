@@ -66,7 +66,8 @@ internal class BondNotificationsEndpointTest(
 
         response.status shouldBe 200
         response.contentAsString shouldBe
-            """{"categories":{"reminder":true,"partnerJoined":true,"reveal":true,"milestone":true,"onThisDay":false,"proposal":true}}"""
+            """{"categories":{"reminder":true,"partnerJoined":true,"reveal":true,"milestone":true,""" +
+            """"onThisDay":false,"proposal":true,"sharedSettings":true}}"""
         // Nothing was written to show it: the defaults are the reading of V9's `{}`.
         storedPrefs(bondId, ada) shouldBe "{}"
     }
@@ -81,8 +82,21 @@ internal class BondNotificationsEndpointTest(
 
         response.status shouldBe 200
         response.contentAsString shouldBe
-            """{"categories":{"reminder":false,"partnerJoined":true,"reveal":true,"milestone":false,"onThisDay":true,"proposal":true}}"""
+            """{"categories":{"reminder":false,"partnerJoined":true,"reveal":true,"milestone":false,""" +
+            """"onThisDay":true,"proposal":true,"sharedSettings":true}}"""
         get(ada, bondId).contentAsString shouldBe response.contentAsString
+    }
+
+    @Test
+    fun `sharedSettings is on by default, turned off by a put, and kept when a later put omits it`() {
+        val (bondId, ada, _) = pairedBond()
+        get(ada, bondId).contentAsString shouldContain "\"sharedSettings\":true"
+
+        put(ada, bondId, """{"categories":{"sharedSettings":false}}""").contentAsString shouldContain "\"sharedSettings\":false"
+        storedPrefs(bondId, ada) shouldContain "\"sharedSettings\": false"
+
+        put(ada, bondId, """{"categories":{"reveal":false}}""").contentAsString shouldContain "\"sharedSettings\":false"
+        get(ada, bondId).contentAsString shouldContain "\"sharedSettings\":false"
     }
 
     @Test

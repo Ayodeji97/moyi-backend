@@ -46,6 +46,18 @@ internal fun BondView.entityTag(): String {
             )
             addAll(listOf(deletion?.proposedByMemberId?.value, deletion?.proposedAt, deletion?.expiresAt))
             addAll(listOf(semanticSearchOn?.proposedByMemberId?.value, semanticSearchOn?.proposedAt, semanticSearchOn?.expiresAt))
+            // B14: a proposal lapses with no write, and an answer or withdrawal moves no bond row.
+            closedProposals.forEach { closed ->
+                addAll(
+                    listOf(
+                        closed.id.value,
+                        closed.kind,
+                        closed.outcome,
+                        closed.closedBy?.value,
+                        closed.confirmedAt ?: closed.cancelledAt ?: closed.expiresAt,
+                    ),
+                )
+            }
             addAll(listOf(me.id.value, me.role))
             addAll(listOf(invite?.invite?.id?.value, invite?.invite?.code?.value, invite?.link, invite?.invite?.expiresAt))
         }

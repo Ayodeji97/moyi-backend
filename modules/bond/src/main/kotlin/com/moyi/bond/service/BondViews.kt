@@ -59,6 +59,8 @@ internal class BondViews(
         val pending = this.proposals.findAllLiveOf(bonds.map { it.id }, now)
         // One `suspendedAmong` for every bond's members, like the queries above and for their reason.
         val paused = pause.pausedAmong(bonds)
+        // The complement of the live query, batched the same way: how each kind last ended (spec B14).
+        val closed = this.proposals.findLatestEndedOf(bonds.map { it.id }, now)
         return bonds.map { bond ->
             BondView(
                 bond = bond,
@@ -72,6 +74,7 @@ internal class BondViews(
                 proposals = pending[bond.id].orEmpty(),
                 timezoneChangeAllowedFrom = bond.timezoneChangeAllowedFrom(now),
                 paused = paused.getValue(bond.id.value),
+                closedProposals = closed[bond.id].orEmpty(),
             )
         }
     }
@@ -121,6 +124,12 @@ internal data class BondView(
      * the old tag is answered `304` and never learns the bond paused, or resumed.
      */
     val paused: Boolean = false,
+    /**
+     * The latest ended proposal of each kind (spec B14). Read only through
+     * `ProposalStore.findLatestEndedOf`, so [Proposal.outcome] is meaningful on each. It changes
+     * with no write (a proposal lapses), so `entityTag` digests it.
+     */
+    val closedProposals: List<Proposal> = emptyList(),
 ) {
     val timezoneChange: Proposal? get() = proposals.firstOrNull { it.kind == ProposalKind.TIMEZONE_CHANGE }
 
