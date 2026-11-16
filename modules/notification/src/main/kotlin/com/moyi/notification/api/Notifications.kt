@@ -48,6 +48,10 @@ interface Notifications {
      * the pushes are called off exactly when the fact that made them pointless
      * commits. Calling it twice is calling it once.
      *
+     * Its only caller is an entry's write, so every push it calls off is
+     * counted with the reason `written` (`notification.push.cancelled`). A
+     * caller with another reason needs that reason in this API first.
+     *
      * @return how many pushes this call cancelled.
      */
     fun cancel(dedupeKeys: Collection<String>): Int

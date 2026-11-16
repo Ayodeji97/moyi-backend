@@ -118,7 +118,8 @@ internal class PushRequests(
         push: CancelledPush,
         reason: String,
     ) {
-        meters.counter(CANCELLED, "category", push.category.name, "nudge", push.nudge?.toString() ?: NO_NUDGE, "reason", reason).increment()
+        val nudge = push.nudge?.toString() ?: SendPush.NO_NUDGE
+        meters.counter(CANCELLED, "category", push.category.name, "nudge", nudge, "reason", reason).increment()
     }
 
     @Transactional(readOnly = true)
@@ -166,7 +167,6 @@ internal class PushRequests(
         private val REVEAL_LOOK_BACK = Duration.ofHours(72)
 
         const val CANCELLED = "notification.push.cancelled"
-        const val NO_NUDGE = "none"
 
         /** Called off by `cancel`: what its writer no longer owes. */
         const val WRITTEN = "written"

@@ -236,6 +236,8 @@ internal class SendPush(
          * sum to the pushes that reached a final outcome, and `held` alone is quiet-hours volume.
          */
         const val SETTLED = "notification.push.settled"
+
+        /** The `nudge` tag of a push that is not a nudge, here and on `notification.push.cancelled`. */
         const val NO_NUDGE = "none"
         const val SENT = "sent"
         const val HELD = "held"
