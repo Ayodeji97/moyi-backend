@@ -1,7 +1,8 @@
 # Reminder nudges: every three hours until the member writes, at most three a Bond-day
 
-**Status:** Draft, 2026-11-16. Issue #200. The owner's rulings in the issue are fixed (§3, A);
-the lead's rulings (§3, B) and the builder's (§3, C) are made for the owner and are **his to
+**Status:** Draft, 2026-11-16, lead rulings folded in the same day. Issue #200. The owner's rulings
+in the issue are fixed (§3, A); the lead's rulings (§3, B, and those marked "lead ruling
+2026-11-16, owner may revise") and the builder's (§3, C) are made for the owner and are **his to
 overrule**; each says what it costs if it is wrong. ✱ marks a departure from the wording of the
 issue, the corpus or the lead's brief.
 
@@ -61,8 +62,9 @@ What the code does now, read for this spec:
 - FR-082: four per Bond per member per day, the reveal slot still reserved; the cross-Bond cap of six
   still holds, and the extra nudges never take the slot a reveal will need.
 - `data.nudge` (`"1"`, `"2"`, `"3"`) on every nudge.
+- On both platforms a Bond-day's later nudge replaces the earlier one on the phone.
 
-**Non-goals:** the words of nudges 2 and 3 (the owner's and the app's, §13); a new toggle (nudges
+**Non-goals:** the words of nudges 2 and 3 and per-nudge localisation keys (owed, §13); a new toggle (nudges
 are reminders, under the `reminder` toggle); a nudge interval or count a member chooses; #205.
 
 **Anti-goals (a failure even if it works):** a nudge that depends on, or says anything about, the
@@ -91,7 +93,8 @@ Each: the decision; why; what it costs if wrong.
 7. **The cross-Bond cap stays six; nudges 2 and 3 are soft.** Nudge 1 is decided as today's
    reminder is. A soft nudge is sent only if, after it, the member's rolling 24-hour count still
    leaves one slot for each Bond whose reveal for its current Bond-day has not been settled.
-   ✱ **The lead's brief said "each of their OTHER Bonds"; this spec counts the nudged Bond too.**
+   ✱ **The lead's brief said "each of their OTHER Bonds"; this spec counts the nudged Bond too**
+   (*lead ruling 2026-11-16, owner may revise*: accepted on this table).
    The cross-Bond cap applies to reveal-class pushes (ADR-0045 decision 5), and the nudged Bond's
    reveal is the one the nudge exists to bring about. Counting only the others loses a reveal in the
    very case the rule protects. Two Bonds, both reminders at 08:00, the member writing in neither
@@ -107,8 +110,8 @@ Each: the decision; why; what it costs if wrong.
    | evening: A's reveal, B's reveal | 4 / 5 | | | 5, 6: **both sent** | 6, then **B's dropped** |
 
    *Cost:* a member in two Bonds gets one fewer nudge; one in three Bonds gets no nudge 2 or 3 at all
-   until a reveal settles (08:00 → 3 sent; 3 + 3 owed = 6). §13 asks the owner whether that is the
-   trade he wants. How "owed" is computed is ruling C10.
+   until a reveal settles (08:00 → 3 sent; 3 + 3 owed = 6). **Accepted as a recorded consequence**
+   (*lead ruling 2026-11-16, owner may revise*). How "owed" is computed is ruling C17.
 8. **Quiet hours: a newer nudge supersedes an older one still unsent** for the same member and
    Bond-day, so at most one nudge is released when the hours end. *Cost:* the member sees nudge 2's
    (or 3's) index on a push that is the first they see that day; §3 C11 keeps its budget hard.
@@ -157,7 +160,8 @@ Each: the decision; why; what it costs if wrong.
     bound a day at three whatever else changes: a member who moves their reminder time mid-day gets
     each index at most once. *Cost:* such a member may get an index out of its usual spacing (nudge 1
     at 08:00, then a 10:00 reminder time whose nudge 2 falls at 13:00).
-16. **A nudge that supersedes an unsent one takes over its budget claim.** Ruling 8 cancels the
+16. **A nudge that supersedes an unsent one takes over its budget claim** (*lead ruling
+    2026-11-16, owner may revise*: accepted). Ruling 8 cancels the
     older nudge; ruling 7 makes the newer one soft. Together they would turn a night's only reminder
     (nudge 1 held from 05:00 to 09:00, superseded at 08:00 by nudge 2) into a soft push that the cap
     may drop, leaving the member nothing. So the superseding push inherits the **smallest**
@@ -271,7 +275,8 @@ nudge 2 at 08:00 supersedes the held nudge 1, inherits its zero, and alone is re
   `Nudge(index ≥ 1, leaveFreeAcrossBonds in 0..5, supersedes)`; `cancel(dedupeKeys: Collection)`;
   `revealClassSettled(userId, days)`. `domain/PushBudget.kt` (`PER_BOND_PER_DAY = 4`, the term of
   C18); `service/PushRequests.kt`, `service/SendPush.kt`, `infra/database/NotificationStore.kt`,
-  `api/PushSender.kt` (`PushMessage.nudge: Int?`), `infra/push/FcmPushSender.kt` (`data.nudge`).
+  `api/PushSender.kt` (`PushMessage.nudge: Int?`), `infra/push/FcmPushSender.kt` (`data.nudge`,
+  the reminder's Android `tag`).
 - **`scheduling`:** `ReminderJob` registers the per-nudge counter from `ReminderRun`; the job's
   registry line in `JobConsole` reads "the daily reminder and its nudges".
 - **`ArchitectureTest`:** `declaredIn` gains `DueNudge`, `RevealDay`, `Nudge`; the rule that only the
@@ -317,7 +322,17 @@ renumbers on its unmerged branch.
 `data` becomes `{bondId, kind, date, nudge}`; `nudge` is `"1"`, `"2"` or `"3"` (FCM data values
 are strings) on a `REMINDER` with a stored index, and absent everywhere else, as `date` is. It names
 an ordinal, never a time, a count of anything else, or the other member. The localisation keys, the
-channel and the collapse key are unchanged (§13 on what that means for wording).
+channel and the collapse key are unchanged: **v1 sends the same `push_reminder_*` keys for all
+three nudges** (*lead ruling 2026-11-16, owner may revise*); per-nudge keys are owed (§13).
+
+**`android.notification.tag` on a `REMINDER`** (*lead ruling 2026-11-16, owner may revise*):
+`REMINDER:{bondId}:{date}`, so on Android each nudge of a Bond-day replaces the last in the shade,
+as `apns-collapse-id` (`REMINDER:{bondId}`) already does on iOS. `collapse_key` alone replaces only
+a message still waiting for an offline phone. Per member is implicit: the phone is the member's,
+and the tag names no member. The Bond-day is in it so that tomorrow's first nudge is a new
+notification, not a silent replacement of yesterday's. No other category gains a tag (each keeps
+today's behaviour). `PushMessage` already carries `bondId`, `category` and `bondDate`, so the tag
+needs no new field.
 
 Unchanged: every HTTP route, `contracts/openapi.json`, the preferences resource, the state map
 (no endpoint answers differently).
@@ -360,14 +375,17 @@ Unchanged: every HTTP route, `contracts/openapi.json`, the preferences resource,
   owed; a settled `REVEAL` row for the current date is not owed, one for yesterday's date is.
 - `PausedSendWindowTest` (app, the real roster): `DAILY_REMINDERS` switched on between nudge 1 and
   nudge 2: nudge 1 never asked, nudge 2 asked; switched off, no nudge asked.
-- `FcmPushSenderTest`: `data.nudge` on a nudge, absent on a reveal and on a pre-V68 reminder.
+- `FcmPushSenderTest`: `data.nudge` on a nudge, absent on a reveal and on a pre-V68 reminder;
+  `android.notification.tag` is `REMINDER:{bondId}:{date}` on a reminder and absent on every other
+  category and on a reminder with no date.
 - `NotificationsCheckTest` (new, as `FeatureFlagCheckTest`): `nudge` on a non-`REMINDER` row is
   refused by the CHECK.
 
 **Mutation targets (each must turn a test red):** drop the leave-free term; count only the other
 Bonds; let a superseding nudge keep its own leave-free; cancel only nudge 1's key on a write;
 schedule a nudge past the day's end; wall-clock instead of elapsed (the spring-forward case); put the
-per-Bond cap back to three; drop `supersedes`; send `nudge` on a non-reminder.
+per-Bond cap back to three; drop `supersedes`; send `nudge` on a non-reminder; drop the reminder's
+Android `tag`, or put the Bond-day out of it.
 
 ## 11. Operations
 
@@ -391,22 +409,22 @@ per-Bond cap back to three; drop `supersedes`; send `nudge` on a non-reminder.
   leave room for owed reveals across Bonds) and FR-080 (the nudges); the Phase 4 spec's table row
   (`2026-10-27-…` line 52) is history and is not edited.
 
-## 13. Open questions (the owner's)
+## 13. Owed, and what was settled (lead rulings 2026-11-16, owner may revise)
 
-1. **The words, and how they can differ.** The phone shows `push_reminder_title/_body`, chosen by
-   the server and **rendered by the operating system** when the app is in the background: on
-   Android a notification message runs no app code, and on iOS only a Notification Service Extension
-   can change it, which needs `mutable-content: 1` (not sent today). So `data.nudge` alone lets the
-   app word nudges 2 and 3 differently only in the foreground, or after one of: per-nudge keys sent by
-   the server (`push_reminder_2_*`, only once an app release carries the strings), or a service
-   extension with `mutable-content`. The words themselves are his to approve.
-2. **Three Bonds** (ruling 7's cost): a member in three Bonds gets no nudge 2 or 3 until a reveal
-   settles. Accept, or raise the cross-Bond cap (FR-082) for nudges.
-3. **Counting the nudged Bond** (ruling 7 ✱): confirm the departure from the lead's wording.
-4. **Android stacking.** `collapse_key` replaces only a message still waiting for an offline phone;
-   iOS's `apns-collapse-id` replaces a shown one. On Android three nudges can sit in the shade
-   together unless the payload also sends `android.notification.tag` (one per category and Bond).
-   A payload change for every category; his to want.
-5. **#205.** `SHARED_SETTING_CHANGED` will share the per-Bond remainder first-come; on a three-nudge
-   day it drops. If he wants it to outrank nudge 3, the hook is a per-Bond leave-free for nudge 3,
-   the same shape as C18's term.
+**Owed**
+1. **Per-nudge words.** The phone shows `push_reminder_title/_body`, chosen by the server and
+   **rendered by the operating system** for a background push (Android runs no app code for a
+   notification message; iOS would need a Notification Service Extension and `mutable-content: 1`).
+   v1 sends the same keys for all three nudges plus `data.nudge`, which the app can read in the
+   foreground and on a tap. **Per-nudge keys** (`push_reminder_2_*`, `push_reminder_3_*`) are a
+   follow-up, coordinated with the app once a release carries the strings; **no service extension**.
+   The words are the owner's to approve.
+
+**Settled, recorded as consequences**
+2. **Three Bonds:** a member in three Bonds gets no nudge 2 or 3 until a reveal settles. Accepted.
+3. **Counting the nudged Bond** (ruling 7 ✱): accepted.
+4. **Android stacking:** in scope, the tag of §8.
+5. **#205:** `SHARED_SETTING_CHANGED` shares the per-Bond remainder first-come and drops on a
+   three-nudge day. Accepted for now; the hook, if it should outrank nudge 3, is a per-Bond leave-free
+   on nudge 3, the same shape as C18's term.
+6. **The request-time race** (§7): unchanged, recorded.

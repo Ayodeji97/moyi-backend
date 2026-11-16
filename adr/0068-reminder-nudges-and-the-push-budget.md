@@ -2,7 +2,8 @@
 
 **Status:** Proposed · **Date:** 2026-11-16 · **Deciders:** the owner ruled the behaviour (issue
 #200, 2026-11-15); the lead and the builder ruled the rest for him, **his to overrule**, each with
-its cost (spec §3). · **Amends:** FR-082 (four per Bond per member per day; nudges 2 and 3 leave
+its cost (spec §3). Decisions marked *lead ruling 2026-11-16* were confirmed by the lead after the
+first draft; the owner may revise each. · **Amends:** FR-082 (four per Bond per member per day; nudges 2 and 3 leave
 room across Bonds), ADR-0044 decision 9 (`data.nudge`), ADR-0045 decisions 5 and 6 (the per-Bond
 cap; the reminder is a series of up to three; `CANCELLED` also means superseded)
 
@@ -41,7 +42,8 @@ arithmetic; this record is what was decided.
    three-nudge day they are dropped.
 5. **The cross-Bond cap stays six; nudges 2 and 3 are soft** (lead). One is sent only if, after it,
    the member's rolling count leaves a slot for every Bond whose reveal for its current Bond-day is
-   still owed. ✱ **The nudged Bond counts**, not only the others as the lead's brief read: the
+   still owed. ✱ **The nudged Bond counts** (*lead ruling 2026-11-16, owner may revise*), not only the
+   others as the lead's first brief read: the
    cross-Bond cap applies to reveals, and the nudged Bond's reveal is the one the nudge exists to
    bring about (spec §3 ruling 7 shows a reveal lost otherwise). `PushBudget.decide` gains one term:
    `sentAcrossBonds + leaveFreeAcrossBonds >= 6` → dropped; zero for every other push, which is
@@ -54,10 +56,15 @@ arithmetic; this record is what was decided.
    rides on the row. Approximate when held overnight: bounded at one nudge per member and Bond-day by
    decision 7.
 7. **A newer nudge supersedes an older one still unsent** (lead), so quiet hours release at most
-   one. The superseding push **inherits the smallest leave-free of what it cancelled** (builder): a
-   night's only reminder stays hard even if it is nudge 2's.
+   one. The superseding push **inherits the smallest leave-free of what it cancelled** (builder;
+   *lead ruling 2026-11-16, owner may revise*: accepted): a night's only reminder stays hard even if it is nudge 2's.
 8. **`data.nudge`**: `"1"`, `"2"` or `"3"` on a nudge, absent on every other push and on reminders
-   recorded before V68 (owner). Localisation keys, channel and collapse key unchanged.
+   recorded before V68 (owner). **v1 sends the same `push_reminder_*` keys for all three nudges**
+   (*lead ruling 2026-11-16, owner may revise*); channel and collapse key unchanged. **A `REMINDER`
+   carries `android.notification.tag` = `REMINDER:{bondId}:{date}`** (*lead ruling 2026-11-16, owner
+   may revise*), so on Android a Bond-day's later nudge replaces the earlier one in the shade, as
+   iOS's `apns-collapse-id` already does; `collapse_key` replaces only an undelivered message. No
+   other category gains a tag.
 9. **V68 adds `notifications.nudge` and `notifications.leave_free_across_bonds`**, additive and
    defaulted. No index. Not avoidable: decisions 5 to 8 need values on the row.
 10. **No API contract change.** No HTTP route changes; preferences are unchanged (nudges are
@@ -74,14 +81,16 @@ hours release one push, not a pile; nothing in a nudge depends on the other memb
 other-member fact read, a reveal in another Bond, is one the member already sees there.
 
 **Negative:** on a three-nudge day the per-Bond remainder is spent, and a milestone, on-this-day,
-partner-joined or proposal push is dropped. A member in three Bonds gets no nudge 2 or 3 until a
-reveal settles. A held nudge's count can be stale by a night. Up to three `REMINDER` rows per member
+partner-joined or proposal push is dropped; #205's push will share that remainder first-come
+(*lead ruling 2026-11-16*: accepted for now; the hook to let it outrank nudge 3 is a per-Bond
+leave-free on nudge 3). A member in three Bonds gets no nudge 2 or 3 until a reveal settles
+(*lead ruling 2026-11-16*: accepted). A held nudge's count can be stale by a night. Up to three `REMINDER` rows per member
 per Bond-day in the ledger, `SUPPRESSED` ones included for a member who turned reminders off. A bond
 made after its member's reminder time has no nudges that first day.
 
 **Neutral:** without nudges, the per-Bond cap of four gives every other category one more slot a day.
 The existing race between a write and the sweep's read of it (one push owed to a member who has just
-written) is unchanged, now possible per nudge.
+written) is unchanged, now possible per nudge (*lead ruling 2026-11-16*: recorded, not fixed).
 
 ## Alternatives considered
 
@@ -95,18 +104,13 @@ written) is unchanged, now possible per nudge.
 - **Keeping the older held nudge instead of the newer.** Equivalent in count; the lead ruled the
   newer, and decision 7's inheritance removes the difference that mattered.
 
-## Owed (the owner decides)
+## Owed
 
-- **The words of nudges 2 and 3**, and how they can differ at all: the OS renders the server's
-  `push_reminder_*` keys for a background push, so `data.nudge` alone changes nothing on screen
-  unless the app ships per-nudge keys the server then sends, or an iOS service extension with
-  `mutable-content` (spec §13.1).
-- **Three Bonds** (Negative): accept, or raise the cross-Bond cap for nudges.
-- **Decision 5's ✱.**
-- **Android stacking:** `android.notification.tag` would make a later nudge replace an earlier one in
-  the shade, as iOS's collapse id already does.
-- **#205's place in the remainder**: first-come as built; a per-Bond leave-free on nudge 3 is the hook
-  if it should outrank it.
+- **Per-nudge words** (*lead ruling 2026-11-16*): the OS renders the server's `push_reminder_*` keys
+  for a background push, so `data.nudge` changes the words only where the app reads it (foreground,
+  a tap). Per-nudge keys (`push_reminder_2_*`, `_3_*`) follow once an app release carries the
+  strings, coordinated with the app; no iOS service extension. The words are the owner's.
+- **The rulings above**, each the owner's to revise.
 - **Corpus:** doc 03 FR-082 and FR-080.
 
 ## Revisit when
