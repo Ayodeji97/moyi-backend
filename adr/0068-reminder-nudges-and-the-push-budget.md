@@ -73,6 +73,28 @@ arithmetic; this record is what was decided.
     nudge,outcome}` (with `dropped_leaving_room` for decision 5's drop),
     `notification.push.cancelled{category,nudge,reason}`. Bounded tags, no ids.
 
+### Rulings while it was built
+
+12. **The two constants of the series live once, on `ReminderRoster`'s companion** (`api`), and are
+    passed into `NudgeSchedule.dueIn` and `ReminderKey.series` as parameters: `domain` depends on
+    nothing, so it cannot read them, and a pinned copy would be a second statement of them.
+13. **The cross-Bond limit is two constants, `Nudge.ACROSS_BONDS` (`api`) and
+    `PushBudget.ACROSS_BONDS` (`domain`), pinned equal by `PushApiTest`.** Neither layer may depend
+    on the other; one number in `common.core` was judged heavier than a test that fails on drift.
+14. **A re-ask supersedes nothing.** The row is inserted first and the older nudges are called off
+    only when this request recorded it, so a run that asks again changes nothing (decision 7).
+15. **`data.nudge` is guarded at the wire too**: `FcmPushSender` sends it only on a `REMINDER`, a
+    second gate after the producer's (decision 8).
+16. **`notification.push.settled` counts dispatch decisions** (decision 11): a held push counts
+    `held` once per hold and then its final outcome, so the outcomes other than `held` sum to the
+    pushes settled.
+17. **A member who joins, or moves their reminder time, after nudge 1's instant still gets nudges 2
+    and 3 that day.** Decision 2 guards the bond's start, not the member's: the entry is still owed,
+    and the budget caps still apply. *Owner-visible; his to overrule.*
+18. **`ArchitectureTest` is unchanged.** The spec had `declaredIn` gain `DueNudge`, `RevealDay` and
+    `Nudge`; that map backs the admin-only import rule, so adding them would forbid `gratitude`
+    from importing `Nudge`. The spec (§5) was corrected.
+
 ## Consequences
 
 **Positive:** a member who has not written is nudged up to three times, never after writing and never

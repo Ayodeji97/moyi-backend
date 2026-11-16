@@ -150,6 +150,13 @@ night. NFR-006's 60 s is measured outside quiet hours (D-15).
   can last a send, and a push that waited across the member's midnight counted against the day
   that had ended. The test holds the lock over a London midnight.
 
+*Amended 2026-11-16 (issue #200, ADR-0068 decisions 4 and 5).* **Four per Bond per member per
+day**, one still reserved for reveal-class, so the remainder is three: room for a Bond-day's three
+reminder nudges, which milestones, on-this-day, partner-joined and proposals share. The cross-Bond
+cap stays six; a nudge 2 or 3 is sent only if, after it, the member's rolling count leaves a slot for
+every Bond whose reveal for its current Bond-day is still owed (`leave_free_across_bonds` on the
+row; zero for every other push, which is the rule above exactly). Over it is `DROPPED_BUDGET`.
+
 **6. The daily reminder: `scheduling` knows when, `bond` whose, `gratitude` who wrote.**
 
 - `ReminderJob` (`scheduling`), at thirty seconds past every fifth minute, ShedLock
@@ -198,6 +205,19 @@ night. NFR-006's 60 s is measured outside quiet hours (D-15).
   cancel waits for a push the consumer has locked mid-send, then finds it settled or still
   owed, never both; the entry write never takes a lock the consumer holds while waiting for
   one of the write's, so there is no cycle.
+
+*Amended 2026-11-16 (issue #200, ADR-0068 decisions 1 to 3 and 7).* **The reminder is a series**
+of up to three nudges a Bond-day: nudge 1 at the member's reminder time, as above, and each next
+one three real hours after the last, while the member has not written that Bond-day. The same job
+and lock find all three, asking the roster about each nudge's own instant, so `DAILY_REMINDERS`
+pauses every nudge. A series lies in one Bond-day: a nudge past its end, or in a series whose
+nudge 1 fell before the bond began, is never asked for. **Keys:** nudge 1 keeps
+`reminder:{memberId}:{bond-day label}`; nudges 2 and 3 add `:2` and `:3` (still one rule,
+`ReminderKey`). Writing calls off every nudge of the series still `REQUESTED` or `HELD`.
+**`CANCELLED` also means superseded**: a newer nudge recorded while an older one is unsent calls
+the older off, so quiet hours release at most one, and the newer one keeps the smallest leave-free
+of its own and of what it called off. `notification.push.cancelled{reason}` counts the two apart
+(`written`, `superseded`).
 
 ## Consequences
 
