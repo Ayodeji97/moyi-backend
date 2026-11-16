@@ -43,7 +43,9 @@ internal class V67MigrationTest : PostgresIntegrationTest() {
 
         flyway("67").migrate()
 
-        AuditAction.entries.map { it.name }.forEach { action -> withClue(action) { insert(action) shouldBe 1 } }
+        (AuditAction.entries.map { it.name } - V69MigrationTest.V69_ACTIONS).forEach { action ->
+            withClue(action) { insert(action) shouldBe 1 }
+        }
         shouldThrow<DataIntegrityViolationException> { insert("JOB_RAN") }.message!! shouldContain "audit_log_action_check"
         jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action = 'ACCOUNT_SUSPENDED'", Int::class.java) shouldBe 2
     }

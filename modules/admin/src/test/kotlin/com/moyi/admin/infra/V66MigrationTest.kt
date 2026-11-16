@@ -51,7 +51,7 @@ internal class V66MigrationTest : PostgresIntegrationTest() {
     fun `every action of the enum, V64's among them, still inserts after V66, and one outside the list is refused`() {
         flyway("66").migrate()
 
-        (AuditAction.entries.map { it.name } - V67MigrationTest.A4_ACTIONS).forEach { action ->
+        (AuditAction.entries.map { it.name } - V67MigrationTest.A4_ACTIONS - V69MigrationTest.V69_ACTIONS).forEach { action ->
             withClue(
                 action,
             ) { insert(action) shouldBe 1 }
