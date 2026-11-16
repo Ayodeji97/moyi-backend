@@ -54,7 +54,8 @@ internal class SendDailyReminders(
         var requested = 0
         var alreadyWritten = 0
         var failed = 0
-        due.forEach { reminder ->
+        due.forEach { nudge ->
+            val reminder = nudge.reminder
             try {
                 when (transactions.execute { remind(reminder) }) {
                     Outcome.REQUESTED -> requested++
