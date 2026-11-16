@@ -87,6 +87,7 @@ internal class SendPush(
         when (val decision = decide(push, now)) {
             is Decision.Settle -> ledger.settle(push.id, decision.status, now)
             is Decision.Hold -> ledger.hold(push.id, decision.until)
+            is Decision.Drop -> ledger.settle(push.id, NotificationStatus.DROPPED_BUDGET, now)
             is Decision.Send -> send(push, decision.slot)
         }
     }
@@ -117,8 +118,8 @@ internal class SendPush(
 
             else -> {
                 when (val slot = budgetSlot(push)) {
-                    BudgetDecision.DROPPED -> Decision.Settle(NotificationStatus.DROPPED_BUDGET)
-                    else -> Decision.Send(slot)
+                    BudgetDecision.DROPPED, BudgetDecision.DROPPED_LEAVING_ROOM -> Decision.Drop(slot)
+                    BudgetDecision.RESERVED, BudgetDecision.REMAINDER -> Decision.Send(slot)
                 }
             }
         }
@@ -189,14 +190,23 @@ internal class SendPush(
             reservedSpentToday = inBond.reservedSpent,
             sentAcrossBonds = budget.sentSince(push.userId, now.minus(PushBudget.ACROSS_BONDS_WINDOW)),
             revealClass = push.category.isRevealClass,
+            leaveFreeAcrossBonds = push.leaveFreeAcrossBonds,
         )
     }
 
     /** What the consumer does with a push before any phone is tried. */
     private sealed interface Decision {
-        /** Into a final status, unsent: expired, suppressed or over budget. */
+        /** Into a final status, unsent: expired or suppressed. */
         data class Settle(
             val status: NotificationStatus,
+        ) : Decision
+
+        /**
+         * `DROPPED_BUDGET`, unsent. A soft nudge's drop is the budget too (ADR-0068 decision 5), so one
+         * status; [slot] keeps which of FR-082's lines dropped it, for counting the two apart.
+         */
+        data class Drop(
+            val slot: BudgetDecision,
         ) : Decision
 
         /** `HELD` until [until], when quiet hours end. */

@@ -6,6 +6,7 @@ import com.moyi.common.testing.PostgresIntegrationTest
 import com.moyi.notification.api.HeldPushes
 import com.moyi.notification.api.NotificationPreferences
 import com.moyi.notification.api.Notifications
+import com.moyi.notification.api.Nudge
 import com.moyi.notification.api.PushCategory
 import com.moyi.notification.api.PushPlatform
 import com.moyi.notification.api.PushRecipient
@@ -251,13 +252,17 @@ internal class PushPreferencesBudgetTest(
     }
 
     @Test
-    fun `FR-082's example in the ledger - the evening's other pushes cannot take the 22-00 reveal's slot`() {
-        listOf("20:00" to PushCategory.REMINDER, "20:15" to PushCategory.MILESTONE, "20:30" to PushCategory.PARTNER_JOINED)
-            .forEachIndexed { index, (time, category) ->
-                clock.set(at(time))
-                ask(push(ada, category, key = "other-$index"))
-                dispatcher.dispatchDue(clock.instant(), BUDGET)
-            }
+    fun `FR-082's example in the ledger - four before 22-00 send three, and the reveal still goes`() {
+        listOf(
+            "20:00" to PushCategory.REMINDER,
+            "20:15" to PushCategory.MILESTONE,
+            "20:30" to PushCategory.PARTNER_JOINED,
+            "20:45" to PushCategory.REMINDER,
+        ).forEachIndexed { index, (time, category) ->
+            clock.set(at(time))
+            ask(push(ada, category, key = "other-$index"))
+            dispatcher.dispatchDue(clock.instant(), BUDGET)
+        }
         clock.set(at("22:00"))
         ask(push(ada, PushCategory.REVEAL, key = "reveal"))
         dispatcher.dispatchDue(clock.instant(), BUDGET)
@@ -266,9 +271,24 @@ internal class PushPreferencesBudgetTest(
             mapOf(
                 "other-0" to ("SENT" to false),
                 "other-1" to ("SENT" to false),
-                "other-2" to ("DROPPED_BUDGET" to false),
+                "other-2" to ("SENT" to false),
+                "other-3" to ("DROPPED_BUDGET" to false),
                 "reveal" to ("SENT" to true),
             )
+    }
+
+    @Test
+    fun `a nudge that would leave no slot for the reveals owed is dropped, and with none owed it is sent`() {
+        // Four sent across her Bonds in the last 24 hours; two reveals still owed (ADR-0068 decision 5).
+        spend(ada, 4)
+        ask(push(ada, PushCategory.REMINDER, key = "leaving-room", nudge = Nudge(2, 2, emptySet())))
+        dispatcher.dispatchDue(evening, BUDGET)
+        statuses(ada).getValue("leaving-room") shouldBe ("DROPPED_BUDGET" to false)
+
+        ask(push(ada, PushCategory.REMINDER, key = "nothing-owed", nudge = Nudge(2, 0, emptySet())))
+        dispatcher.dispatchDue(evening, BUDGET)
+        statuses(ada).getValue("nothing-owed") shouldBe ("SENT" to false)
+        provider.sent.size shouldBe 1
     }
 
     @Test
@@ -287,18 +307,18 @@ internal class PushPreferencesBudgetTest(
     }
 
     @Test
-    fun `the per-Bond day is the member's day in their reminder zone, so midnight there gives three more`() {
+    fun `the per-Bond day is the member's day in their reminder zone, so midnight there gives four more`() {
         val kathmandu = ZoneId.of("Asia/Kathmandu")
-        // 23:00 in Kathmandu (17:15Z): three sent, a fourth dropped.
+        // 23:00 in Kathmandu (17:15Z): four sent, a fifth dropped.
         clock.set(Instant.parse("2026-10-14T17:15:00Z"))
-        repeat(4) { ask(push(ada, PushCategory.REVEAL, zone = kathmandu, key = "before-$it")) }
+        repeat(5) { ask(push(ada, PushCategory.REVEAL, zone = kathmandu, key = "before-$it")) }
         dispatcher.dispatchDue(clock.instant(), BUDGET)
         // 00:00 the next day there (18:15Z), an hour later: a new day in that Bond, though the rolling cap still counts.
         clock.set(Instant.parse("2026-10-14T18:15:00Z"))
         ask(push(ada, PushCategory.REVEAL, zone = kathmandu, key = "after"))
         dispatcher.dispatchDue(clock.instant(), BUDGET)
 
-        statuses(ada).filterValues { it.first == "SENT" }.keys shouldBe setOf("before-0", "before-1", "before-2", "after")
+        statuses(ada).filterValues { it.first == "SENT" }.keys shouldBe setOf("before-0", "before-1", "before-2", "before-3", "after")
         statuses(ada)["after"] shouldBe ("SENT" to true)
     }
 
@@ -327,7 +347,7 @@ internal class PushPreferencesBudgetTest(
     @Test
     fun `two pushes for one member decided at once are decided one after the other, under the budget lock`() {
         // One remainder slot left in this Bond today: of two pushes sent at once, exactly one may take it.
-        spend(ada, 1, bondId = bond, reserved = false)
+        spend(ada, 2, bondId = bond, reserved = false)
         ask(push(ada, PushCategory.MILESTONE, key = "first"))
         ask(push(ada, PushCategory.REMINDER, key = "second"))
 
@@ -365,10 +385,10 @@ internal class PushPreferencesBudgetTest(
 
     @Test
     fun `the budget's day is read once the lock is held, not before it was waited for`() {
-        // Two pushes of the remainder already sent this evening. The 23:59 reveal is being sent,
+        // The remainder's three already sent this evening. The 23:59 reveal is being sent,
         // holding her budget lock, when midnight passes; the milestone that waited on that lock
         // belongs to the new day, which has room. Read before the wait, it counted yesterday.
-        spend(ada, 2, bondId = bond)
+        spend(ada, 3, bondId = bond)
         clock.set(at("23:59"))
         ask(push(ada, PushCategory.REVEAL, key = "reveal"))
         ask(push(ada, PushCategory.MILESTONE, key = "milestone"))
@@ -413,7 +433,8 @@ internal class PushPreferencesBudgetTest(
         preferences: NotificationPreferences = NotificationPreferences.DEFAULTS,
         staleAfter: Instant = evening.plus(Duration.ofDays(2)),
         bondDate: LocalDate? = null,
-    ) = PushRequest(userId, bondId, category, key, staleAfter, PushRecipient(zone, quietHours, preferences), bondDate, null)
+        nudge: Nudge? = null,
+    ) = PushRequest(userId, bondId, category, key, staleAfter, PushRecipient(zone, quietHours, preferences), bondDate, nudge)
 
     private fun ask(request: PushRequest) {
         transactions.execute { notifications.request(request) } shouldBe true
