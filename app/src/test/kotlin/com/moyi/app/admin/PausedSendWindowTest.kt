@@ -188,13 +188,17 @@ class PausedSendWindowTest(
         keysAskedOf(member) shouldBe emptyList()
     }
 
-    /** [user]'s reminder at [time] UTC, in the bond of their own. */
+    /**
+     * [user]'s reminder at [time] UTC, in the bond of their own. Reykjavik keeps UTC all year and is a
+     * region zone: `UTC` itself is not one, and a member row holding it breaks every later read of the
+     * bond in this shared database (`RegionZone`), as it broke `SecretsNeverLogged*Test`.
+     */
     private fun remindedAt(
         user: UUID,
         time: String,
     ) {
         jdbc.update(
-            "UPDATE bond_members SET reminder_time_local = ?::time, reminder_timezone = 'UTC' WHERE user_id = ?",
+            "UPDATE bond_members SET reminder_time_local = ?::time, reminder_timezone = 'Atlantic/Reykjavik' WHERE user_id = ?",
             time,
             user,
         ) shouldBe 1
