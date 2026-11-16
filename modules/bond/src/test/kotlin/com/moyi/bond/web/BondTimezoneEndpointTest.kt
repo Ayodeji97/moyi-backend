@@ -417,6 +417,53 @@ internal class BondTimezoneEndpointTest(
     }
 
     @Test
+    fun `a lapse is dated by its expiry before and after a later proposal closes the row`() {
+        val (ada, _, bondId) = pairedBond()
+        propose(ada, bondId, "Europe/London").status shouldBe 200
+        jdbc.update("UPDATE bond_proposals SET proposed_at = now() - interval '9 days', expires_at = now() - interval '2 days'")
+        val before = closed(ada, bondId)[0]
+        before["outcome"].asString() shouldBe "LAPSED"
+
+        propose(ada, bondId, "Asia/Tokyo").status shouldBe 200
+
+        val after = closed(ada, bondId)[0]
+        jdbc.queryForObject("SELECT count(*) FROM bond_proposals WHERE cancel_cause = 'LAPSED'", Int::class.java) shouldBe 1
+        after["id"] shouldBe before["id"]
+        after["closedAt"] shouldBe before["closedAt"]
+    }
+
+    @Test
+    fun `GET bonds carries the same closedProposals as GET bond`() {
+        val (ada, bea, bondId) = pairedBond()
+        propose(ada, bondId, "Europe/London").status shouldBe 200
+        cancel(bea, bondId).status shouldBe 204
+
+        val list =
+            JsonMapper().readTree(
+                mockMvc
+                    .get("/api/v1/bonds") { header(HttpHeaders.AUTHORIZATION, bearer(ada)) }
+                    .andReturn()
+                    .response.contentAsString,
+            )
+
+        list["bonds"][0]["closedProposals"].size() shouldBe 1
+        list["bonds"][0]["closedProposals"] shouldBe closed(ada, bondId)
+    }
+
+    @Test
+    fun `a row whose cause was never recorded reads UNRECORDED and names nobody`() {
+        val (ada, bea, bondId) = pairedBond()
+        propose(ada, bondId, "Europe/London").status shouldBe 200
+        // What V70 leaves of an old cancel it cannot attribute: cancelled, no cause, no member.
+        jdbc.update("UPDATE bond_proposals SET cancelled_at = now()")
+
+        val entry = closed(bea, bondId)[0]
+
+        entry["outcome"].asString() shouldBe "UNRECORDED"
+        entry["closedByMemberId"].isNull shouldBe true
+    }
+
+    @Test
     fun `a leave ends a pending proposal as BOND_ENDED, naming nobody`() {
         val (ada, bea, bondId) = pairedBond()
         propose(ada, bondId, "Europe/London").status shouldBe 200

@@ -137,6 +137,14 @@ internal data class Proposal(
                 }
             }
 
+    /**
+     * When it ended, for an ended proposal. **A lapse is dated by its expiry, whether or not
+     * something has since closed the row**: `closeLapsed` stamps `cancelledAt = now`, and an
+     * entry whose date (and so its ETag) jumped then would read as changed when nothing was.
+     */
+    val closedAt: Instant
+        get() = if (outcome == ProposalOutcome.LAPSED) expiresAt else requireNotNull(confirmedAt ?: cancelledAt)
+
     /** The member who confirmed it or called it off; nobody for a lapse, a bond ending, or an unrecorded cause. */
     val closedBy: MemberId? get() = confirmedByMemberId ?: cancelledBy
 

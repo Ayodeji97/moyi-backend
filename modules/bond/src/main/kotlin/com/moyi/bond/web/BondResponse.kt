@@ -240,7 +240,7 @@ internal data class ClosedProposalResponse(
                 proposedAt = proposal.proposedAt,
                 outcome = proposal.outcome,
                 closedByMemberId = proposal.closedBy?.value,
-                closedAt = proposal.confirmedAt ?: proposal.cancelledAt ?: proposal.expiresAt,
+                closedAt = proposal.closedAt,
             )
     }
 }

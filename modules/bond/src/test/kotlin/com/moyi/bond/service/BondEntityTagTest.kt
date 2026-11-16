@@ -9,6 +9,7 @@ import com.moyi.bond.domain.Proposal
 import com.moyi.bond.domain.ProposalId
 import com.moyi.bond.domain.RegionZone
 import com.moyi.bond.domain.UserId
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -44,5 +45,25 @@ internal class BondEntityTagTest {
                 }
 
         view.copy(closedProposals = listOf(ended)).entityTag() shouldNotBe view.entityTag()
+    }
+
+    @Test
+    fun `a lapse keeps its closedAt and its entity tag when something later closes the row`() {
+        val bond =
+            Bond.create(
+                BondId(UUID.randomUUID()),
+                MemberId(UUID.randomUUID()),
+                BondDraft(UserId(UUID.randomUUID()), BondType.COUPLE, "Us", lagos, null, null),
+                now,
+            )
+        val member = bond.members.single()
+        val view = BondView(bond = bond, members = listOf(MemberView(member, "Ada")), me = member, invite = null)
+        val unclosed = Proposal.timezoneChange(ProposalId(UUID.randomUUID()), bond.id, RegionZone.of("Europe/London"), member.id, now)
+        val closedLater =
+            unclosed.copy(cancelledAt = unclosed.expiresAt.plusSeconds(3600), cancelCause = com.moyi.bond.domain.CancelCause.LAPSED)
+
+        closedLater.closedAt shouldBe unclosed.expiresAt
+        unclosed.closedAt shouldBe unclosed.expiresAt
+        view.copy(closedProposals = listOf(closedLater)).entityTag() shouldBe view.copy(closedProposals = listOf(unclosed)).entityTag()
     }
 }

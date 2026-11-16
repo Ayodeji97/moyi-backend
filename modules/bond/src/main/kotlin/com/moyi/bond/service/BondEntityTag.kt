@@ -54,7 +54,7 @@ internal fun BondView.entityTag(): String {
                         closed.kind,
                         closed.outcome,
                         closed.closedBy?.value,
-                        closed.confirmedAt ?: closed.cancelledAt ?: closed.expiresAt,
+                        closed.closedAt,
                     ),
                 )
             }
