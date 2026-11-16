@@ -9,6 +9,7 @@ import com.moyi.notification.api.PushCategory
 import com.moyi.notification.api.PushDelivery
 import com.moyi.notification.api.PushMessage
 import com.moyi.notification.api.PushToken
+import com.moyi.notification.api.SharedChange
 import com.nimbusds.jose.crypto.RSASSAVerifier
 import com.nimbusds.jwt.SignedJWT
 import io.kotest.assertions.throwables.shouldThrow
@@ -170,7 +171,7 @@ internal class FcmPushSenderTest {
 
     @Test
     fun `no other category carries a tag`() {
-        PushCategory.entries.filter { it != PushCategory.REMINDER }.forEach { category ->
+        PushCategory.entries.filter { it != PushCategory.REMINDER && it != PushCategory.SHARED_SETTING_CHANGED }.forEach { category ->
             androidNotificationOf(message.copy(category = category, bondDate = LocalDate.parse("2026-11-16")))
                 .containsKey("tag") shouldBe false
         }
@@ -189,6 +190,76 @@ internal class FcmPushSenderTest {
             android["title_loc_key"] shouldBe "push_reminder_title"
             android["body_loc_key"] shouldBe "push_reminder_body"
         }
+    }
+
+    private val shared = message.copy(category = PushCategory.SHARED_SETTING_CHANGED, sharedChange = SharedChange.SETTING)
+
+    private fun bodyOf(change: SharedChange?) = androidNotificationOf(shared.copy(sharedChange = change))["body_loc_key"]
+
+    @Test
+    fun `each change has its body key, one title, and SEVERAL and SETTING share the generic body`() {
+        val stem = "push_shared_setting_changed"
+        bodyOf(SharedChange.SETTING) shouldBe "${stem}_body"
+        bodyOf(SharedChange.SEVERAL) shouldBe "${stem}_body"
+        bodyOf(SharedChange.PROPOSAL_ACCEPTED) shouldBe "${stem}_accepted_body"
+        bodyOf(SharedChange.PROPOSAL_DECLINED) shouldBe "${stem}_declined_body"
+        bodyOf(SharedChange.PROPOSAL_WITHDRAWN) shouldBe "${stem}_withdrawn_body"
+        SharedChange.entries.forEach {
+            androidNotificationOf(shared.copy(sharedChange = it))["title_loc_key"] shouldBe "${stem}_title"
+            androidNotificationOf(shared.copy(sharedChange = it))["channel_id"] shouldBe "shared_setting_changed"
+        }
+    }
+
+    @Test
+    fun `iOS carries the same per-change keys`() {
+        @Suppress("UNCHECKED_CAST")
+        val alert =
+            (
+                (
+                    (
+                        FcmPushSender.payloadOf(
+                            shared.copy(sharedChange = SharedChange.PROPOSAL_DECLINED),
+                            clock.instant(),
+                        )["message"] as Map<String, Any>
+                    )["apns"]
+                        as Map<String, Any>
+                )["payload"] as Map<String, Any>
+            )["aps"] as Map<String, Any>
+
+        @Suppress("UNCHECKED_CAST")
+        val keys = alert["alert"] as Map<String, String>
+        keys["loc-key"] shouldBe "push_shared_setting_changed_declined_body"
+        keys["title-loc-key"] shouldBe "push_shared_setting_changed_title"
+    }
+
+    @Test
+    fun `every other category keeps its own keys whatever change a message carries`() {
+        PushCategory.entries.filter { it != PushCategory.SHARED_SETTING_CHANGED }.forEach { category ->
+            val stem = "push_${category.name.lowercase()}"
+            val keys = FcmPushSender.locKeys(message.copy(category = category, sharedChange = SharedChange.PROPOSAL_DECLINED))
+            keys shouldBe ("${stem}_title" to "${stem}_body")
+        }
+    }
+
+    @Test
+    fun `data carries the change on this category only, as its name`() {
+        dataOf(shared.copy(sharedChange = SharedChange.PROPOSAL_DECLINED)) shouldBe
+            mapOf("bondId" to bond.toString(), "kind" to "SHARED_SETTING_CHANGED", "change" to "PROPOSAL_DECLINED")
+        PushCategory.entries.filter { it != PushCategory.SHARED_SETTING_CHANGED }.forEach { category ->
+            dataOf(message.copy(category = category, sharedChange = SharedChange.PROPOSAL_DECLINED))
+                .containsKey("change") shouldBe false
+        }
+    }
+
+    @Test
+    fun `a shared-setting push is tagged by Bond alone, and no other category but the reminder is tagged`() {
+        androidNotificationOf(shared)["tag"] shouldBe "SHARED_SETTING_CHANGED:$bond"
+        androidNotificationOf(shared.copy(bondDate = LocalDate.parse("2026-11-16")))["tag"] shouldBe "SHARED_SETTING_CHANGED:$bond"
+        val tagged =
+            PushCategory.entries.filter {
+                androidNotificationOf(message.copy(category = it, bondDate = LocalDate.parse("2026-11-16"))).containsKey("tag")
+            }
+        tagged.toSet() shouldBe setOf(PushCategory.REMINDER, PushCategory.SHARED_SETTING_CHANGED)
     }
 
     @Suppress("UNCHECKED_CAST")

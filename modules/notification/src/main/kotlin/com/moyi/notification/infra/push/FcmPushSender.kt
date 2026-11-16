@@ -5,6 +5,7 @@ import com.moyi.notification.api.PushCategory
 import com.moyi.notification.api.PushDelivery
 import com.moyi.notification.api.PushMessage
 import com.moyi.notification.api.PushSender
+import com.moyi.notification.api.SharedChange
 import com.nimbusds.jose.JOSEObjectType
 import com.nimbusds.jose.JWSAlgorithm
 import com.nimbusds.jose.JWSHeader
@@ -54,10 +55,12 @@ import java.util.Base64
  * **What a phone is sent.** Localisation keys chosen by category for both
  * platforms (`title_loc_key`/`body_loc_key` on Android, `title-loc-key`/
  * `loc-key` on iOS), the Android channel of the category ([channelId]),
- * `data: {bondId, kind, date, nudge}` (`date` the Bond-day's ISO date, only for a
- * push about a day: issue #146; `nudge` the reminder's ordinal, only on one that has it, ADR-0068), for a
- * `REMINDER` an Android `tag` of Bond and Bond-day ([androidTag], so each nudge replaces the last in the
- * shade), and a collapse key of category
+ * `data: {bondId, kind, date, nudge, change}` (`date` the Bond-day's ISO date, only for a
+ * push about a day: issue #146; `nudge` the reminder's ordinal, only on one that has it, ADR-0068;
+ * `change` the kind of shared change, only on a
+ * `SHARED_SETTING_CHANGED`, ADR-0069), for a `REMINDER` an Android `tag` of Bond and Bond-day
+ * ([androidTag], so each nudge replaces the last in the shade) and for a `SHARED_SETTING_CHANGED` one of
+ * category and Bond (a later change replaces the earlier), and a collapse key of category
  * and Bond, so that a push held back and then sent replaces its predecessor
  * rather than stacking (spec N1, Q6). No text authored here, no name.
  *
@@ -305,13 +308,26 @@ internal class FcmPushSender(
         private const val HTTP_TOO_MANY_REQUESTS = 429
 
         /**
-         * The localisation keys a phone shows for [category]: `push_<category>_title`
-         * and `push_<category>_body`. The owner writes the words in the apps'
-         * string tables (Q6); the server sends only the keys.
+         * The localisation keys a phone shows for [message]: `push_<category>_title` and
+         * `push_<category>_body`. The owner writes the words in the apps' string tables (Q6); the
+         * server sends only the keys. A shared-setting push has one title and a body per change
+         * (ADR-0069 decision 9); `SETTING`, `SEVERAL` and a row recorded with no change share the
+         * generic body. No setting, value or member is named by any of them.
          */
-        fun locKeys(category: PushCategory): Pair<String, String> {
-            val stem = "push_${channelId(category)}"
-            return "${stem}_title" to "${stem}_body"
+        fun locKeys(message: PushMessage): Pair<String, String> {
+            val stem = "push_${channelId(message.category)}"
+            val body =
+                if (message.category == PushCategory.SHARED_SETTING_CHANGED) {
+                    when (message.sharedChange) {
+                        SharedChange.PROPOSAL_ACCEPTED -> "${stem}_accepted_body"
+                        SharedChange.PROPOSAL_DECLINED -> "${stem}_declined_body"
+                        SharedChange.PROPOSAL_WITHDRAWN -> "${stem}_withdrawn_body"
+                        SharedChange.SETTING, SharedChange.SEVERAL, null -> "${stem}_body"
+                    }
+                } else {
+                    "${stem}_body"
+                }
+            return "${stem}_title" to body
         }
 
         /**
@@ -328,15 +344,18 @@ internal class FcmPushSender(
         fun collapseKey(message: PushMessage): String = "${message.category.name}:${message.bondId}"
 
         /**
-         * What a reminder replaces on Android: the same Bond and Bond-day, so each nudge takes the
-         * last one's place in the shade. No member is named (the phone is the member's), and the
-         * Bond-day keeps tomorrow's first nudge from replacing yesterday's. Every other category,
-         * and a reminder about no day, has none (ADR-0068 decision 8).
+         * What a push replaces on Android. A reminder: the same Bond and Bond-day, so each nudge takes
+         * the last one's place in the shade (ADR-0068 decision 8). A shared-setting change: the same
+         * Bond, so a later change replaces the earlier (ADR-0069 decision 9; about no day). No member
+         * is named (the phone is the member's). Every other category, and a reminder about no day,
+         * has none.
          */
         fun androidTag(message: PushMessage): String? =
-            message.bondDate
-                ?.takeIf { message.category == PushCategory.REMINDER }
-                ?.let { "REMINDER:${message.bondId}:$it" }
+            when (message.category) {
+                PushCategory.REMINDER -> message.bondDate?.let { "REMINDER:${message.bondId}:$it" }
+                PushCategory.SHARED_SETTING_CHANGED -> "SHARED_SETTING_CHANGED:${message.bondId}"
+                else -> null
+            }
 
         /**
          * FCM v1's `messages:send` body. Maps, because the wire names mix snake case and hyphens.
@@ -350,7 +369,7 @@ internal class FcmPushSender(
             message: PushMessage,
             now: Instant,
         ): Map<String, Any> {
-            val (title, body) = locKeys(message.category)
+            val (title, body) = locKeys(message)
             val collapse = collapseKey(message)
             val remaining = Duration.between(now, message.staleAfter).seconds.coerceAtLeast(0)
             return mapOf(
@@ -386,7 +405,7 @@ internal class FcmPushSender(
          * The push's `data`: what the app opens, never what it shows. FCM's data values are
          * strings, so the date is ISO `yyyy-MM-dd`, and a push about no day leaves the key out
          * rather than sending it empty. No content can travel here: a Bond's id, a category and
-         * a calendar date (FR-084, T-14).
+         * a calendar date, and the kind of a shared change (FR-084, T-14, T-09).
          */
         private fun dataOf(message: PushMessage): Map<String, String> =
             buildMap {
@@ -394,6 +413,7 @@ internal class FcmPushSender(
                 put("kind", message.category.name)
                 message.bondDate?.let { put("date", it.toString()) }
                 message.nudge?.takeIf { message.category == PushCategory.REMINDER }?.let { put("nudge", it.toString()) }
+                message.sharedChange?.takeIf { message.category == PushCategory.SHARED_SETTING_CHANGED }?.let { put("change", it.name) }
             }
 
         private fun bytes(content: ByteArray) = StreamingHttpOutputMessage.Body { it.write(content) }
