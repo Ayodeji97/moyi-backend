@@ -4190,6 +4190,66 @@ else
 fi
 flush_buckets
 
+echo; echo "account deletion asked for by email — the operator opens the app's own request (ADR-0058, amended 2026-11-16)"
+account_op() {
+  MOYI_OPERATOR=smoke-operator MOYI_OPS_PSQL="docker compose exec -T postgres psql -U moyi -d $MOYI_DB" \
+    scripts/moyi account "$@"
+}
+# What the operator types: the address twice, then the answer to "Type yes".
+em_feed() { printf '%s\n%s\n%s\n' "$1" "${2:-$1}" "${3:-yes}"; }
+verified_account "deleted-by-email" "203.0.113.215"; EM_A="$ACCOUNT_ACCESS"; EM_EMAIL="$ACCOUNT_EMAIL"
+EM_UNCONFIRMED="end-unconfirmed-$(date +%s)-$RANDOM@example.com"
+expect "register an account that never confirms its address" 201 "" -- -X POST "$API/auth/register" \
+  -H "X-Forwarded-For: 203.0.113.216" -d "$(register_body "$EM_UNCONFIRMED" en Smoke)"
+flush_buckets
+if docker compose exec -T postgres true >/dev/null 2>&1; then
+  EM_USER="$(sql "SELECT id FROM users WHERE email = '$EM_EMAIL'")"
+  em_none() { db_is "$1" "$(sql "SELECT count(*) FROM deletion_requests WHERE user_id = '$EM_USER'")" "0"; }
+  if EM_OUT="$(em_feed "$EM_EMAIL" | account_op delete "" 2>&1)"; then fail "moyi account delete refuses an empty note" "$EM_OUT"; else
+    case "$EM_OUT" in *"a note is required"*) pass "moyi account delete refuses an empty note";; *) fail "moyi account delete refuses an empty note" "$EM_OUT";; esac; fi
+  if EM_OUT="$(em_feed "$EM_EMAIL" | account_op delete "replied from $EM_EMAIL" 2>&1)"; then fail "a note holding an address is refused" "$EM_OUT"; else
+    case "$EM_OUT" in *"must not hold an email address"*) pass "a note holding an address is refused";; *) fail "a note holding an address is refused" "$EM_OUT";; esac; fi
+  if EM_OUT="$(em_feed "$EM_EMAIL" "x$EM_EMAIL" | account_op delete "smoke: confirmed" 2>&1)"; then fail "two different addresses are refused" "$EM_OUT"; else
+    case "$EM_OUT" in *"the two addresses differ"*) pass "two different addresses are refused";; *) fail "two different addresses are refused" "$EM_OUT";; esac; fi
+  if EM_OUT="$(em_feed "$EM_EMAIL" "$EM_EMAIL" "y" | account_op delete "smoke: confirmed" 2>&1)"; then fail "anything but yes does nothing" "$EM_OUT"; else
+    case "$EM_OUT" in *"account at $EM_EMAIL (status ACTIVE, address confirmed)? Type yes"*"not confirmed. Nothing was done"*)
+      pass "the account is shown as stored, and anything but yes does nothing";; *) fail "anything but yes does nothing" "$EM_OUT";; esac; fi
+  em_none "…and no request was opened"
+  if EM_OUT="$(em_feed "nobody-$RANDOM@example.com" | account_op delete "smoke: confirmed" 2>&1)"; then fail "an address with no account is refused" "$EM_OUT"; else
+    case "$EM_OUT" in *"no account has that address"*) pass "an address with no account is refused, and nothing is done";; *) fail "an address with no account is refused" "$EM_OUT";; esac; fi
+  if EM_OUT="$(em_feed "$EM_UNCONFIRMED" | account_op delete "smoke: confirmed" 2>&1)"; then fail "an unconfirmed address is refused" "$EM_OUT"; else
+    case "$EM_OUT" in *"never confirmed its address"*) pass "an address never confirmed is refused";; *) fail "an unconfirmed address is refused" "$EM_OUT";; esac; fi
+  db_is "…and nothing is written for it" "$(sql "SELECT count(*) FROM deletion_requests d JOIN users u ON u.id = d.user_id WHERE u.email = '$EM_UNCONFIRMED'")" "0"
+  EM_OUT="$(em_feed "$EM_EMAIL" | account_op delete "smoke: replied from the account address" 2>&1)" || true
+  case "$EM_OUT" in *"Requested: account $EM_USER ($EM_EMAIL) is deleted from "*"(14 days)."*) pass "the operator opens the deletion";; *) fail "the operator opens the deletion" "$EM_OUT";; esac
+  expect "GET /me shows it as the app's own pending deletion" 200 '"deletionRequest":{"' -- "$API/me" -H "Authorization: Bearer $EM_A"
+  is "…cancellable for 14 days, done within 30" "$(python3 -c "
+import json, sys
+from datetime import datetime
+b = json.loads(sys.argv[1])['deletionRequest']; p = lambda k: datetime.fromisoformat(b[k].replace('Z', '+00:00'))
+print((p('cancellableUntil') - p('requestedAt')).days, (p('deleteBy') - p('requestedAt')).days)" "$LAST_BODY")" "14 30"
+  EM_OUT="$(em_feed "$EM_EMAIL" | account_op delete "smoke: again" 2>&1)" || true
+  case "$EM_OUT" in "Already requested on "*"Nothing changed.") pass "asking again changes nothing";; *"Already requested on "*"Nothing changed.") pass "asking again changes nothing";; *) fail "asking again changes nothing" "$EM_OUT";; esac
+  db_is "one request, and one audit row naming the account by id, never its address, in metadata or note" \
+    "$(sql "SELECT (SELECT count(*) FROM deletion_requests WHERE user_id = '$EM_USER') || '|' || count(*) || '|' || bool_and(metadata::text NOT LIKE '%example.com%' AND justification NOT LIKE '%example.com%') FROM audit_log WHERE target_id = '$EM_USER' AND action = 'ACCOUNT_DELETION_REQUESTED' AND actor_type = 'OPERATOR'")" "1|1|true"
+  expect "the person can still cancel it in the app: 204" 204 "" -- -X DELETE "$API/me/deletion-request" -H "Authorization: Bearer $EM_A"
+  db_is "…which cancels the operator's request itself" \
+    "$(sql "SELECT count(*) FILTER (WHERE cancelled_at IS NOT NULL) || '|' || count(*) FILTER (WHERE cancelled_at IS NULL AND executed_at IS NULL) FROM deletion_requests WHERE user_id = '$EM_USER'")" "1|0"
+  expect "…and GET /me is clear" 200 '"deletionRequest":null' -- "$API/me" -H "Authorization: Bearer $EM_A"
+  EM_OUT="$(em_feed "$EM_EMAIL" | account_op delete "smoke: asked again by email" 2>&1)" || true
+  case "$EM_OUT" in *"Requested: account "*) pass "after a cancel, the operator can open a new one";; *) fail "after a cancel, the operator can open a new one" "$EM_OUT";; esac
+  EM_OUT="$(em_feed "$EM_EMAIL" | account_op cancel-deletion "smoke: asked to cancel by reply" 2>&1)" || true
+  case "$EM_OUT" in *"Cancel the deletion of the account at $EM_EMAIL"*"Cancelled: the deletion of account $EM_USER"*) pass "the operator cancels it by email";; *) fail "the operator cancels it by email" "$EM_OUT";; esac
+  db_is "…no request pending, one ACCOUNT_DELETION_CANCELLED row by OPERATOR without the address" \
+    "$(sql "SELECT (SELECT count(*) FROM deletion_requests WHERE user_id = '$EM_USER' AND cancelled_at IS NULL AND executed_at IS NULL) || '|' || count(*) || '|' || bool_and(metadata::text NOT LIKE '%example.com%' AND justification NOT LIKE '%example.com%') FROM audit_log WHERE target_id = '$EM_USER' AND action = 'ACCOUNT_DELETION_CANCELLED' AND actor_type = 'OPERATOR'")" "0|1|true"
+  expect "…and GET /me is clear again" 200 '"deletionRequest":null' -- "$API/me" -H "Authorization: Bearer $EM_A"
+  if EM_OUT="$(em_feed "$EM_EMAIL" | account_op cancel-deletion "smoke: again" 2>&1)"; then fail "cancelling with nothing pending is refused" "$EM_OUT"; else
+    case "$EM_OUT" in *"no deletion that can still be cancelled"*) pass "cancelling with nothing pending does nothing";; *) fail "cancelling with nothing pending is refused" "$EM_OUT";; esac; fi
+else
+  skip "account deletion by email (psql not reachable through docker compose)"
+fi
+flush_buckets
+
 echo; echo "data export — asked for, built by the job, downloaded, expired by a withdrawal, limited (FR-009, FR-094, ADR-0059)"
 # The job runs on a five-second schedule here (the boot above; with --attach, start the server with
 # --moyi.scheduling.data-export.cron='*/5 * * * * *'). The first archive is built while the bond is

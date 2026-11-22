@@ -33,6 +33,11 @@ internal data class DeletionRequest(
     fun canBeCancelledAt(now: Instant): Boolean = now.isBefore(cancellableUntil)
 
     companion object {
+        /**
+         * Also written in SQL, as `interval '336 hours'`, by the operator's V69 functions (admin module,
+         * deletion asked for by email): change one and the other, or the job and the cancel disagree.
+         * `DeletionRequestTest` holds the two together.
+         */
         val CANCELLATION_WINDOW: Duration = Duration.ofDays(14)
         val DEADLINE: Duration = Duration.ofDays(30)
 
