@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# Issue #205 (shared-setting pushes, ADR-0069) adds a section before the media section: a setting
+# PATCH asks one SHARED_SETTING_CHANGED push for the other member, REQUESTED until the consumer holds
+# it; a second change inside two minutes coalesces into SEVERAL; a proposal's ending calls off its
+# opening push and shows in closedProposals; a leave cancels every owed row of the bond as
+# bond_ended, and no log line carries a member id. Last run on 2026-11-22, on feat/shared-setting-push,
+# from a jar of 16c02784's tree (main 0864d082 merged), on a fresh database that applied 65 migrations
+# to V71, against its own compose project (moyi-ss205: Postgres 55205, Valkey 56205, MinIO 57205),
+# the jar booted by hand (local profile, the five crons at */5, ports 18205/18206) and --attach:
+# 2017 passed, 0 failed, 0 skipped. An earlier run failed 3 probes that pinned the categories without
+# the new sharedSettings toggle; those expectations were stale, not the API.
+#
 # Issue #200 (reminder nudges, ADR-0068) adds a section after the daily reminder's: a fresh bond moved
 # back four hours by SQL into a region anchor zone where it is about noon, her reminder three hours
 # before the last boundary, so nudge 2 falls on it and nudge 1 outside the look-back; one row keyed
