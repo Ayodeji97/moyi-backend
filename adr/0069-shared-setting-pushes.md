@@ -56,8 +56,11 @@ tables and the worked cases; this record is what was decided.
 5. **Ending a Bond calls off every push of that Bond still owed** (lead): `EndBond.end`, the one path
    of leave, block and account deletion, calls `Notifications.cancelBond(bondId)` in its own
    transaction; every `REQUESTED` or `HELD` push of the Bond, every member and category, is
-   `CANCELLED` (`bond_ended`). Nothing arrives after a leave; leave and block stay identical in the
-   ledger.
+   `CANCELLED` (`bond_ended`). No push of the Bond still owed when the leave commits arrives after
+   it; leave and block stay identical in the ledger. The `bond.notify` consumer takes the Bond's row
+   lock, so a shared change cannot slip past a leave. The older `PARTNER_JOINED` and
+   `PROPOSAL_OPENED` consumers take no lock, so a push they record in the milliseconds around a
+   leave can still be sent (final review, recorded, not fixed here).
 6. **How a proposal ended: two columns, the reading derived** (owner asked; lead shaped). V70 adds
    `bond_proposals.cancelled_by_member_id` and `cancel_cause` (`MEMBER`, `LAPSED`, `BOND_ENDED`).
    Withdrawn and declined are **not stored**: a `MEMBER` cancel by the proposer is withdrawn, by
@@ -168,7 +171,9 @@ Each is the lead's, the owner's to revise; the cost of each is named.
 
 ## Owed
 
-- **The words and the channel in the app**, coordinated with a release; the owner's to approve.
+- **The words and the channel in the app, released before this backend is deployed.** The
+  category is on by default, and an app without the five strings shows the raw key on iOS and a
+  bare title on Android (final review I1). Deploy order: app release first, then the backend.
 - **The app**: read `closedProposals`, offer `sharedSettings`, route the new `kind`.
 - **Corpus:** doc 03 FR-081 and FR-082; ADR-0046's table, which still lists `ProposalOpened` from
   two services when `EnableSemanticSearch` publishes it too.

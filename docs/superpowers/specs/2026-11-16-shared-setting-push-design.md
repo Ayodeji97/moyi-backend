@@ -564,9 +564,11 @@ publish `ProposalClosed` from `EndBond`; drop the opening-push call-off; take th
   within 70 s, `SENT` by the logging provider, whose line carries no id. Existing probes that count
   every category in `NB_BOND` (smoke.sh:3155, :3278) are re-read: a `PATCH` in that section now
   asks a push.
-- **Runbook:** none new. **Deploy:** V70 and V71 additive; deploy the backend before an app release
-  that offers the toggle; the push shows text only once the app ships the five strings and the
-  channel (ruling 15).
+- **Runbook:** a rollback of the jar past V71 first cancels every owed `SHARED_SETTING_CHANGED` row,
+  which the older jar cannot read. **Deploy:** V70 and V71 are additive, but
+  `sharedSettings` is on by default, so the backend asks these pushes from its first minute. The app
+  release with the five strings and the channel ships **first**; an app without them shows the raw
+  key on iOS and a bare title on Android (final review I1, amending ruling 15).
 
 ## 12. Amendments (in the build PR, and the corpus)
 
