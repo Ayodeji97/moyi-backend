@@ -54,6 +54,11 @@ import java.util.UUID
  * countdown off, are exactly what the other member must hear. An ended Bond
  * is told nothing by any of them.
  *
+ * **A redelivered withdrawal's skip** (a member whose opening push was called off is told nothing more)
+ * relies on the delivery's ack committing with its handling: the redelivery then finds the opening push
+ * already `CANCELLED` and cannot tell it from a first delivery's work, so the skip must not be re-derived
+ * from anything the handling itself changes.
+ *
  * **The shared-setting push holds the Bond's row lock** (`FOR UPDATE`, the one
  * `EndBond` takes) from before it reads whether the Bond has ended until the
  * delivery commits (spec §7). Without it a leave could commit between that read

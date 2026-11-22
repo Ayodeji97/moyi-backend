@@ -53,7 +53,7 @@ interface PushAudiences {
  * caller outside `bond` may read one and cannot make one.
  *
  * @property takesWrites the Bond-level half of every push decision: `false`
- *   and nobody is told anything.
+ *   and nobody is told anything (except shared-setting pushes, see [hasEnded]).
  * @property hasEnded the Bond is over (archived or deleted). Narrower than "does not take
  *   writes" by exactly a deletion counting down: the gate of the shared-setting push alone
  *   (ADR-0069 decision 4), so that the agreement that starts the countdown, and calling it off,

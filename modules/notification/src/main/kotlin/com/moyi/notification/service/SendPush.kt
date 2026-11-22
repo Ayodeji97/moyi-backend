@@ -239,6 +239,9 @@ internal class SendPush(
          * has none, and `notification.push.cancelled` counts it. So the final outcomes (every
          * outcome but `held` and `settling`) sum to the pushes that reached a final outcome.
          *
+         * A push can count `settling` first (its own two minutes), then `held` (quiet hours), so one push
+         * may contribute both before its final outcome.
+         *
          * `settling` is a hold by the push's own `not_before` (a coalescing push's two minutes,
          * ADR-0069 decisions 7 and 13); `held` is a hold by quiet hours, including one whose end is
          * later than the push's `not_before`. So `held` alone is quiet-hours volume.
@@ -263,7 +266,7 @@ internal class SendPush(
         ) : Decision
 
         /**
-         * `DROPPED_BUDGET`, unsent. A soft nudge's drop is the budget too (ADR-0068 decision 5), so one
+         * `DROPPED_BUDGET`, unsent. A leaving-room drop is the budget too (ADR-0068 decision 5), so one
          * status; [slot] keeps which of FR-082's lines dropped it, for counting the two apart.
          */
         data class Drop(

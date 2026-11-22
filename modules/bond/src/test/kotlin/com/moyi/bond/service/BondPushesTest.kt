@@ -149,7 +149,7 @@ internal class BondPushesTest(
     }
 
     @Test
-    fun `a proposal called off before it was told is told to nobody`() {
+    fun `a proposal called off before it was told is told as a withdrawal to the member never pushed it`() {
         val bond = pairedBond()
         dispatchAll()
         clearPushes()

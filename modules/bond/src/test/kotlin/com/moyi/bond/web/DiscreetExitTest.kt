@@ -358,6 +358,8 @@ internal class DiscreetExitTest(
         transactions.executeWithoutResult { notifications.request(heldReveal(bea, bondId)) }
         dispatchAll()
 
+        val owedRows = jdbc.queryForObject("SELECT count(*) FROM notifications", Int::class.java)
+        owedRows shouldBe 3
         val owedBefore = statusByCategory()
         val sharedBefore = sharedRows()
         val cancelled = cancelledBondEndedCount()
