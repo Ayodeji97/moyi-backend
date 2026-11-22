@@ -111,6 +111,8 @@ arithmetic; this record is what was decided.
     held back for a slot the reveal could still use. Nudge 1 and reveal-class pushes are unchanged;
     no new parameter.
 
+*Amended 2026-11-16 (issue #205, ADR-0069):* decision 19 applies to every non-reveal push, not to soft nudges alone: once a Bond's reserved slot is spent today, no non-reveal push takes its last slot, and nudge 1 loses its exemption (ADR-0069 decision 10); decision 7's supersede has a second, by group, for a category that coalesces (ADR-0069 decision 7).
+
 ## Consequences
 
 **Positive:** a member who has not written is nudged up to three times, never after writing and never

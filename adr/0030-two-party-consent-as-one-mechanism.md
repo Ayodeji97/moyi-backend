@@ -154,6 +154,8 @@ else about the bond had moved in between — including the other member's own re
 Every path still takes the bond's **row lock** (ADR-0028 §6a), which is what makes each
 read-then-conditional-write one decision.
 
+*Amended 2026-11-16 (issue #205, ADR-0069):* a proposal's cancel records its cause (`MEMBER`, `LAPSED`, `BOND_ENDED`) and, for `MEMBER`, the member; a proposal closed by the bond ending names nobody (ADR-0069 decision 6).
+
 ## Consequences
 
 - **Three new `ErrorCode` values** (`PROPOSAL_PENDING`, `PROPOSAL_NEEDS_OTHER_MEMBER`,

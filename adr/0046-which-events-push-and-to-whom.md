@@ -197,6 +197,8 @@ for the owner (Open).
 **10. Records.** ADR-0044 decision 2 said the push-token lock's namespace `2` was free; bond's
 "bonds of a user" lock (FR-025) uses it too. Amended there in this change (ADR-0045 Owed).
 
+*Amended 2026-11-16 (issue #205, ADR-0069):* decision 1's table gains two rows, `BondSettingsChanged` and `ProposalClosed`, to `SHARED_SETTING_CHANGED` (ADR-0069 decisions 2 and 11); decision 4's gate does not apply to this category, whose gate is that the Bond has not ended, and an ending calls off every push of the Bond still owed (ADR-0069 decisions 4 and 5); decision 7: an ending of a proposal calls off its opening push still owed (ADR-0069 decision 3); decision 9's copy table gains the five keys `push_shared_setting_changed_title`, `push_shared_setting_changed_body`, and the accepted, declined and withdrawn bodies (ADR-0069 decision 9).
+
 ## Consequences
 
 **Positive.** Every push FR-080 lists is now requested by the module that holds its fact, and

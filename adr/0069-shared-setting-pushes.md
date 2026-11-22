@@ -124,6 +124,33 @@ can leave two owed setting pushes for one member. `dropped_leaving_room` now cou
 **Neutral:** the cross-Bond case of ADR-0068 decision 5 stays open for this category, as for
 milestones. Proposal cancellers before V70 read `UNRECORDED`.
 
+## Rulings while it was built
+
+Each is the lead's, the owner's to revise; the cost of each is named.
+
+- **C1: coalescing is a `PushCategory` property.** The domain imports nothing (`ArchitectureTest`), so
+  `Coalescing` could not read `api`. `PushCategory.coalesces` says which categories settle; `SETTLE`
+  stays in `notification.domain.Coalescing`; `merged(own, cancelled, several)` is generic over the
+  domain's own enum. Cost: none.
+- **Locks in id order, and a bond index (Task 2 review).** `cancelOwedOfBond`, `cancelOwedInGroup` and
+  `cancelOwed` lock the rows they cancel in id order: two of them, or a leave beside a coalescing
+  request, would otherwise deadlock, and a leave failing on a deadlock is visible to the member.
+  V71 (unmerged, edited in place) adds the partial index `notifications_bond_owed_idx
+  (bond_id) WHERE status IN ('REQUESTED','HELD')`, so `cancelBond` does not scan the ledger; an
+  `EXPLAIN` test pins it. Cost: one more index on a small table.
+- **A lapsed proposal's `closedAt` is its `expiresAt` (Task 6 review).** One shared function serves
+  `BondResponse` and `BondEntityTag`, so the value is stable across `closeLapsed`, which stamps a
+  later `cancelled_at`; a value that changed with no event would be a client-visible bug.
+  `UNRECORDED` reads `closedByMemberId` null. `GET /bonds` carries `closedProposals` too. Cost: a
+  lapsed proposal's close time is the moment it expired, not the moment the row was swept.
+- **The consumer takes the bond row lock (Task 8).** `NotifyBondMembers` locks the Bond (`FOR UPDATE`,
+  `EndBond`'s lock) before it reads `hasEnded` and holds it until the delivery commits, so a leave
+  cannot commit between the read and the request and leave a push its `cancelBond` could not see.
+  Cost: two deliveries for one Bond serialise.
+- **A withdrawal can be told about a proposal never pushed.** The recorded cost of decision 3, held in
+  `BondPushesTest`, where a proposal called off before its opening push was asked is told to the
+  other member as a withdrawal.
+
 ## Alternatives considered
 
 - **Treat only `SHARED_SETTING_CHANGED` specially in the budget.** Leaves the same hole open for

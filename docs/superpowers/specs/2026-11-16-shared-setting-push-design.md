@@ -293,6 +293,9 @@ deletion), `closeLapsed`, the lone member's self-confirming deletion, or `Update
 
 **Consume** (`bond.notify`, `NotifyBondMembers`, the delivery's transaction, `MANDATORY`):
 
+The consumer takes the bond row lock (`FOR UPDATE`) before it reads `hasEnded` and holds it through the
+request (§7; built in Task 8).
+
 ```
 BondSettingsChanged: change = SETTING
 ProposalClosed:      p = proposals.findInBond(bondId, proposalId)          // the row is the truth
@@ -428,8 +431,9 @@ ALTER TABLE notifications ADD CONSTRAINT notifications_shared_change_check CHECK
 ```
 
 The group supersede (`user_id`, `bond_id`, `category`, status owed) and `cancelBond` (`bond_id`,
-status owed) need no new index at this size: the first is served by `notifications_recipient_idx
-(user_id, category, created_at)`, the second scans a Bond's rows, at most a few hundred. Re-adding
+status owed) need one new index: the first is served by `notifications_recipient_idx
+(user_id, category, created_at)`, the second by the partial `notifications_bond_owed_idx
+(bond_id) WHERE status IN ('REQUESTED', 'HELD')`, in V71. Re-adding
 the category CHECK validates the table once, under a short lock; the ledger is small (ninety days,
 owner ruling 2026-11-16).
 
@@ -437,11 +441,11 @@ owner ruling 2026-11-16).
 
 | Race | What decides it | Result |
 |---|---|---|
-| The same event delivered twice | the unique key `shared:{eventId}:{userId}` | one row; the re-ask supersedes and publishes nothing |
+| The same event delivered twice | the unique key `shared:{eventId}:{userId}` | one row; the re-ask supersedes nothing and publishes nothing |
 | Two changes' requests for one member at once (two deliveries in flight) | none needed: each `UPDATE` sees only committed rows | both rows may survive: at most two pushes where one was meant; never zero |
 | A supersede while the consumer sends the older push | the consumer's `FOR UPDATE` on that row; the `UPDATE` waits, then re-reads its status | sent and left alone, or still owed and cancelled; never both |
 | A proposal confirmed and cancelled at once | the bond's row lock, then the compare-and-set (`confirm`, `cancel`), as today | one ending, one event |
-| A leave while a setting push is owed | `cancelBond` in the leave's transaction; the consumer's row lock | the push is sent before the leave commits, or cancelled; a request asked after the leave commits finds `hasEnded` |
+| A leave while a setting push is owed | `cancelBond` in the leave's transaction; the consumer's row lock (the consumer takes the bond row lock before reading `hasEnded` and holds it through the request) | the push is sent before the leave commits, or cancelled; a request asked after the leave commits finds `hasEnded` |
 | A change's event handled after the bond ended | `hasEnded` read in the consumer | nobody told |
 | `ProposalClosed` handled before `ProposalOpened` | none (no order promised) | the opening push is never asked (not live); a withdrawal is pushed about an unpushed proposal (ruling 10's recorded cost) |
 
@@ -489,7 +493,7 @@ the key reads the default, so no migration and no backfill (the mechanism ADR-00
 - `PushBudgetTest`: the §3 B19 table as one test (reserved spent at 12:00, three sent, a
   non-reveal push → `DROPPED_LEAVING_ROOM`, then the reveal → `REMAINDER`); the same for each
   non-reveal category, nudge 1 (`leaveFree = 0`) included (**the existing case "leaveFree 0 →
-  REMAINDER" flips by this ruling; it is changed, not bent**); reserved unspent and three sent →
+  REMAINDER" flips by this ruling; it is changed, not bent**); reserved unspent and two sent →
   a non-reveal push still `REMAINDER`; a reveal-class push with reserved spent and three sent →
   `REMAINDER`.
 - `CoalescingTest` (pure): `merged(SETTING, [SETTING]) = SETTING`; `merged(SETTING,
@@ -548,8 +552,9 @@ publish `ProposalClosed` from `EndBond`; drop the opening-push call-off; take th
   ends `BOND_ENDED`, naming nobody, and every owed push of the Bond is called off; the `GET /bonds`
   rows name `closedProposals`; the notification-preferences rows name `sharedSettings`.
 - **Smoke** (`scripts/smoke.sh`, a new section after the N3 pushes, a fresh pair and bond so that no
-  earlier probe's counts move): she renames → one owed row for him, `SETTING`, `HELD` with
-  `not_before` two minutes on, none for her; she toggles strict mode twice → still one owed, the
+  earlier probe's counts move): she renames → one owed row for him, `SETTING`, with
+  `not_before` two minutes on (it stays `REQUESTED` until the delivery consumer holds it, `HELD`, about
+  a minute and a half on in the smoke run), none for her; she toggles strict mode twice → still one owed, the
   others `CANCELLED`, `not_before` unchanged; a same-value `PATCH` → no new row; he proposes a zone
   change and she declines → `closedProposals` shows `DECLINED` by her and his owed row becomes
   `SEVERAL`; with her quiet hours set over now, he requests deletion and withdraws it → her
