@@ -34,6 +34,10 @@ dependencies {
     // holds the leaf.
     implementation(projects.modules.notification)
 
+    // `bond.notify.shared_changes` (ADR-0069, spec §9): what the shared-setting push decided for
+    // each member, counted where it is decided. Also the registry type the test context supplies.
+    implementation("io.micrometer:micrometer-core")
+
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
 
     // This module owns its own HTTP edge — controllers and DTOs live in
@@ -65,7 +69,4 @@ dependencies {
     // stops the schema before V13, inserts bonds, and then migrates on — the
     // only way to run V13's backfill against rows that exist.
     testImplementation("org.flywaydb:flyway-core")
-    // A registry for the test context: `notification`'s push request counts what it settles
-    // (#200), and this context has no actuator to supply one.
-    testImplementation("io.micrometer:micrometer-core")
 }

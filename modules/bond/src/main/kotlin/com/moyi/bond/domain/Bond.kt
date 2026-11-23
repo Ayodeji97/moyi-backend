@@ -48,6 +48,14 @@ internal enum class BondStatus {
      * from two places.
      */
     val isOpen: Boolean get() = this == PENDING_MEMBER || this == ACTIVE
+
+    /**
+     * Over: nothing more happens to it but being read (and, once `DELETED`, not even that).
+     * Narrower than "not [isOpen]" by exactly `PENDING_DELETION`, which is not open (it takes no
+     * writes) and has not ended (it can still be left, blocked, or called off). The one statement
+     * of that rule: [Bond.canBeEnded] reads it, and ADR-0069 decision 4 gates the shared-setting push on it.
+     */
+    val hasEnded: Boolean get() = this == ARCHIVED || this == DELETED
 }
 
 /**
@@ -227,7 +235,7 @@ internal data class Bond(
      * permitting `block` would make the two distinguishable, which is the oracle
      * doc 26 §2.1 forbids. Found by the review of PR #41.
      */
-    val canBeEnded: Boolean get() = isOpen || status == BondStatus.PENDING_DELETION
+    val canBeEnded: Boolean get() = !status.hasEnded
 
     /**
      * The second member joins (FR-022).

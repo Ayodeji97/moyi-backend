@@ -125,7 +125,9 @@ internal class RequestDeletion(
 
                 // An unanswered ask: withdraw it, and the bond never changed status.
                 pending != null -> {
-                    proposals.cancel(pending.id, now)
+                    proposals.cancel(pending.id, membership.memberId, now).also { closed ->
+                        if (closed) support.events.publish(ProposalClosed.of(pending, membership.memberId, now))
+                    }
                 }
 
                 // Already counting down: this is the escape hatch itself.
@@ -135,6 +137,8 @@ internal class RequestDeletion(
                     // the days in between are not days anybody missed.
                     bond.deletionRequestedAt?.let { pauses.record(bond.id, it, now) }
                     bonds.update(bond.cancelDeletion(now))
+                    // The box is no longer closing: a shared change, told as one (ADR-0069).
+                    support.events.publish(BondSettingsChanged.of(membership, now))
                     true
                 }
 
@@ -183,6 +187,7 @@ internal class RequestDeletion(
         // bond is already counting down and there is nothing left to do.
         if (proposals.confirm(proposal.id, membership.memberId, now)) {
             schedule(bond, now)
+            support.events.publish(ProposalClosed.of(proposal, membership.memberId, now))
             log.info("Bond {} was scheduled for deletion by agreement", bond.id.value)
         }
     }

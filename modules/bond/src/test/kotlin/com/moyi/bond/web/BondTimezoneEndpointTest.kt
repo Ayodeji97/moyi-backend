@@ -6,6 +6,7 @@ import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterEach
@@ -22,6 +23,8 @@ import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
+import tools.jackson.databind.JsonNode
+import tools.jackson.databind.json.JsonMapper
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -350,6 +353,144 @@ internal class BondTimezoneEndpointTest(
         expired.contentAsString shouldContain "\"pendingTimezoneChange\":null"
     }
 
+    @Test
+    fun `a new bond shows no closed proposal`() {
+        val (ada, _, bondId) = pairedBond()
+
+        closed(ada, bondId).size() shouldBe 0
+    }
+
+    @Test
+    fun `a decline is DECLINED by the answerer, and both members see the same entry`() {
+        val (ada, bea, bondId) = pairedBond()
+        propose(ada, bondId, "Europe/London").status shouldBe 200
+        val proposalId = proposalId()
+
+        cancel(bea, bondId).status shouldBe 204
+
+        val seenByBea = closed(bea, bondId)
+        seenByBea.size() shouldBe 1
+        seenByBea[0]["id"].asString() shouldBe proposalId
+        seenByBea[0]["kind"].asString() shouldBe "TIMEZONE_CHANGE"
+        seenByBea[0]["outcome"].asString() shouldBe "DECLINED"
+        seenByBea[0]["closedByMemberId"].asString() shouldBe memberId(bea)
+        seenByBea[0]["proposedByMemberId"].asString() shouldBe memberId(ada)
+        closed(ada, bondId) shouldBe seenByBea
+    }
+
+    @Test
+    fun `a withdrawal is WITHDRAWN by the proposer`() {
+        val (ada, bea, bondId) = pairedBond()
+        propose(ada, bondId, "Europe/London").status shouldBe 200
+
+        cancel(ada, bondId).status shouldBe 204
+
+        closed(bea, bondId)[0]["outcome"].asString() shouldBe "WITHDRAWN"
+        closed(bea, bondId)[0]["closedByMemberId"].asString() shouldBe memberId(ada)
+    }
+
+    @Test
+    fun `an agreement is ACCEPTED by the confirmer`() {
+        val (ada, bea, bondId) = pairedBond()
+        propose(ada, bondId, "Europe/London").status shouldBe 200
+
+        confirm(bea, bondId).status shouldBe 200
+
+        closed(ada, bondId)[0]["outcome"].asString() shouldBe "ACCEPTED"
+        closed(ada, bondId)[0]["closedByMemberId"].asString() shouldBe memberId(bea)
+    }
+
+    @Test
+    fun `a lapse with no write shows LAPSED naming nobody, and moves the ETag`() {
+        val (ada, bea, bondId) = pairedBond()
+        propose(ada, bondId, "Europe/London").status shouldBe 200
+        val live = getBond(bea, bondId).getHeader(HttpHeaders.ETAG)!!
+        jdbc.update("UPDATE bond_proposals SET proposed_at = now() - interval '9 days', expires_at = now() - interval '2 days'")
+
+        val lapsed = conditionalGet(bea, bondId, live)
+
+        lapsed.status shouldBe 200
+        lapsed.getHeader(HttpHeaders.ETAG) shouldNotBe live
+        val entry = JsonMapper().readTree(lapsed.contentAsString)["closedProposals"][0]
+        entry["outcome"].asString() shouldBe "LAPSED"
+        entry["closedByMemberId"].isNull shouldBe true
+    }
+
+    @Test
+    fun `a lapse is dated by its expiry before and after a later proposal closes the row`() {
+        val (ada, _, bondId) = pairedBond()
+        propose(ada, bondId, "Europe/London").status shouldBe 200
+        jdbc.update("UPDATE bond_proposals SET proposed_at = now() - interval '9 days', expires_at = now() - interval '2 days'")
+        val before = closed(ada, bondId)[0]
+        before["outcome"].asString() shouldBe "LAPSED"
+
+        propose(ada, bondId, "Asia/Tokyo").status shouldBe 200
+
+        val after = closed(ada, bondId)[0]
+        jdbc.queryForObject("SELECT count(*) FROM bond_proposals WHERE cancel_cause = 'LAPSED'", Int::class.java) shouldBe 1
+        after["id"] shouldBe before["id"]
+        after["closedAt"] shouldBe before["closedAt"]
+    }
+
+    @Test
+    fun `GET bonds carries the same closedProposals as GET bond`() {
+        val (ada, bea, bondId) = pairedBond()
+        propose(ada, bondId, "Europe/London").status shouldBe 200
+        cancel(bea, bondId).status shouldBe 204
+
+        val list =
+            JsonMapper().readTree(
+                mockMvc
+                    .get("/api/v1/bonds") { header(HttpHeaders.AUTHORIZATION, bearer(ada)) }
+                    .andReturn()
+                    .response.contentAsString,
+            )
+
+        list["bonds"][0]["closedProposals"].size() shouldBe 1
+        list["bonds"][0]["closedProposals"] shouldBe closed(ada, bondId)
+    }
+
+    @Test
+    fun `a row whose cause was never recorded reads UNRECORDED and names nobody`() {
+        val (ada, bea, bondId) = pairedBond()
+        propose(ada, bondId, "Europe/London").status shouldBe 200
+        // What V70 leaves of an old cancel it cannot attribute: cancelled, no cause, no member.
+        jdbc.update("UPDATE bond_proposals SET cancelled_at = now()")
+
+        val entry = closed(bea, bondId)[0]
+
+        entry["outcome"].asString() shouldBe "UNRECORDED"
+        entry["closedByMemberId"].isNull shouldBe true
+    }
+
+    @Test
+    fun `a leave ends a pending proposal as BOND_ENDED, naming nobody`() {
+        val (ada, bea, bondId) = pairedBond()
+        propose(ada, bondId, "Europe/London").status shouldBe 200
+
+        leave(bea, bondId).status shouldBe 204
+
+        val entry = closed(ada, bondId)[0]
+        entry["outcome"].asString() shouldBe "BOND_ENDED"
+        entry["closedByMemberId"].isNull shouldBe true
+    }
+
+    @Test
+    fun `only the latest ending of a kind is shown`() {
+        val (ada, bea, bondId) = pairedBond()
+        propose(ada, bondId, "Europe/London").status shouldBe 200
+        cancel(ada, bondId).status shouldBe 204
+        propose(ada, bondId, "Asia/Tokyo").status shouldBe 200
+        val second = proposalId()
+        cancel(bea, bondId).status shouldBe 204
+
+        val entries = closed(ada, bondId)
+
+        entries.size() shouldBe 1
+        entries[0]["id"].asString() shouldBe second
+        entries[0]["outcome"].asString() shouldBe "DECLINED"
+    }
+
     private fun conditionalGet(
         userId: UUID,
         bondId: String,
@@ -361,6 +502,17 @@ internal class BondTimezoneEndpointTest(
                 header(HttpHeaders.IF_NONE_MATCH, etag)
             }.andReturn()
             .response
+
+    private fun closed(
+        userId: UUID,
+        bondId: String,
+    ): JsonNode = JsonMapper().readTree(getBond(userId, bondId).contentAsString)["closedProposals"]
+
+    private fun proposalId(): String =
+        jdbc.queryForObject("SELECT id FROM bond_proposals ORDER BY proposed_at DESC LIMIT 1", String::class.java)!!
+
+    private fun memberId(userId: UUID): String =
+        jdbc.queryForObject("SELECT id FROM bond_members WHERE user_id = ?", String::class.java, userId)!!
 
     // ---- helpers ------------------------------------------------------------
 

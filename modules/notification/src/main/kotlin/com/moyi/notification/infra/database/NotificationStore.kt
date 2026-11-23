@@ -1,6 +1,7 @@
 package com.moyi.notification.infra.database
 
 import com.moyi.notification.api.PushCategory
+import com.moyi.notification.api.SharedChange
 import com.moyi.notification.domain.NotificationStatus
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
@@ -14,7 +15,7 @@ import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
-/** The `notifications` ledger (V29, V30, V58, V68). */
+/** The `notifications` ledger (V29, V30, V58, V68, V71). */
 @Suppress("TooManyFunctions") // One per statement on the ledger, in the ledger's terms.
 @Component
 internal class NotificationStore(
@@ -32,8 +33,8 @@ internal class NotificationStore(
         jdbc.update(
             """
             INSERT INTO notifications (id, user_id, bond_id, category, dedupe_key, not_before, stale_after, status, created_at,
-                                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date, nudge, leave_free_across_bonds)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'REQUESTED', ?, ?, ?, ?, ?, ?, ?, ?)
+                                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date, nudge, leave_free_across_bonds, shared_change)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'REQUESTED', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (dedupe_key) DO NOTHING
             """.trimIndent(),
             push.id,
@@ -51,6 +52,7 @@ internal class NotificationStore(
             push.bondDate?.let(java.sql.Date::valueOf),
             push.nudge,
             push.leaveFreeAcrossBonds,
+            push.sharedChange?.name,
         ) == 1
 
     /**
@@ -64,7 +66,7 @@ internal class NotificationStore(
             .query(
                 """
                 SELECT id, user_id, bond_id, category, not_before, stale_after, status,
-                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date, nudge, leave_free_across_bonds
+                       zone, quiet_hours_start, quiet_hours_end, wanted, bond_date, nudge, leave_free_across_bonds, shared_change
                   FROM notifications WHERE id = ? FOR UPDATE
                 """.trimIndent(),
                 { row, _ -> storedPush(row) },
@@ -109,6 +111,12 @@ internal class NotificationStore(
      * (and left alone) or still owed (and cancelled): never both sent and
      * cancelled.
      *
+     * **Every statement here that cancels several rows locks them in id order**
+     * (`ORDER BY id FOR UPDATE`), so two of them racing (a leave's [cancelOwedOfBond]
+     * and a coalescing [cancelOwedInGroup], say) cannot take two rows in opposite
+     * orders and deadlock. The subquery's status test is read again on each row it
+     * waited for, so a row settled meanwhile is passed over.
+     *
      * @return what this call cancelled, and only that: a push already settled,
      *   cancelled before, or never asked for is not returned, so nothing is
      *   counted or inherited from twice (spec C16, ADR-0068 decision 7).
@@ -117,18 +125,79 @@ internal class NotificationStore(
         jdbc.query(
             """
             UPDATE notifications SET status = 'CANCELLED'
-             WHERE dedupe_key = ANY (?) AND status IN ('REQUESTED', 'HELD')
+             WHERE id IN (SELECT id FROM notifications
+                           WHERE dedupe_key = ANY (?) AND status IN ('REQUESTED', 'HELD')
+                           ORDER BY id FOR UPDATE)
             RETURNING category, nudge, leave_free_across_bonds
             """.trimIndent(),
-            { row, _ ->
-                CancelledPush(
-                    category = PushCategory.valueOf(row.getString("category")),
-                    nudge = row.getObject("nudge", Integer::class.java)?.toInt(),
-                    leaveFreeAcrossBonds = row.getInt("leave_free_across_bonds"),
-                )
-            },
+            { row, _ -> cancelledPush(row) },
             dedupeKeys.toTypedArray(),
         )
+
+    /**
+     * `CANCELLED` for every push of [category] to [userId] in [bondId] still owed (`REQUESTED` or
+     * `HELD`) but [except]: a coalescing push superseding its group (ADR-0069 decision 7). One
+     * statement, served by `notifications_recipient_idx (user_id, category, created_at)`. A push
+     * the consumer has locked is waited for, and its status read again: sent and left alone, or
+     * still owed and cancelled, never both. Rows committed after this statement began are not
+     * seen, so two requests at once may both survive (spec §7): at most one push too many, never
+     * none.
+     *
+     * @return what this call cancelled, and only that.
+     */
+    fun cancelOwedInGroup(
+        userId: UUID,
+        bondId: UUID,
+        category: PushCategory,
+        except: UUID,
+    ): List<CoalescedPush> =
+        jdbc.query(
+            """
+            UPDATE notifications SET status = 'CANCELLED'
+             WHERE id IN (SELECT id FROM notifications
+                           WHERE user_id = ? AND bond_id = ? AND category = ? AND id <> ? AND status IN ('REQUESTED', 'HELD')
+                           ORDER BY id FOR UPDATE)
+            RETURNING category, nudge, not_before, shared_change
+            """.trimIndent(),
+            { row, _ ->
+                CoalescedPush(
+                    category = PushCategory.valueOf(row.getString("category")),
+                    nudge = row.getObject("nudge", Integer::class.java)?.toInt(),
+                    notBefore = row.getTimestamp("not_before").toInstant(),
+                    sharedChange = row.getString("shared_change")?.let(SharedChange::valueOf),
+                )
+            },
+            userId,
+            bondId,
+            category.name,
+            except,
+        )
+
+    /**
+     * Sets when the push [id] may go and which change it carries: a coalescing push taking over the
+     * earliest time, and the merged change, of what it superseded (ADR-0069 decision 7).
+     */
+    fun retime(
+        id: UUID,
+        notBefore: Instant,
+        sharedChange: SharedChange?,
+    ): Boolean =
+        jdbc.update(
+            "UPDATE notifications SET not_before = ?, shared_change = ? WHERE id = ?",
+            timestamp(notBefore),
+            sharedChange?.name,
+            id,
+        ) == 1
+
+    /**
+     * `CANCELLED` for every push of [bondId] still owed (`REQUESTED` or `HELD`), every member's and
+     * every category's: a Bond that has ended (ADR-0069 decision 5). One statement, through the
+     * partial `notifications_bond_owed_idx` (V71), so the leave's transaction reads the Bond's owed
+     * rows and not the ledger. A push the consumer has locked is waited for, as in [cancelOwed].
+     *
+     * @return what this call cancelled, and only that.
+     */
+    fun cancelOwedOfBond(bondId: UUID): List<CancelledPush> = jdbc.query(CANCEL_OWED_OF_BOND, { row, _ -> cancelledPush(row) }, bondId)
 
     /**
      * Lowers the leave-free of the push [id] to [leaveFree], never raises it: a superseding nudge
@@ -238,6 +307,13 @@ internal class NotificationStore(
                 limit,
             ).filterNotNull()
 
+    private fun cancelledPush(row: ResultSet): CancelledPush =
+        CancelledPush(
+            category = PushCategory.valueOf(row.getString("category")),
+            nudge = row.getObject("nudge", Integer::class.java)?.toInt(),
+            leaveFreeAcrossBonds = row.getInt("leave_free_across_bonds"),
+        )
+
     private fun storedPush(row: ResultSet): StoredPush {
         val quietStart = row.getTime("quiet_hours_start")?.toLocalTime()
         val quietEnd = row.getTime("quiet_hours_end")?.toLocalTime()
@@ -255,12 +331,23 @@ internal class NotificationStore(
             bondDate = row.getDate("bond_date")?.toLocalDate(),
             nudge = row.getObject("nudge", Integer::class.java)?.toInt(),
             leaveFreeAcrossBonds = row.getInt("leave_free_across_bonds"),
+            sharedChange = row.getString("shared_change")?.let(SharedChange::valueOf),
         )
     }
 
     private fun timestamp(instant: Instant): Timestamp = Timestamp.from(instant.truncatedTo(ChronoUnit.MICROS))
 
     internal companion object {
+        /** [cancelOwedOfBond]'s statement; a test EXPLAINs it to see that the partial owed index serves it. */
+        val CANCEL_OWED_OF_BOND =
+            """
+            UPDATE notifications SET status = 'CANCELLED'
+             WHERE id IN (SELECT id FROM notifications
+                           WHERE bond_id = ? AND status IN ('REQUESTED', 'HELD')
+                           ORDER BY id FOR UPDATE)
+            RETURNING category, nudge, leave_free_across_bonds
+            """.trimIndent()
+
         /** [datedSince]'s statement; a test EXPLAINs it to see that the recipient index can serve it. */
         val DATED_SINCE =
             """
@@ -296,6 +383,8 @@ internal data class NewPush(
     val nudge: Int?,
     /** How many cross-Bond slots the push must leave free when sent (V68). */
     val leaveFreeAcrossBonds: Int,
+    /** Which shared change a shared-setting push is about; `null` for any other push (V71). */
+    val sharedChange: SharedChange?,
 ) {
     val quietHoursStart: LocalTime? get() = quietHours?.start
     val quietHoursEnd: LocalTime? get() = quietHours?.end
@@ -321,15 +410,32 @@ internal data class StoredPush(
     val nudge: Int?,
     /** How many cross-Bond slots the push must leave free when sent: 0 for a row written before V68. */
     val leaveFreeAcrossBonds: Int,
+    /** Which shared change a shared-setting push is about: `null` for any other push (V71). */
+    val sharedChange: SharedChange?,
 )
 
-/** A push [NotificationStore.cancelOwed] has just called off: what a superseding nudge inherits from. */
+/**
+ * A push [NotificationStore.cancelOwed] or [NotificationStore.cancelOwedOfBond] has just called
+ * off: what a superseding nudge inherits from, and what the cancellation is counted by.
+ */
 internal data class CancelledPush(
     val category: PushCategory,
     /** Which nudge of its Bond-day it was: `null` for any other push, and for a row written before V68. */
     val nudge: Int?,
     /** How many cross-Bond slots it had to leave free when sent. */
     val leaveFreeAcrossBonds: Int,
+)
+
+/**
+ * A push [NotificationStore.cancelOwedInGroup] has just called off: what the coalescing push that
+ * superseded it takes over (its time and its change), and what the cancellation is counted by.
+ */
+internal data class CoalescedPush(
+    val category: PushCategory,
+    /** Always `null` for a coalescing category; kept so the cancellation is counted like any other. */
+    val nudge: Int?,
+    val notBefore: Instant,
+    val sharedChange: SharedChange?,
 )
 
 /** Quiet hours as two columns hold them. */

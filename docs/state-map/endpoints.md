@@ -775,7 +775,7 @@ curl -X POST "$API/auth/reset-password/check" -H 'Content-Type: application/json
 
 ### GET /bonds
 
-list your bonds
+list your bonds, with how each ended proposal ended
 
 **Needs:** an access token.
 
@@ -791,9 +791,9 @@ curl "$API/bonds" -H "Authorization: Bearer $TOKEN"
 |---|---|---|---|---|---|---|
 | `bond` | `NO_BOND` |  | 200 stays | You hold no bond, so the list is empty. An account that is not yet verified may ask too. |  | smoke |
 | `bond` | `PENDING_MEMBER` |  | 200 stays | The bond is listed, newest first, with its live invite and its code. |  | smoke |
-| `bond` | `ACTIVE` |  | 200 stays | The bond is listed with both members and whatever is waiting to be agreed. Each bond carries paused: true while a member who has not left it is suspended, and nothing about why (A3). |  | never-run |
-| `bond` | `PENDING_DELETION` |  | 200 stays | A bond counting down to deletion is still listed, with the date it is scheduled for. |  | never-run |
-| `bond` | `ARCHIVED` |  | 200 stays | A bond that has ended stays in the list of both members, the one who left included. | ADR-0026 §4, ADR-0028 §4 | test |
+| `bond` | `ACTIVE` |  | 200 stays | The bond is listed with both members and whatever is waiting to be agreed. Each bond carries paused: true while a member who has not left it is suspended, and nothing about why (A3). Each bond carries closedProposals: the latest ended proposal of each kind, at most three, with how it ended (ACCEPTED, DECLINED, WITHDRAWN, LAPSED, BOND_ENDED) and who closed it. |  | never-run |
+| `bond` | `PENDING_DELETION` |  | 200 stays | A bond counting down to deletion is still listed, with the date it is scheduled for. Each bond carries closedProposals: the latest ended proposal of each kind, at most three, with how it ended (ACCEPTED, DECLINED, WITHDRAWN, LAPSED, BOND_ENDED) and who closed it. |  | never-run |
+| `bond` | `ARCHIVED` |  | 200 stays | A bond that has ended stays in the list of both members, the one who left included. Each bond carries closedProposals: the latest ended proposal of each kind, at most three, with how it ended (ACCEPTED, DECLINED, WITHDRAWN, LAPSED, BOND_ENDED) and who closed it. | ADR-0026 §4, ADR-0028 §4 | test |
 
 ### POST /bonds
 
@@ -946,7 +946,7 @@ curl -X POST "$API/bonds/$BOND/leave" -H "Authorization: Bearer $TOKEN" -H 'Cont
 | `bond.invite` | `REVOKED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. A leave of a bond that has already ended is refused: see the bond region. | ADR-0028 §1 | never-run |
 | `bond.invite` | `EXPIRED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. A leave of a bond that has already ended is refused: see the bond region. | ADR-0028 §1 | never-run |
 | `bond.proposal` | `NONE` |  | 204 stays | Nothing was ever proposed, so ending the bond has nothing to cancel. A leave of a bond that has already ended is refused: see the bond region. | ADR-0030 §11 | smoke |
-| `bond.proposal` | `PROPOSED` |  | 204 → `CANCELLED` | Leaving cancels whatever was waiting to be agreed, of either kind and whoever opened it, in the same transaction. Otherwise an agreement arriving later would try to move the zone of a bond that has ended. | ADR-0030 §11, ADR-0028 | test |
+| `bond.proposal` | `PROPOSED` |  | 204 → `CANCELLED` | Leaving cancels whatever was waiting to be agreed, of either kind and whoever opened it, in the same transaction. Otherwise an agreement arriving later would try to move the zone of a bond that has ended. The proposal is closed BOND_ENDED and names no member, so a leave and a block read alike, and every push of the bond still owed is called off. | ADR-0030 §11, ADR-0028 | test |
 | `bond.proposal` | `CONFIRMED` |  | 204 stays | An agreed proposal is history and is not touched. If it is the deletion and the bond is counting down, the countdown goes on without you: see the bond region. A leave of a bond that has already ended is refused: see the bond region. | ADR-0030 §4a | smoke |
 | `bond.proposal` | `CANCELLED` |  | 204 stays | A proposal already called off stays as it is. A leave of a bond that has already ended is refused: see the bond region. | ADR-0030 §11 | never-run |
 | `bond.proposal` | `LAPSED` |  | 204 → `CANCELLED` | The statement that cancels what is waiting does not ask the clock, so a proposal that had lapsed and was never closed is stamped cancelled too. No response can show the difference: a lapsed proposal was already invisible. | ADR-0030 §2, §11 | never-run |
@@ -1005,7 +1005,7 @@ curl -X POST "$API/bonds/$BOND/block" -H "Authorization: Bearer $TOKEN" -H 'Cont
 | `bond.invite` | `REVOKED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. | ADR-0028 §1 | never-run |
 | `bond.invite` | `EXPIRED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. | ADR-0028 §1 | never-run |
 | `bond.proposal` | `NONE` |  | 204 stays | Nothing was ever proposed, so ending the bond has nothing to cancel. | ADR-0030 §11 | smoke |
-| `bond.proposal` | `PROPOSED` |  | 204 → `CANCELLED` | Blocking cancels whatever was waiting to be agreed, of either kind and whoever opened it, in the same transaction. Otherwise an agreement arriving later would try to move the zone of a bond that has ended. | ADR-0030 §11, ADR-0028 | never-run |
+| `bond.proposal` | `PROPOSED` |  | 204 → `CANCELLED` | Blocking cancels whatever was waiting to be agreed, of either kind and whoever opened it, in the same transaction. Otherwise an agreement arriving later would try to move the zone of a bond that has ended. The proposal is closed BOND_ENDED and names no member, so a leave and a block read alike, and every push of the bond still owed is called off. | ADR-0030 §11, ADR-0028 | never-run |
 | `bond.proposal` | `CONFIRMED` |  | 204 stays | An agreed proposal is history and is not touched. If it is the deletion and the bond is counting down, the countdown goes on without you: see the bond region. | ADR-0030 §4a | test |
 | `bond.proposal` | `CANCELLED` |  | 204 stays | A proposal already called off stays as it is. | ADR-0030 §11 | never-run |
 | `bond.proposal` | `LAPSED` |  | 204 → `CANCELLED` | The statement that cancels what is waiting does not ask the clock, so a proposal that had lapsed and was never closed is stamped cancelled too. No response can show the difference: a lapsed proposal was already invisible. | ADR-0030 §2, §11 | never-run |
@@ -1255,7 +1255,7 @@ curl "$API/bonds/$BOND/members/me/notifications" -H "Authorization: Bearer $TOKE
 |---|---|---|---|---|---|---|
 | `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
 | `bond` | `PENDING_MEMBER` |  | 200 stays | Which kinds of push you want in this bond: everything on but on-this-day until you choose. Only yours: the path has no way to name your partner's. | FR-081, Q7, ADR-0045 §1 | smoke |
-| `bond` | `ACTIVE` |  | 200 stays | Yours, as on a bond of one. Your partner's are theirs and are never shown. | FR-081, ADR-0045 §1 | test |
+| `bond` | `ACTIVE` |  | 200 stays | Yours, as on a bond of one. Your partner's are theirs and are never shown. sharedSettings is the seventh toggle, on by default: whether you are told when your partner changes a shared setting or answers or withdraws a proposal. | FR-081, ADR-0045 §1 | test |
 | `bond` | `PENDING_DELETION` |  | 200 stays | Reading is not a write, so the countdown does not stop it. |  | never-run |
 | `bond` | `ARCHIVED` |  | 200 stays | An ended bond's record stays readable, your own choices with it. | ADR-0028 §4 | test |
 
@@ -1283,7 +1283,7 @@ curl -X PUT "$API/bonds/$BOND/members/me/notifications" -H "Authorization: Beare
 |---|---|---|---|---|---|---|
 | `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | test |
 | `bond` | `PENDING_MEMBER` |  | 200 stays | Sets the kinds it is sent and keeps the others: a toggle left out is not cleared. No If-Match, and the bond's ETag does not move. | ADR-0045 §1 | smoke |
-| `bond` | `ACTIVE` |  | 200 stays | The same on a bond of two. Turning a kind off holds back your own copy only: your partner is still told, and is not told that you are not. | FR-081, Q9, ADR-0045 §1, §3 | test |
+| `bond` | `ACTIVE` |  | 200 stays | The same on a bond of two. Turning a kind off holds back your own copy only: your partner is still told, and is not told that you are not. sharedSettings is the seventh toggle, on by default: whether you are told when your partner changes a shared setting or answers or withdraws a proposal. | FR-081, Q9, ADR-0045 §1, §3 | test |
 | `bond` | `PENDING_DELETION` |  | 409 `BOND_ARCHIVED` | A bond counting down takes no writes, your own choices included. | BR-9, FR-028 | never-run |
 | `bond` | `ARCHIVED` |  | 409 `BOND_ARCHIVED` | Writes stop when the bond ends; reads do not. | BR-9, ADR-0028 §4 | test |
 

@@ -35,6 +35,9 @@ interface PushSender {
  * [nudge] is which nudge of its Bond-day a reminder is (1..3), `null` for any other push and for a
  * reminder recorded before V68. An ordinal, never a time.
  *
+ * [sharedChange] is which change a [PushCategory.SHARED_SETTING_CHANGED] push is about, `null` for any
+ * other push. A kind of change, never which setting, its value or who made it (ADR-0069).
+ *
  * [token] redacts itself; this class's [toString] is the generated one and is
  * safe for that reason alone.
  */
@@ -45,6 +48,7 @@ data class PushMessage(
     val staleAfter: Instant,
     val bondDate: LocalDate? = null,
     val nudge: Int? = null,
+    val sharedChange: SharedChange? = null,
 )
 
 /**

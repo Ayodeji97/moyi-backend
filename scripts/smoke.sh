@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# Issue #205 (shared-setting pushes, ADR-0069) adds a section before the media section: a setting
+# PATCH asks one SHARED_SETTING_CHANGED push for the other member, REQUESTED until the consumer holds
+# it; a second change inside two minutes coalesces into SEVERAL; a proposal's ending calls off its
+# opening push and shows in closedProposals; a leave cancels every owed row of the bond as
+# bond_ended, and no log line carries a member id. Last run on 2026-11-22, on feat/shared-setting-push,
+# from a jar of 16c02784's tree (main 0864d082 merged), on a fresh database that applied 65 migrations
+# to V71, against its own compose project (moyi-ss205: Postgres 55205, Valkey 56205, MinIO 57205),
+# the jar booted by hand (local profile, the five crons at */5, ports 18205/18206) and --attach:
+# 2017 passed, 0 failed, 0 skipped. An earlier run failed 3 probes that pinned the categories without
+# the new sharedSettings toggle; those expectations were stale, not the API.
+#
 # Issue #200 (reminder nudges, ADR-0068) adds a section after the daily reminder's: a fresh bond moved
 # back four hours by SQL into a region anchor zone where it is about noon, her reminder three hours
 # before the last boundary, so nudge 2 falls on it and nudge 1 outside the look-back; one row keyed
@@ -3109,12 +3120,12 @@ NB_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['co
 expect "notifications: readable while the bond waits for its second member" 200 '"reminder":true' -- "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A"
 expect "notifications: …and settable while it waits" 200 '"proposal":true' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A" -d '{"categories":{"proposal":true}}'
 expect "notifications: the other member joins it" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$NB_CODE/accept" -H "Authorization: Bearer $NB_B"
-NB_ALL_ON='{"categories":{"reminder":true,"partnerJoined":true,"reveal":true,"milestone":true,"onThisDay":false,"proposal":true}}'
+NB_ALL_ON='{"categories":{"reminder":true,"partnerJoined":true,"reveal":true,"milestone":true,"onThisDay":false,"proposal":true,"sharedSettings":true}}'
 expect "notifications: a member who never chose has every category on but on-this-day" 200 '"onThisDay":false' -- "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A"
 is "notifications: …exactly that" "$LAST_BODY" "$NB_ALL_ON"
 expect "notifications: a PUT sets what it is sent" 200 '"onThisDay":true' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A" -d '{"categories":{"onThisDay":true,"milestone":false}}'
 expect "notifications: …and a later one keeps what it is not sent" 200 '"milestone":false' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A" -d '{"categories":{"partnerJoined":false}}'
-is "notifications: …all three as set" "$LAST_BODY" '{"categories":{"reminder":true,"partnerJoined":false,"reveal":true,"milestone":false,"onThisDay":true,"proposal":true}}'
+is "notifications: …all three as set" "$LAST_BODY" '{"categories":{"reminder":true,"partnerJoined":false,"reveal":true,"milestone":false,"onThisDay":true,"proposal":true,"sharedSettings":true}}'
 expect "notifications: the settings PUT, which clears what it is not sent, is 200" 200 '"reminderTimeLocal":"21:00"' -- -X PUT "$API/bonds/$NB_BOND/members/me/settings" -H "Authorization: Bearer $NB_A" -d '{"reminderTimeLocal":"21:00"}'
 expect "notifications: …and leaves the toggles alone" 200 '"onThisDay":true' -- "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A"
 expect "notifications: the other member's are their own, still the defaults" 200 '"onThisDay":false' -- "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_B"
@@ -3278,6 +3289,155 @@ fi
 db_is "reveal push: no solo, milestone or streak push came of it" "$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$NB_BOND' AND category NOT IN ('REMINDER', 'PARTNER_JOINED', 'REVEAL')")" "0"
 if grep -q "$NR_WORDS" "$MOYI_LOG"; then fail "reveal push: her words are in no log line" "found in $MOYI_LOG"; else pass "reveal push: her words are in no log line"; fi
 if grep -q "$NR_TOKEN" "$MOYI_LOG"; then fail "reveal push: his token is in no log line" "found in $MOYI_LOG"; else pass "reveal push: his token is in no log line"; fi
+flush_buckets
+
+echo; echo "the pushes a shared change and a proposal's ending make (issue #205, ADR-0069)"
+# A fresh pair and bond, so that no earlier probe's counts move. She renames the bond: one push owed to
+# him, SETTING, HELD (settling) two minutes on, none for her. She turns strict mode on and off: still
+# one owed, the others CANCELLED, not_before unchanged (the earliest). A PATCH that changes nothing asks
+# nothing. He proposes a zone change and she declines: the bond says DECLINED by her, and his one owed
+# push becomes SEVERAL. His held row, moved back by SQL, is released by the job and taken by the
+# logging provider, whose line carries no id, no setting and no change. With her quiet hours over now he
+# asks for the deletion and takes it back: her opening push is called off, no PROPOSAL_WITHDRAWN is
+# asked for her, and the bond says WITHDRAWN by him. He asks again and she leaves: BOND_ENDED, no
+# member, every owed row of the bond CANCELLED and no new row.
+flush_buckets
+verified_account "renamer" "203.0.113.220"; SS_A="$ACCOUNT_ACCESS"
+verified_account "renamed" "203.0.113.221"; SS_B="$ACCOUNT_ACCESS"
+expect "shared: a bond for two is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $SS_A" -d "$(bond_body "Before")"
+SS_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+SS_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "shared: the other member joins it" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$SS_CODE/accept" -H "Authorization: Bearer $SS_B"
+SS_TOKEN_A="smoke-push-token-ss-a-$RANDOM$RANDOM"; SS_TOKEN_B="smoke-push-token-ss-b-$RANDOM$RANDOM"
+expect "shared: she registers her phone" 204 "" -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $SS_A" -d "{\"token\":\"$SS_TOKEN_A\"}"
+expect "shared: he registers his" 204 "" -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $SS_B" -d "{\"token\":\"$SS_TOKEN_B\"}"
+ss_shared() { sql "SELECT count(*) FROM notifications WHERE bond_id = '$SS_BOND' AND category = 'SHARED_SETTING_CHANGED'$1"; }
+# Polls up to 40 s for the count of this bond's shared rows to reach $1.
+ss_wait() { local got=""; for _ in $(seq 1 80); do got="$(ss_shared '')"; [ "$got" = "$1" ] && break; sleep 0.5; done; printf '%s' "$got"; }
+SS_ETAG_NOW="$(curl -s -D - -o /dev/null "$API/bonds/$SS_BOND" -H "Authorization: Bearer $SS_A" | grep -i '^etag:' | head -1 | cut -d' ' -f2- | tr -d '\r')"
+expect "shared: she renames the bond" 200 '"name":"After"' -- -X PATCH "$API/bonds/$SS_BOND" -H "Authorization: Bearer $SS_A" -H "If-Match: $SS_ETAG_NOW" -d '{"name":"After"}'
+SS_ETAG_NOW="$(etag_of | tr -d '\r')"
+db_is "shared: one push is owed, the outbox having told it" "$(ss_wait 1)" "1"
+db_is "shared: …to him, SETTING, owed, its not_before about two minutes on" "$(sql "SELECT (m.role = 'MEMBER') || '|' || n.shared_change || '|' || (n.status IN ('REQUESTED', 'HELD')) || '|' || (n.not_before BETWEEN n.created_at + interval '100 seconds' AND n.created_at + interval '130 seconds') FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$SS_BOND' AND n.category = 'SHARED_SETTING_CHANGED'")" "true|SETTING|true|true"
+SS_FIRST_NB="$(sql "SELECT not_before FROM notifications WHERE bond_id = '$SS_BOND' AND category = 'SHARED_SETTING_CHANGED'")"
+db_is "shared: …and none for her" "$(sql "SELECT count(*) FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$SS_BOND' AND n.category = 'SHARED_SETTING_CHANGED' AND m.role = 'OWNER'")" "0"
+expect "shared: she turns strict mode on" 200 '"strictMode":true' -- -X PATCH "$API/bonds/$SS_BOND" -H "Authorization: Bearer $SS_A" -H "If-Match: $SS_ETAG_NOW" -d '{"strictMode":true}'
+SS_ETAG_NOW="$(etag_of | tr -d '\r')"
+expect "shared: …and off again" 200 '"strictMode":false' -- -X PATCH "$API/bonds/$SS_BOND" -H "Authorization: Bearer $SS_A" -H "If-Match: $SS_ETAG_NOW" -d '{"strictMode":false}'
+SS_ETAG_NOW="$(etag_of | tr -d '\r')"
+db_is "shared: three were asked in all" "$(ss_wait 3)" "3"
+db_is "shared: …still one owed, the others CANCELLED" "$(sql "SELECT count(*) FILTER (WHERE status IN ('REQUESTED', 'HELD')) || '|' || count(*) FILTER (WHERE status = 'CANCELLED') FROM notifications WHERE bond_id = '$SS_BOND' AND category = 'SHARED_SETTING_CHANGED'")" "1|2"
+db_is "shared: …its not_before the first one's, unchanged" "$(sql "SELECT not_before FROM notifications WHERE bond_id = '$SS_BOND' AND category = 'SHARED_SETTING_CHANGED' AND status IN ('REQUESTED', 'HELD')")" "$SS_FIRST_NB"
+expect "shared: a PATCH of the values it already has is 200" 200 '"name":"After"' -- -X PATCH "$API/bonds/$SS_BOND" -H "Authorization: Bearer $SS_A" -H "If-Match: $SS_ETAG_NOW" -d '{"name":"After","strictMode":false}'
+sleep 6
+db_is "shared: …and asked nothing: still three rows" "$(ss_shared '')" "3"
+
+expect "shared: he proposes a zone change" 200 '"proposedTimezone":"Europe/London"' -- -X PATCH "$API/bonds/$SS_BOND/timezone" -H "Authorization: Bearer $SS_B" -d '{"anchorTimezone":"Europe/London"}'
+SS_GOT=""
+for _ in $(seq 1 80); do
+  SS_GOT="$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$SS_BOND' AND category = 'PROPOSAL_OPENED'")"
+  [ "$SS_GOT" = "1" ] && break
+  sleep 0.5
+done
+db_is "shared: …her opening push is asked, one, under its own category" "$SS_GOT" "1"
+expect "shared: she declines it: 204" 204 "" -- -X DELETE "$API/bonds/$SS_BOND/timezone" -H "Authorization: Bearer $SS_A"
+db_is "shared: …his push is a fourth row, his one owed push now SEVERAL, the rest CANCELLED" "$(ss_wait 4)|$(sql "SELECT count(*) FILTER (WHERE status IN ('REQUESTED', 'HELD') AND shared_change = 'SEVERAL') || '|' || count(*) FILTER (WHERE status = 'CANCELLED') FROM notifications WHERE bond_id = '$SS_BOND' AND category = 'SHARED_SETTING_CHANGED'")" "4|1|3"
+db_is "shared: …still none for her, and the first not_before kept" "$(sql "SELECT (SELECT count(*) FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$SS_BOND' AND n.category = 'SHARED_SETTING_CHANGED' AND m.role = 'OWNER') || '|' || (SELECT not_before FROM notifications WHERE bond_id = '$SS_BOND' AND category = 'SHARED_SETTING_CHANGED' AND status IN ('REQUESTED', 'HELD'))")" "0|$SS_FIRST_NB"
+db_is "shared: …her opening push had been sent before, so there was none to call off" "$(sql "SELECT status FROM notifications WHERE bond_id = '$SS_BOND' AND category = 'PROPOSAL_OPENED'")" "SENT"
+expect "shared: he reads the bond: the zone change was DECLINED" 200 '"outcome":"DECLINED"' -- "$API/bonds/$SS_BOND" -H "Authorization: Bearer $SS_B"
+SS_CLOSED="$(python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+c=d['closedProposals']
+print(len(c), c[0]['outcome'], c[0]['closedByMemberId'] is not None and c[0]['closedByMemberId'] != c[0]['proposedByMemberId'])" <<<"$LAST_BODY")"
+is "shared: …one closed proposal, closed by her and not by him who proposed it" "$SS_CLOSED" "1 DECLINED True"
+
+# His push waits out its two minutes: the delivery consumer turns the owed row HELD (settling) when it
+# reaches it, up to two and a half minutes on. Then its hold is moved back by SQL, and the held-pushes
+# job hands it back within 70 s.
+SS_HELD=""
+for _ in $(seq 1 150); do
+  SS_HELD="$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$SS_BOND' AND category = 'SHARED_SETTING_CHANGED' AND status = 'HELD'")"
+  [ "$SS_HELD" = "1" ] && break
+  sleep 1
+done
+db_is "shared: …the consumer holds his one owed push, settling" "$SS_HELD" "1"
+sql "UPDATE notifications SET not_before = now() - interval '1 second' WHERE bond_id = '$SS_BOND' AND category = 'SHARED_SETTING_CHANGED' AND status = 'HELD'" >/dev/null
+SS_SENT=""
+for _ in $(seq 1 70); do
+  SS_SENT="$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$SS_BOND' AND category = 'SHARED_SETTING_CHANGED' AND status = 'SENT'")"
+  [ "$SS_SENT" = "1" ] && break
+  sleep 1
+done
+db_is "shared: released by the job within 70 s and taken by the logging provider, SENT" "$SS_SENT" "1"
+SS_LOGGED=0
+for _ in $(seq 1 20); do
+  SS_LOGGED="$(grep -c "Push NOT sent (provider=log): category=SHARED_SETTING_CHANGED bond=$SS_BOND" "$MOYI_LOG" || true)"
+  [ "$SS_LOGGED" = "1" ] && break
+  sleep 0.5
+done
+is "shared: …one line logged by the logging provider" "$SS_LOGGED" "1"
+SS_LINE="$(grep "Push NOT sent (provider=log): category=SHARED_SETTING_CHANGED" "$MOYI_LOG" | grep "bond=$SS_BOND" | head -1)"
+SS_IDS="$(sql "SELECT string_agg(x, ' ') FROM (SELECT user_id::text x FROM bond_members WHERE bond_id = '$SS_BOND' UNION SELECT id::text FROM bond_members WHERE bond_id = '$SS_BOND' UNION SELECT id::text FROM bond_proposals WHERE bond_id = '$SS_BOND') s")"
+SS_LEAK=""
+for needle in $SS_IDS; do case "$SS_LINE" in *"$needle"*) SS_LEAK="$SS_LEAK $needle";; esac; done
+# The bond's own id at INFO is how every push line has read since N1; this slice leaves it (spec §12 owed).
+for word in SEVERAL PROPOSAL_ACCEPTED PROPOSAL_DECLINED PROPOSAL_WITHDRAWN strict zone name= change Europe After Before member user proposal; do case "$SS_LINE" in *"$word"*) SS_LEAK="$SS_LEAK [$word]";; esac; done
+if [ -n "$SS_LINE" ] && [ -z "$SS_LEAK" ]; then pass "shared: the line names no user, member or proposal id, no setting and no change"; else fail "shared: the logging line is bare" "line '$SS_LINE', leaked:$SS_LEAK"; fi
+is "shared: …it names the bond and the category alone" "$(printf '%s' "$SS_LINE" | sed -E 's/^.*(Push NOT sent)/\1/')" "Push NOT sent (provider=log): category=SHARED_SETTING_CHANGED bond=$SS_BOND"
+
+# Her quiet hours over now; he asks for the deletion and takes it back.
+SS_QUIET_FROM="$(python3 -c 'import time; print(time.strftime("%H:%M", time.gmtime(time.time()-3600)))')"
+SS_QUIET_TO="$(python3 -c 'import time; print(time.strftime("%H:%M", time.gmtime(time.time()+3600)))')"
+expect "shared: her quiet hours are around now" 200 "\"quietHoursStart\":\"$SS_QUIET_FROM\"" -- -X PUT "$API/bonds/$SS_BOND/members/me/settings" -H "Authorization: Bearer $SS_A" -d "{\"reminderTimeLocal\":\"21:00\",\"reminderTimezone\":\"Africa/Abidjan\",\"quietHoursStart\":\"$SS_QUIET_FROM\",\"quietHoursEnd\":\"$SS_QUIET_TO\"}"
+SS_SHARED_BEFORE="$(ss_shared '')"
+expect "shared: he asks for the deletion: 202" 202 '"requestedByMemberId"' -- -X POST "$API/bonds/$SS_BOND/deletion-request" -H "Authorization: Bearer $SS_B"
+SS_GOT=""
+for _ in $(seq 1 80); do
+  SS_GOT="$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$SS_BOND' AND category = 'PROPOSAL_OPENED' AND status = 'HELD'")"
+  [ "$SS_GOT" = "1" ] && break
+  sleep 0.5
+done
+db_is "shared: …her opening push is asked and held by her quiet hours" "$SS_GOT" "1"
+expect "shared: he takes it back: 204" 204 "" -- -X DELETE "$API/bonds/$SS_BOND/deletion-request" -H "Authorization: Bearer $SS_B"
+SS_GOT=""
+for _ in $(seq 1 80); do
+  SS_GOT="$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$SS_BOND' AND category = 'PROPOSAL_OPENED' AND status = 'CANCELLED'")"
+  [ "$SS_GOT" = "1" ] && break
+  sleep 0.5
+done
+db_is "shared: …her opening push is CANCELLED" "$SS_GOT" "1"
+sleep 6
+db_is "shared: …no PROPOSAL_WITHDRAWN was asked for her, and no row of the category at all" "$(sql "SELECT count(*) FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$SS_BOND' AND n.category = 'SHARED_SETTING_CHANGED' AND m.role = 'OWNER'")|$(ss_shared '')" "0|$SS_SHARED_BEFORE"
+expect "shared: she reads the bond: the deletion request was WITHDRAWN" 200 '"outcome":"WITHDRAWN"' -- "$API/bonds/$SS_BOND" -H "Authorization: Bearer $SS_A"
+SS_CLOSED="$(python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+c=[x for x in d['closedProposals'] if x['outcome'] == 'WITHDRAWN']
+print(len(c), c[0]['closedByMemberId'] == c[0]['proposedByMemberId'])" <<<"$LAST_BODY")"
+is "shared: …one, closed by the member who proposed it" "$SS_CLOSED" "1 True"
+
+# He asks again, and she leaves.
+expect "shared: he asks for the deletion again: 202" 202 '"requestedByMemberId"' -- -X POST "$API/bonds/$SS_BOND/deletion-request" -H "Authorization: Bearer $SS_B"
+SS_GOT=""
+for _ in $(seq 1 80); do
+  SS_GOT="$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$SS_BOND' AND category = 'PROPOSAL_OPENED' AND status = 'HELD'")"
+  [ "$SS_GOT" = "1" ] && break
+  sleep 0.5
+done
+db_is "shared: …her opening push is held again, owed" "$SS_GOT" "1"
+SS_SHARED_BEFORE="$(ss_shared '')"
+expect "shared: she leaves: 204" 204 "" -- -X POST "$API/bonds/$SS_BOND/leave" -H "Authorization: Bearer $SS_A"
+sleep 6
+expect "shared: he reads the bond: the deletion request ended BOND_ENDED" 200 '"outcome":"BOND_ENDED"' -- "$API/bonds/$SS_BOND" -H "Authorization: Bearer $SS_B"
+SS_CLOSED="$(python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+c=[x for x in d['closedProposals'] if x['outcome'] == 'BOND_ENDED']
+print(len(c), c[0]['closedByMemberId'])" <<<"$LAST_BODY")"
+is "shared: …closed by no member" "$SS_CLOSED" "1 None"
+db_is "shared: …no push of the bond is owed any more" "$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$SS_BOND' AND status IN ('REQUESTED', 'HELD')")" "0"
+db_is "shared: …her held opening push was CANCELLED by the ending, and no shared row was asked" "$(sql "SELECT (SELECT count(*) FROM notifications WHERE bond_id = '$SS_BOND' AND category = 'PROPOSAL_OPENED' AND status = 'CANCELLED') || '|' || (SELECT count(*) FROM notifications WHERE bond_id = '$SS_BOND' AND category = 'SHARED_SETTING_CHANGED')")" "2|$SS_SHARED_BEFORE"
 flush_buckets
 
 echo; echo "media — an upload straight to the storage, and the four /media routes (Phase 4 D1, ADR-0047)"

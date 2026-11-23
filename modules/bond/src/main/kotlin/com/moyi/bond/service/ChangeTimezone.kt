@@ -128,6 +128,8 @@ internal class ChangeTimezone(
         // Compare-and-set: losing this race means somebody else answered it,
         // which from here is indistinguishable from it never having been live.
         if (!proposals.confirm(proposal.id, membership.memberId, now)) throw ProposalNotFoundException()
+        // One push for the answer, never a second for the zone it moves (ADR-0069).
+        support.events.publish(ProposalClosed.of(proposal, membership.memberId, now))
 
         // B5's own behaviour, unchanged: the bond records what was agreed the
         // moment it is agreed, so `GET /bonds/{id}` reflects consent at once.
@@ -164,7 +166,8 @@ internal class ChangeTimezone(
         val now = support.clock.instant().truncatedTo(ChronoUnit.MICROS)
         val proposal =
             proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()
-        if (!proposals.cancel(proposal.id, now)) throw ProposalNotFoundException()
+        if (!proposals.cancel(proposal.id, membership.memberId, now)) throw ProposalNotFoundException()
+        support.events.publish(ProposalClosed.of(proposal, membership.memberId, now))
         log.info("A zone change was cancelled on bond {}", membership.bondId.value)
     }
 

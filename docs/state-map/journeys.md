@@ -161,7 +161,7 @@ sequenceDiagram
 
 1. **you**: ask for the bond's deletion, or agree to it. Your request is recorded and waits seven days for your partner. The bond stays ACTIVE and nothing else changes. First the two of you try to end it together.
 2. (the same request) **you**: ask for the bond's deletion, or agree to it. Your request is recorded and waits seven days for your partner, whose own request is the agreement. Nothing else changes. On a bond that has ended the answer is BOND_ARCHIVED: see the bond region.
-3. **partner**: your partner agrees to your proposal. Your partner's own request is their agreement. The 30-day countdown starts and the bond takes no writes until one of you calls it off.
+3. **partner**: your partner agrees to your proposal, and you are told. Your partner's own request is their agreement. The 30-day countdown starts and the bond takes no writes until one of you calls it off. You are told (SHARED_SETTING_CHANGED, PROPOSAL_ACCEPTED), under your sharedSettings toggle.
 4. **you**: write today's entry. A bond counting down to deletion takes no new entry, from either member. It is checked under the bond's lock and before the day is looked at, so nothing is stored and no day is opened.
 5. **you**: call off the deletion. Either of you may call the deletion off at any point in the 30 days. The bond is ACTIVE again and takes writes. What becomes of the days that ended during the countdown is the day machine's: the streak passes over them; all but the first are stored SUSPENDED. You change your mind inside the 30 days. What would have come at their end, the deletion itself, is not built.
 6. **you**: leave the bond. One member leaving ends the bond for both: it becomes ARCHIVED, a record each of you can still read. Nobody is notified, and anything waiting to be agreed is cancelled. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11). Allowed while the bond is paused: a partner is never kept from leaving (ADR-0066 ruling 9; PausedBondEndpointTest). The bond is whole again, and some time later you go on your own after all. You send no body, so your entries stay.
@@ -181,7 +181,7 @@ sequenceDiagram
     participant Job as The service, on its own schedule
     You->>API: ask for the bond's deletion, or agree to it
     API-->>You: 202, bond is ACTIVE, bond.proposal is PROPOSED
-    Partner->>API: your partner agrees to your proposal
+    Partner->>API: your partner agrees to your proposal, and you are told
     Note over API: bond is PENDING_DELETION
     You->>API: write today's entry
     API-->>You: 409 BOND_ARCHIVED

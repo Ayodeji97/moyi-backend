@@ -52,6 +52,7 @@ internal class LiveOrSentTest(
                     recipient = PushRecipient(ZoneId.of("Africa/Lagos"), null, NotificationPreferences(onThisDay = true)),
                     bondDate = null,
                     nudge = null,
+                    sharedChange = null,
                 ),
             )
         }

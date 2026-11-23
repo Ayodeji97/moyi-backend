@@ -12,6 +12,7 @@ import com.moyi.bond.infra.database.MembershipRows
 import com.moyi.bond.infra.database.ProposalStore
 import com.moyi.common.events.EventPublisher
 import com.moyi.common.events.OutboxEvent
+import com.moyi.notification.api.Notifications
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
@@ -35,6 +36,8 @@ import java.time.temporal.ChronoUnit
  *
  * Nobody is notified by either path (T-09, "the discreet exit"). There is no
  * email, no push, and no field anywhere that says which of the two happened.
+ * Every push of the bond still owed is called off as it ends (ADR-0069), so
+ * nothing held by quiet hours arrives after it either.
  *
  * Ending a bond also **cancels whatever was waiting to be agreed** — the
  * obligation ADR-0028 recorded and could not discharge, because
@@ -61,6 +64,7 @@ internal class EndBond(
     private val withdrawals: EntryWithdrawals,
     private val memberships: MembershipRows,
     private val events: EventPublisher,
+    private val notifications: Notifications,
     private val clock: Clock,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -219,6 +223,11 @@ internal class EndBond(
         // nobody can write to. Both are refused at the endpoint as well; this is
         // the half that stops the pending state being shown at all.
         proposals.cancelLiveOf(ended.id, at)
+        // ADR-0069 decision 5: nothing held past the end reaches anyone, so a change made just
+        // before a leave is not pushed the next morning to send the partner to an archived bond.
+        // In this transaction (`MANDATORY`), so a leave that rolls back calls off nothing. One
+        // call for leave and block alike, and no event: the ledger cannot tell them apart either.
+        notifications.cancelBond(ended.id.value)
         log.info("A member ended bond {}", ended.id.value)
     }
 

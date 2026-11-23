@@ -279,6 +279,36 @@ internal class SemanticSearchSettingTest(
     }
 
     @Test
+    fun `the pending request carries an id, the same one its ending shows`() {
+        val bond = pair(ada, bea)
+        turnOff(ada, bond)
+        post(ada, "/bonds/$bond/semantic-search").status shouldBe 202
+        val pendingId = get(bea, bond)["pendingSemanticSearchRequest"]["id"].asString()
+
+        delete(ada, "/bonds/$bond/semantic-search").status shouldBe 204
+
+        val closed = get(bea, bond)["closedProposals"]
+        closed.size() shouldBe 1
+        closed[0]["id"].asString() shouldBe pendingId
+        closed[0]["kind"].asString() shouldBe "SEMANTIC_SEARCH_ON"
+        closed[0]["outcome"].asString() shouldBe "WITHDRAWN"
+    }
+
+    @Test
+    fun `the other member's refusal is DECLINED, and an agreement is ACCEPTED`() {
+        val bond = pair(ada, bea)
+        turnOff(ada, bond)
+        post(ada, "/bonds/$bond/semantic-search").status shouldBe 202
+        delete(bea, "/bonds/$bond/semantic-search").status shouldBe 204
+        get(ada, bond)["closedProposals"][0]["outcome"].asString() shouldBe "DECLINED"
+
+        post(ada, "/bonds/$bond/semantic-search").status shouldBe 202
+        post(bea, "/bonds/$bond/semantic-search").status shouldBe 202
+
+        get(ada, bond)["closedProposals"][0]["outcome"].asString() shouldBe "ACCEPTED"
+    }
+
+    @Test
     fun `the membership carries the setting`() {
         val bond = pair(ada, bea)
         turnOff(ada, bond)

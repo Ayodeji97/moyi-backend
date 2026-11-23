@@ -6304,6 +6304,12 @@
             "type" : [ "string", "null" ],
             "format" : "date-time"
           },
+          "closedProposals" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ClosedProposalResponse"
+            }
+          },
           "createdAt" : {
             "type" : "string",
             "format" : "date-time"
@@ -6388,7 +6394,7 @@
             "enum" : [ "COUPLE", "FRIENDS", "FAMILY", "PARENT_CHILD" ]
           }
         },
-        "required" : [ "anchorTimezone", "archivedAt", "createdAt", "deletionScheduledFor", "id", "invite", "maxMembers", "me", "members", "name", "paused", "pendingDeletionRequest", "pendingSemanticSearchRequest", "pendingTimezoneChange", "revealTimeLocal", "semanticSearchEnabled", "status", "strictMode", "timezoneChangeAllowedFrom", "type" ]
+        "required" : [ "anchorTimezone", "archivedAt", "closedProposals", "createdAt", "deletionScheduledFor", "id", "invite", "maxMembers", "me", "members", "name", "paused", "pendingDeletionRequest", "pendingSemanticSearchRequest", "pendingTimezoneChange", "revealTimeLocal", "semanticSearchEnabled", "status", "strictMode", "timezoneChangeAllowedFrom", "type" ]
       },
       "BondsResponse" : {
         "type" : "object",
@@ -6411,6 +6417,40 @@
           }
         },
         "required" : [ "anchorTimezone" ]
+      },
+      "ClosedProposalResponse" : {
+        "type" : "object",
+        "properties" : {
+          "closedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "closedByMemberId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "kind" : {
+            "type" : "string",
+            "enum" : [ "TIMEZONE_CHANGE", "DELETION", "SEMANTIC_SEARCH_ON" ]
+          },
+          "outcome" : {
+            "type" : "string",
+            "enum" : [ "ACCEPTED", "DECLINED", "WITHDRAWN", "LAPSED", "BOND_ENDED", "UNRECORDED" ]
+          },
+          "proposedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "proposedByMemberId" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        },
+        "required" : [ "closedAt", "closedByMemberId", "id", "kind", "outcome", "proposedAt", "proposedByMemberId" ]
       },
       "ConfirmTimezoneRequest" : {
         "type" : "object",
@@ -7216,6 +7256,9 @@
           },
           "reveal" : {
             "type" : [ "boolean", "null" ]
+          },
+          "sharedSettings" : {
+            "type" : [ "boolean", "null" ]
           }
         }
       },
@@ -7239,9 +7282,12 @@
           },
           "reveal" : {
             "type" : "boolean"
+          },
+          "sharedSettings" : {
+            "type" : "boolean"
           }
         },
-        "required" : [ "milestone", "onThisDay", "partnerJoined", "proposal", "reminder", "reveal" ]
+        "required" : [ "milestone", "onThisDay", "partnerJoined", "proposal", "reminder", "reveal", "sharedSettings" ]
       },
       "OnThisDayResponse" : {
         "type" : "object",
@@ -7341,6 +7387,10 @@
             "type" : "string",
             "format" : "date-time"
           },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
           "requestedAt" : {
             "type" : "string",
             "format" : "date-time"
@@ -7350,7 +7400,7 @@
             "format" : "uuid"
           }
         },
-        "required" : [ "expiresAt", "requestedAt", "requestedByMemberId" ]
+        "required" : [ "expiresAt", "id", "requestedAt", "requestedByMemberId" ]
       },
       "PendingSemanticSearchRequestResponse" : {
         "type" : "object",
@@ -7359,6 +7409,10 @@
             "type" : "string",
             "format" : "date-time"
           },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
           "requestedAt" : {
             "type" : "string",
             "format" : "date-time"
@@ -7368,7 +7422,7 @@
             "format" : "uuid"
           }
         },
-        "required" : [ "expiresAt", "requestedAt", "requestedByMemberId" ]
+        "required" : [ "expiresAt", "id", "requestedAt", "requestedByMemberId" ]
       },
       "PendingTimezoneChangeResponse" : {
         "type" : "object",

@@ -109,6 +109,7 @@ internal class SendOnThisDayPushes(
                     // The day remembered, not today (#146): the newest of the answer, which is newest first.
                     bondDate = memories.first().date,
                     nudge = null,
+                    sharedChange = null,
                 ),
             )
         return if (asked) Outcome.REQUESTED else Outcome.ALREADY_THIS_WEEK

@@ -495,6 +495,7 @@ internal class DailyRemindersTest(
                     recipient = LAGOS,
                     bondDate = LocalDate.parse("2026-09-02"),
                     nudge = null,
+                    sharedChange = null,
                 ),
             )
         }
@@ -632,6 +633,7 @@ internal class DailyRemindersTest(
                     recipient = LAGOS,
                     bondDate = date,
                     nudge = null,
+                    sharedChange = null,
                 ),
             )
         }

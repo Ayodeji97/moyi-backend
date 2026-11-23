@@ -222,6 +222,8 @@ the older off, so quiet hours release at most one, and the newer one keeps the s
 of its own and of what it called off. `notification.push.cancelled{reason}` counts the two apart
 (`written`, `superseded`).
 
+*Amended 2026-11-16 (issue #205, ADR-0069):* decision 1: a seventh toggle, `sharedSettings`, on by default, stored in `notification_prefs` like the others (ADR-0069 decision 1).
+
 ## Consequences
 
 **Positive.** A member's mute, night and budget are honoured per copy, and say nothing to the

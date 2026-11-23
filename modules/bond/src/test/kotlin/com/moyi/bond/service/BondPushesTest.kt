@@ -149,7 +149,7 @@ internal class BondPushesTest(
     }
 
     @Test
-    fun `a proposal called off before it was told is told to nobody`() {
+    fun `a proposal called off before it was told is told as a withdrawal to the member never pushed it`() {
         val bond = pairedBond()
         dispatchAll()
         clearPushes()
@@ -158,7 +158,10 @@ internal class BondPushesTest(
         cancel(ada, bond).status shouldBe 204
         dispatchAll()
 
-        pushes().shouldBeEmpty()
+        pushes().filter { it.category == "PROPOSAL_OPENED" }.shouldBeEmpty()
+        // Spec ruling 10's recorded cost (ADR-0069 decision 3): no opening push was owed to call off, so the
+        // withdrawal is told (as SHARED_SETTING_CHANGED) about a proposal Bea was never pushed.
+        pushes().map { it.category } shouldBe listOf("SHARED_SETTING_CHANGED")
     }
 
     @Test
@@ -174,6 +177,12 @@ internal class BondPushesTest(
 
         pushRow(ada)["wanted"] shouldBe false
         pushRow(ada)["status"] shouldBe "SUPPRESSED"
+    }
+
+    @Test
+    fun `bond_notify reads joins, proposals opened, shared changes and proposals closed`() {
+        consumer.eventTypes shouldBe
+            setOf(MemberJoined.TYPE, ProposalOpened.TYPE, BondSettingsChanged.TYPE, ProposalClosed.TYPE)
     }
 
     private data class Push(

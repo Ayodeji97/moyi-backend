@@ -1,5 +1,6 @@
 package com.moyi.notification.domain
 
+import com.moyi.notification.api.PushCategory
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -59,14 +60,17 @@ internal class PushBudgetTest {
     }
 
     @Test
-    fun `a reveal that came first leaves the remainder whole for the rest`() {
+    fun `a reveal that came first leaves two of the remainder for the rest, and the last slot for a reveal`() {
+        // Flipped by ADR-0069 decision 10 (spec B19), a ruling: once the reserved slot is spent today,
+        // no non-reveal push takes the Bond's last slot, even after the day's own reveal (its cost b).
+        // Was REMAINDER, REMAINDER, REMAINDER, DROPPED for the four after the reveal.
         day(REVEAL, OTHER, OTHER, OTHER, OTHER) shouldBe
             listOf(
                 BudgetDecision.RESERVED,
                 BudgetDecision.REMAINDER,
                 BudgetDecision.REMAINDER,
-                BudgetDecision.REMAINDER,
-                BudgetDecision.DROPPED,
+                BudgetDecision.DROPPED_LEAVING_ROOM,
+                BudgetDecision.DROPPED_LEAVING_ROOM,
             )
     }
 
@@ -124,18 +128,23 @@ internal class PushBudgetTest {
     }
 
     @Test
-    fun `with nothing to leave free, every decision is the rule before nudges`() {
-        // The rule as ADR-0045 documented it, with ADR-0068's per-Bond four: written out here, not
-        // read from PushBudget, so that a change to the rule is a change to this table.
+    fun `with nothing to leave free, every decision is the documented rule`() {
+        // The rule as ADR-0045 documented it, with ADR-0068's per-Bond four and ADR-0069 decision 10's
+        // last slot: written out here, not read from PushBudget, so that a change to the rule is a
+        // change to this table.
         fun documented(
             sent: Int,
             reserved: Boolean,
             across: Int,
             revealClass: Boolean,
         ): BudgetDecision =
+            // The `!revealClass && reserved` line was added by ADR-0069 decision 10 (spec B19), a ruling:
+            // a non-reveal push leaves the last slot once the reserved one is spent. Before it,
+            // sent=3 reserved=true for a non-reveal push was REMAINDER.
             when {
                 across >= 6 -> BudgetDecision.DROPPED
                 sent >= 4 -> BudgetDecision.DROPPED
+                !revealClass && reserved && sent + 1 >= 4 -> BudgetDecision.DROPPED_LEAVING_ROOM
                 revealClass && !reserved -> BudgetDecision.RESERVED
                 sent - (if (reserved) 1 else 0) < 3 -> BudgetDecision.REMAINDER
                 else -> BudgetDecision.DROPPED
@@ -163,7 +172,7 @@ internal class PushBudgetTest {
     }
 
     @Test
-    fun `a soft nudge leaves its Bond's last slot for the reveal once the reserved slot is spent (lead ruling)`() {
+    fun `a non-reveal push leaves its Bond's last slot for the reveal once the reserved slot is spent (ADR-0069 decision 10)`() {
         // Yesterday's solo-unlock took the reserved slot this morning, and two remainder pushes went: one slot left.
         PushBudget.decide(
             sentInBondToday = 3,
@@ -173,7 +182,8 @@ internal class PushBudgetTest {
             leaveFreeAcrossBonds = 1,
         ) shouldBe
             BudgetDecision.DROPPED_LEAVING_ROOM
-        // Nudge 1, or a nudge that inherited nothing to leave free, is hard: it takes the slot.
+        // Nudge 1, or a nudge that inherited nothing to leave free, leaves it too. Flipped by ADR-0069
+        // decision 10 (spec B19), a ruling: ADR-0068 decision 19 kept nudge 1 hard here (was REMAINDER).
         PushBudget.decide(
             sentInBondToday = 3,
             reservedSpentToday = true,
@@ -181,7 +191,7 @@ internal class PushBudgetTest {
             revealClass = false,
             leaveFreeAcrossBonds = 0,
         ) shouldBe
-            BudgetDecision.REMAINDER
+            BudgetDecision.DROPPED_LEAVING_ROOM
         // The reserved slot still free: the reveal will take it, so the nudge may take the last remainder slot.
         PushBudget.decide(
             sentInBondToday = 2,
@@ -209,6 +219,43 @@ internal class PushBudgetTest {
             leaveFreeAcrossBonds = 1,
         ) shouldBe
             BudgetDecision.DROPPED
+    }
+
+    @Test
+    fun `spec B19's day - a shared-setting push after a solo-unlock took the reserved slot leaves the last slot for the reveal`() {
+        // Member B, one Bond: 08:00 nudge 1 and 11:00 nudge 2 sent; 12:00 the solo-unlock of D-1 takes the
+        // reserved slot; 13:00 the partner renames the Bond; 19:00 the reveal of D (ADR-0069 decision 10).
+        PushBudget.decide(0, false, 0, false, 0) shouldBe BudgetDecision.REMAINDER
+        PushBudget.decide(1, false, 1, false, 1) shouldBe BudgetDecision.REMAINDER
+        PushBudget.decide(2, false, 2, true, 0) shouldBe BudgetDecision.RESERVED
+        PushBudget.decide(3, true, 3, false, 0) shouldBe BudgetDecision.DROPPED_LEAVING_ROOM
+        PushBudget.decide(3, true, 3, true, 0) shouldBe BudgetDecision.REMAINDER
+    }
+
+    @Test
+    fun `every non-reveal category leaves the last slot once the reserved one is spent`() {
+        // Nudge 1 among them: the REMINDER with nothing to leave free (ADR-0069 decision 10, spec B19).
+        val nonReveal =
+            listOf(
+                PushCategory.MILESTONE,
+                PushCategory.PARTNER_JOINED,
+                PushCategory.PROPOSAL_OPENED,
+                PushCategory.ON_THIS_DAY,
+                PushCategory.SHARED_SETTING_CHANGED,
+                PushCategory.REMINDER,
+            )
+        nonReveal.toSet() shouldBe PushCategory.entries.filterNot { it.isRevealClass }.toSet()
+        nonReveal.forEach { category ->
+            withClue(category) {
+                PushBudget.decide(3, true, 3, category.isRevealClass, 0) shouldBe BudgetDecision.DROPPED_LEAVING_ROOM
+            }
+        }
+        // The reserved slot unspent: today's reveal will take it, so a non-reveal push takes the third
+        // remainder slot (the one that makes three sent) and is refused a fourth by the remainder alone.
+        PushBudget.decide(2, false, 2, OTHER, 0) shouldBe BudgetDecision.REMAINDER
+        PushBudget.decide(3, false, 3, OTHER, 0) shouldBe BudgetDecision.DROPPED
+        // Reveal-class, reserved spent, three sent: unchanged.
+        PushBudget.decide(3, true, 3, REVEAL, 0) shouldBe BudgetDecision.REMAINDER
     }
 
     @Test

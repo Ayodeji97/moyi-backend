@@ -68,7 +68,7 @@
     "to": "ACTIVE",
     "status": 200,
     "code": null,
-    "reason": "The bond is listed with both members and whatever is waiting to be agreed. Each bond carries paused: true while a member who has not left it is suspended, and nothing about why (A3).",
+    "reason": "The bond is listed with both members and whatever is waiting to be agreed. Each bond carries paused: true while a member who has not left it is suspended, and nothing about why (A3). Each bond carries closedProposals: the latest ended proposal of each kind, at most three, with how it ended (ACCEPTED, DECLINED, WITHDRAWN, LAPSED, BOND_ENDED) and who closed it.",
     "rule": "",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -93,7 +93,7 @@
     "to": "PENDING_DELETION",
     "status": 200,
     "code": null,
-    "reason": "A bond counting down to deletion is still listed, with the date it is scheduled for.",
+    "reason": "A bond counting down to deletion is still listed, with the date it is scheduled for. Each bond carries closedProposals: the latest ended proposal of each kind, at most three, with how it ended (ACCEPTED, DECLINED, WITHDRAWN, LAPSED, BOND_ENDED) and who closed it.",
     "rule": "",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -118,7 +118,7 @@
     "to": "ARCHIVED",
     "status": 200,
     "code": null,
-    "reason": "A bond that has ended stays in the list of both members, the one who left included.",
+    "reason": "A bond that has ended stays in the list of both members, the one who left included. Each bond carries closedProposals: the latest ended proposal of each kind, at most three, with how it ended (ACCEPTED, DECLINED, WITHDRAWN, LAPSED, BOND_ENDED) and who closed it.",
     "rule": "ADR-0026 §4, ADR-0028 §4",
     "evidence": "test",
     "evidenceRef": "BondEndingEndpointTest#the member who left still reads the archive, and so does the other",
@@ -1893,7 +1893,7 @@
     "to": "ACTIVE",
     "status": 200,
     "code": null,
-    "reason": "Yours, as on a bond of one. Your partner's are theirs and are never shown.",
+    "reason": "Yours, as on a bond of one. Your partner's are theirs and are never shown. sharedSettings is the seventh toggle, on by default: whether you are told when your partner changes a shared setting or answers or withdraws a proposal.",
     "rule": "FR-081, ADR-0045 §1",
     "evidence": "test",
     "evidenceRef": "BondNotificationsEndpointTest#a member who never chose is shown every category on except on-this-day",
@@ -2018,7 +2018,7 @@
     "to": "ACTIVE",
     "status": 200,
     "code": null,
-    "reason": "The same on a bond of two. Turning a kind off holds back your own copy only: your partner is still told, and is not told that you are not.",
+    "reason": "The same on a bond of two. Turning a kind off holds back your own copy only: your partner is still told, and is not told that you are not. sharedSettings is the seventh toggle, on by default: whether you are told when your partner changes a shared setting or answers or withdraws a proposal.",
     "rule": "FR-081, Q9, ADR-0045 §1, §3",
     "evidence": "test",
     "evidenceRef": "BondNotificationsEndpointTest#a put sets what it is sent and keeps what it is not",
@@ -2522,7 +2522,7 @@
     "rule": "ADR-0030 §5",
     "evidence": "smoke",
     "evidenceRef": "either member may cancel it: 204",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!proposals.cancel(proposal.id, now)) throw ProposalNotFoundException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!proposals.cancel(proposal.id, membership.memberId, now)) throw ProposalNotFoundException()"
   },
   {
     "id": "bond-active-timezone-cancel-nothing",
@@ -2572,7 +2572,7 @@
     "rule": "ADR-0030 §5",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!proposals.cancel(proposal.id, now)) throw ProposalNotFoundException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!proposals.cancel(proposal.id, membership.memberId, now)) throw ProposalNotFoundException()"
   },
   {
     "id": "bond-pending-deletion-timezone-cancel-nothing",
@@ -2872,7 +2872,7 @@
     "rule": "ADR-0030 §5",
     "evidence": "test",
     "evidenceRef": "BondDeletionEndpointTest#cancelling an unconfirmed request removes it",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#proposals.cancel(pending.id, now)"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#proposals.cancel(pending.id, membership.memberId, now)"
   },
   {
     "id": "bond-active-deletion-cancel-nothing",
@@ -3994,7 +3994,7 @@
     "to": "PENDING_DELETION",
     "status": null,
     "code": null,
-    "reason": "Your partner's own request is their agreement. The 30-day countdown starts and the bond takes no writes until one of you calls it off.",
+    "reason": "Your partner's own request is their agreement. The 30-day countdown starts and the bond takes no writes until one of you calls it off. You are told (SHARED_SETTING_CHANGED, PROPOSAL_ACCEPTED), under your sharedSettings toggle.",
     "rule": "FR-028, ADR-0030 §9",
     "evidence": "test",
     "evidenceRef": "BondDeletionEndpointTest#the other member's request confirms it, and the cooling-off starts",
@@ -4012,17 +4012,35 @@
     "to": "ACTIVE",
     "status": null,
     "code": null,
-    "reason": "The bond's zone moves as your partner agrees. The bond stays ACTIVE; the new zone decides dates from the end of the current day.",
+    "reason": "The bond's zone moves as your partner agrees. The bond stays ACTIVE; the new zone decides dates from the end of the current day. You are told (SHARED_SETTING_CHANGED, PROPOSAL_ACCEPTED), under your sharedSettings toggle.",
     "rule": "FR-027, BR-6",
     "evidence": "test",
     "evidenceRef": "BondTimezoneEndpointTest#the other member confirms, and the zone moves",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#bonds.update(bond.withAnchorTimezone(proposal.proposedZone(), now))"
   },
   {
-    "id": "bond-pending-deletion-partner-cancels",
+    "id": "bond-active-partner-changes-a-setting",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "event:partner-changes-a-setting",
+    "actor": "partner",
+    "when": "the change is a name, type, reveal time, strict mode or turning search by meaning off, and a value moved",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": null,
+    "code": null,
+    "reason": "The bond stays ACTIVE. You are told once (SHARED_SETTING_CHANGED, SETTING), two minutes on; a burst of changes is one push, SEVERAL if they differ, and a PATCH that changes no value is none. Nothing names the setting or the value.",
+    "rule": "ADR-0069 §2, §7",
+    "evidence": "test",
+    "evidenceRef": "SharedSettingPushesTest#a setting changed is told to the other member, as SETTING, under the event's key, and never to the actor",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#support.events.publish(BondSettingsChanged.of(membership, clock.instant().truncatedTo(ChronoUnit.MICROS)))"
+  },
+  {
+    "id": "bond-pending-deletion-partner-changes-a-setting",
     "region": "bond",
     "from": "PENDING_DELETION",
-    "action": "event:partner-cancels",
+    "action": "event:partner-changes-a-setting",
     "actor": "partner",
     "when": "you are both still in the bond",
     "guards": [],
@@ -4030,17 +4048,17 @@
     "to": "ACTIVE",
     "status": null,
     "code": null,
-    "reason": "Your partner calls the deletion off, and the bond is ACTIVE again for both of you.",
+    "reason": "Your partner calls the deletion off, and the bond is ACTIVE again for both of you. You are told (SHARED_SETTING_CHANGED, SETTING, two minutes on, under your sharedSettings toggle).",
     "rule": "FR-028, ADR-0030 §5",
-    "evidence": "smoke",
-    "evidenceRef": "…and the bond is ACTIVE again",
+    "evidence": "test",
+    "evidenceRef": "SharedSettingPushesTest#calling off an agreed deletion is a SETTING for the other member, and nothing for the one who called it off",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#else -> BondStatus.ACTIVE"
   },
   {
-    "id": "bond-pending-deletion-partner-cancels-left",
+    "id": "bond-pending-deletion-partner-changes-a-setting-left",
     "region": "bond",
     "from": "PENDING_DELETION",
-    "action": "event:partner-cancels",
+    "action": "event:partner-changes-a-setting",
     "actor": "partner",
     "when": "you left or blocked them during the countdown",
     "guards": [],
@@ -4048,7 +4066,7 @@
     "to": "ARCHIVED",
     "status": null,
     "code": null,
-    "reason": "Your partner calls the deletion off after you walked away. The bond is not revived with you gone: its one status becomes ARCHIVED. The test cited reads it as the member who called it off.",
+    "reason": "Your partner calls the deletion off after you walked away. The bond is not revived with you gone: its one status becomes ARCHIVED. The test cited reads it as the member who called it off. Nobody is told: the bond has ended.",
     "rule": "ADR-0030 §4a, §4a-ii",
     "evidence": "test",
     "evidenceRef": "BondDeletionEndpointTest#a deletion called off after the other member left leaves an archived bond that knows when it ended",
@@ -6425,7 +6443,7 @@
     "rule": "FR-204, ADR-0054",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, membership.memberId, now)) throw ProposalNotFoundException()"
   },
   {
     "id": "bond-active-semantic-cancel",
@@ -6475,7 +6493,7 @@
     "rule": "FR-204, ADR-0054",
     "evidence": "smoke",
     "evidenceRef": "semantic: calling a request off with nothing waiting is 404",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, membership.memberId, now)) throw ProposalNotFoundException()"
   },
   {
     "id": "bond-pending-deletion-semantic-cancel",
@@ -6525,7 +6543,7 @@
     "rule": "FR-204, ADR-0054",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, membership.memberId, now)) throw ProposalNotFoundException()"
   },
   {
     "id": "bond-archived-semantic-cancel",
@@ -6550,7 +6568,7 @@
     "rule": "FR-204, ADR-0054, ADR-0028",
     "evidence": "smoke",
     "evidenceRef": "semantic: on an ended bond, calling a request off is 404",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, membership.memberId, now)) throw ProposalNotFoundException()"
   },
   {
     "id": "bond-none-member-report",
@@ -6834,7 +6852,7 @@
     "rule": "ADR-0030 §5",
     "evidence": "smoke",
     "evidenceRef": "either member may cancel it: 204",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!proposals.cancel(proposal.id, now)) throw ProposalNotFoundException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!proposals.cancel(proposal.id, membership.memberId, now)) throw ProposalNotFoundException()"
   },
   {
     "id": "proposal-confirmed-timezone-cancel",
@@ -7275,7 +7293,7 @@
     "rule": "ADR-0030 §5",
     "evidence": "test",
     "evidenceRef": "BondDeletionEndpointTest#cancelling an unconfirmed request removes it",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#proposals.cancel(pending.id, now)"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#proposals.cancel(pending.id, membership.memberId, now)"
   },
   {
     "id": "proposal-confirmed-deletion-cancel",
@@ -7494,7 +7512,7 @@
     "to": "CANCELLED",
     "status": 204,
     "code": null,
-    "reason": "Leaving cancels whatever was waiting to be agreed, of either kind and whoever opened it, in the same transaction. Otherwise an agreement arriving later would try to move the zone of a bond that has ended.",
+    "reason": "Leaving cancels whatever was waiting to be agreed, of either kind and whoever opened it, in the same transaction. Otherwise an agreement arriving later would try to move the zone of a bond that has ended. The proposal is closed BOND_ENDED and names no member, so a leave and a block read alike, and every push of the bond still owed is called off.",
     "rule": "ADR-0030 §11, ADR-0028",
     "evidence": "test",
     "evidenceRef": "BondEndingEndpointTest#ending a bond cancels what was waiting to be agreed",
@@ -7657,7 +7675,7 @@
     "to": "CANCELLED",
     "status": 204,
     "code": null,
-    "reason": "Blocking cancels whatever was waiting to be agreed, of either kind and whoever opened it, in the same transaction. Otherwise an agreement arriving later would try to move the zone of a bond that has ended.",
+    "reason": "Blocking cancels whatever was waiting to be agreed, of either kind and whoever opened it, in the same transaction. Otherwise an agreement arriving later would try to move the zone of a bond that has ended. The proposal is closed BOND_ENDED and names no member, so a leave and a block read alike, and every push of the bond still owed is called off.",
     "rule": "ADR-0030 §11, ADR-0028",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -7846,17 +7864,17 @@
     "to": "CONFIRMED",
     "status": null,
     "code": null,
-    "reason": "Your partner agrees to what you proposed. A zone change shows on the bond at once, and decides which date an entry belongs to only from the end of the current day (BR-6); a deletion starts the 30-day countdown. The bond region has both.",
+    "reason": "Your partner agrees to what you proposed. A zone change shows on the bond at once, and decides which date an entry belongs to only from the end of the current day (BR-6); a deletion starts the 30-day countdown. The bond region has both. You are told (SHARED_SETTING_CHANGED, PROPOSAL_ACCEPTED), under your sharedSettings toggle.",
     "rule": "BR-6, ADR-0030 §4",
     "evidence": "test",
     "evidenceRef": "BondTimezoneEndpointTest#the other member confirms, and the zone moves",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#SET p.confirmedAt = :now,"
   },
   {
-    "id": "proposal-proposed-partner-cancels",
+    "id": "proposal-proposed-partner-withdraws-proposal",
     "region": "bond.proposal",
     "from": "PROPOSED",
-    "action": "event:partner-cancels",
+    "action": "event:partner-withdraws-proposal",
     "actor": "partner",
     "when": "",
     "guards": [],
@@ -7864,10 +7882,28 @@
     "to": "CANCELLED",
     "status": null,
     "code": null,
-    "reason": "Your partner calls it off, whether it was theirs or yours. Your next read of the bond shows nothing waiting.",
-    "rule": "ADR-0030 §5",
+    "reason": "Your partner takes back what they proposed. Your next read of the bond shows nothing waiting and, in closedProposals, WITHDRAWN by them. You are told (PROPOSAL_WITHDRAWN) unless the proposal's opening push was still owed to you: that is called off and nothing follows.",
+    "rule": "ADR-0030 §5, ADR-0069 §2, §3",
     "evidence": "test",
-    "evidenceRef": "BondTimezoneEndpointTest#either member may cancel, and then a fresh proposal is allowed",
+    "evidenceRef": "SharedSettingPushesTest#a zone change withdrawn after its opening push went is told to the other member as PROPOSAL_WITHDRAWN",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun cancel("
+  },
+  {
+    "id": "proposal-proposed-partner-declines",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "event:partner-declines",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "CANCELLED",
+    "status": null,
+    "code": null,
+    "reason": "Your partner declines what you proposed. Your next read of the bond shows nothing waiting and, in closedProposals, DECLINED by them. You are told (PROPOSAL_DECLINED).",
+    "rule": "ADR-0030 §5, ADR-0069 §2, §3",
+    "evidence": "test",
+    "evidenceRef": "SharedSettingPushesTest#a zone change declined is told to the proposer as PROPOSAL_DECLINED",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun cancel("
   },
   {
@@ -7882,7 +7918,7 @@
     "to": "CANCELLED",
     "status": null,
     "code": null,
-    "reason": "Your partner leaves, the bond ends, and whatever was waiting is cancelled with it. You can no longer agree to it: the answer would be BOND_ARCHIVED.",
+    "reason": "Your partner leaves, the bond ends, and whatever was waiting is cancelled with it. You can no longer agree to it: the answer would be BOND_ARCHIVED. closedProposals reads BOND_ENDED with no member, and nothing is pushed.",
     "rule": "ADR-0030 §11",
     "evidence": "test",
     "evidenceRef": "BondEndingEndpointTest#ending a bond cancels what was waiting to be agreed",
@@ -7900,7 +7936,7 @@
     "to": "CANCELLED",
     "status": null,
     "code": null,
-    "reason": "Your partner blocks you, the bond ends, and whatever was waiting is cancelled with it. You can no longer agree to it: the answer would be BOND_ARCHIVED.",
+    "reason": "Your partner blocks you, the bond ends, and whatever was waiting is cancelled with it. You can no longer agree to it: the answer would be BOND_ARCHIVED. closedProposals reads BOND_ENDED with no member, and nothing is pushed.",
     "rule": "ADR-0030 §11",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -8238,7 +8274,7 @@
     "rule": "FR-204, ADR-0054",
     "evidence": "smoke",
     "evidenceRef": "semantic: calling a request off with nothing waiting is 404",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, membership.memberId, now)) throw ProposalNotFoundException()"
   },
   {
     "id": "proposal-proposed-semantic-cancel",
@@ -8269,7 +8305,7 @@
     "rule": "FR-204, ADR-0054",
     "evidence": "smoke",
     "evidenceRef": "semantic: the other member calls it off: 204",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, membership.memberId, now)) throw ProposalNotFoundException()"
   },
   {
     "id": "proposal-confirmed-semantic-cancel",
@@ -8300,7 +8336,7 @@
     "rule": "FR-204, ADR-0054",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, membership.memberId, now)) throw ProposalNotFoundException()"
   },
   {
     "id": "proposal-cancelled-semantic-cancel",
@@ -8331,7 +8367,7 @@
     "rule": "FR-204, ADR-0054",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, membership.memberId, now)) throw ProposalNotFoundException()"
   },
   {
     "id": "proposal-lapsed-semantic-cancel",
@@ -8362,7 +8398,7 @@
     "rule": "FR-204, ADR-0054",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, membership.memberId, now)) throw ProposalNotFoundException()"
   },
   {
     "id": "bond-none-react",

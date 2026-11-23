@@ -3,6 +3,7 @@ package com.moyi.notification.service
 import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.notification.api.CancelReason
 import com.moyi.notification.api.HeldPushes
 import com.moyi.notification.api.NotificationPreferences
 import com.moyi.notification.api.Notifications
@@ -15,6 +16,7 @@ import com.moyi.notification.api.PushToken
 import com.moyi.notification.api.PushTokenRegistration
 import com.moyi.notification.api.PushTokens
 import com.moyi.notification.api.QuietHoursWindow
+import com.moyi.notification.api.SharedChange
 import com.moyi.notification.infra.NotificationTestApplication
 import com.moyi.notification.infra.ScriptedPushSender
 import com.moyi.notification.infra.database.BUDGET_LOCK_NAMESPACE
@@ -205,10 +207,10 @@ internal class PushPreferencesBudgetTest(
         statuses(ada).getValue("held").first shouldBe "HELD"
         ask(push(ada, PushCategory.REMINDER, key = "requested"))
 
-        transactions.execute { notifications.cancel(listOf("held")) } shouldBe 1
-        transactions.execute { notifications.cancel(listOf("held")) } shouldBe 0
+        transactions.execute { notifications.cancel(listOf("held"), CancelReason.WRITTEN) } shouldBe 1
+        transactions.execute { notifications.cancel(listOf("held"), CancelReason.WRITTEN) } shouldBe 0
         // "requested" is still owed to the outbox; its delivery runs and finds nothing to send.
-        transactions.execute { notifications.cancel(listOf("requested")) } shouldBe 1
+        transactions.execute { notifications.cancel(listOf("requested"), CancelReason.WRITTEN) } shouldBe 1
         dispatcher.dispatchDue(clock.instant(), BUDGET)
         held.releaseDue(Instant.parse("2026-10-15T06:00:00Z"), LIMIT) shouldBe 0
 
@@ -221,12 +223,12 @@ internal class PushPreferencesBudgetTest(
         ask(push(ada, PushCategory.REMINDER, key = "sent"))
         dispatcher.dispatchDue(evening, BUDGET)
 
-        transactions.execute { notifications.cancel(listOf("sent")) } shouldBe 0
-        transactions.execute { notifications.cancel(listOf("never-asked")) } shouldBe 0
+        transactions.execute { notifications.cancel(listOf("sent"), CancelReason.WRITTEN) } shouldBe 0
+        transactions.execute { notifications.cancel(listOf("never-asked"), CancelReason.WRITTEN) } shouldBe 0
         statuses(ada).getValue("sent").first shouldBe "SENT"
         // And a cancelled key stays spent: asking again records nothing new.
         ask(push(ada, PushCategory.REMINDER, key = "cancelled"))
-        transactions.execute { notifications.cancel(listOf("cancelled")) } shouldBe 1
+        transactions.execute { notifications.cancel(listOf("cancelled"), CancelReason.WRITTEN) } shouldBe 1
         transactions.execute { notifications.request(push(ada, PushCategory.REMINDER, key = "cancelled")) } shouldBe false
     }
 
@@ -234,7 +236,7 @@ internal class PushPreferencesBudgetTest(
     fun `calling a push off refuses to run outside the caller's transaction`() {
         ask(push(ada, PushCategory.REMINDER, key = "owed"))
         io.kotest.assertions.throwables.shouldThrow<org.springframework.transaction.IllegalTransactionStateException> {
-            notifications.cancel(listOf("owed"))
+            notifications.cancel(listOf("owed"), CancelReason.WRITTEN)
         }
         statuses(ada).getValue("owed").first shouldBe "REQUESTED"
     }
@@ -274,6 +276,39 @@ internal class PushPreferencesBudgetTest(
                 "other-2" to ("SENT" to false),
                 "other-3" to ("DROPPED_BUDGET" to false),
                 "reveal" to ("SENT" to true),
+            )
+    }
+
+    @Test
+    fun `spec B19's day in the ledger - a shared change after yesterday's solo-unlock is dropped, and the reveal goes`() {
+        // ADR-0069 decision 10: once the reserved slot is spent today, no non-reveal push takes the Bond's last slot.
+        fun askAt(
+            time: String,
+            request: PushRequest,
+        ) {
+            clock.set(at(time))
+            ask(request)
+            dispatcher.dispatchDue(clock.instant(), BUDGET)
+        }
+        val today = evening.atZone(london).toLocalDate()
+        askAt("08:00", push(ada, PushCategory.REMINDER, key = "nudge-1", bondDate = today, nudge = Nudge(1, 0, emptySet())))
+        askAt("11:00", push(ada, PushCategory.REMINDER, key = "nudge-2", bondDate = today, nudge = Nudge(2, 1, emptySet())))
+        askAt("12:00", push(ada, PushCategory.SOLO_UNLOCK, key = "solo-unlock", bondDate = today.minusDays(1)))
+        askAt("13:00", push(ada, PushCategory.SHARED_SETTING_CHANGED, key = "renamed", sharedChange = SharedChange.SETTING))
+        // Held to settle for two minutes, then handed back and decided.
+        statuses(ada).getValue("renamed") shouldBe ("HELD" to false)
+        clock.set(at("13:02"))
+        held.releaseDue(clock.instant(), LIMIT) shouldBe 1
+        dispatcher.dispatchDue(clock.instant(), BUDGET)
+        askAt("19:00", push(ada, PushCategory.REVEAL, key = "reveal", bondDate = today))
+
+        statuses(ada) shouldBe
+            mapOf(
+                "nudge-1" to ("SENT" to false),
+                "nudge-2" to ("SENT" to false),
+                "solo-unlock" to ("SENT" to true),
+                "renamed" to ("DROPPED_BUDGET" to false),
+                "reveal" to ("SENT" to false),
             )
     }
 
@@ -434,7 +469,8 @@ internal class PushPreferencesBudgetTest(
         staleAfter: Instant = evening.plus(Duration.ofDays(2)),
         bondDate: LocalDate? = null,
         nudge: Nudge? = null,
-    ) = PushRequest(userId, bondId, category, key, staleAfter, PushRecipient(zone, quietHours, preferences), bondDate, nudge)
+        sharedChange: SharedChange? = null,
+    ) = PushRequest(userId, bondId, category, key, staleAfter, PushRecipient(zone, quietHours, preferences), bondDate, nudge, sharedChange)
 
     private fun ask(request: PushRequest) {
         transactions.execute { notifications.request(request) } shouldBe true

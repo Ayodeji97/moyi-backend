@@ -3,6 +3,7 @@ package com.moyi.notification.service
 import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.notification.api.CancelReason
 import com.moyi.notification.api.HeldPushes
 import com.moyi.notification.api.NotificationPreferences
 import com.moyi.notification.api.Notifications
@@ -16,6 +17,7 @@ import com.moyi.notification.api.PushToken
 import com.moyi.notification.api.PushTokenRegistration
 import com.moyi.notification.api.PushTokens
 import com.moyi.notification.api.QuietHoursWindow
+import com.moyi.notification.api.SharedChange
 import com.moyi.notification.infra.NotificationTestApplication
 import com.moyi.notification.infra.ScriptedPushSender
 import io.kotest.matchers.shouldBe
@@ -96,6 +98,27 @@ internal class PushMetricsTest(
     }
 
     @Test
+    fun `a push held only by its own not_before is counted settling, not held`() {
+        // ADR-0069 decision 13, spec B22: `held` stays quiet-hours volume.
+        ask("shared:1", null, PushCategory.SHARED_SETTING_CHANGED, sharedChange = SharedChange.SETTING)
+        dispatch()
+
+        settled("SHARED_SETTING_CHANGED", "none", "settling") shouldBe 1.0
+        settled("SHARED_SETTING_CHANGED", "none", "held") shouldBe 0.0
+        totalSettled() shouldBe 1.0
+    }
+
+    @Test
+    fun `a settling push that quiet hours would hold longer is counted held`() {
+        val night = recipient(quiet = QuietHoursWindow(LocalTime.of(17, 0), LocalTime.of(23, 0)))
+        ask("shared:1", null, PushCategory.SHARED_SETTING_CHANGED, recipient = night, sharedChange = SharedChange.SETTING)
+        dispatch()
+
+        settled("SHARED_SETTING_CHANGED", "none", "held") shouldBe 1.0
+        settled("SHARED_SETTING_CHANGED", "none", "settling") shouldBe 0.0
+    }
+
+    @Test
     fun `a held push counts held once, and its final outcome once when released`() {
         register("token")
         val night = recipient(quiet = QuietHoursWindow(LocalTime.of(17, 0), LocalTime.of(23, 0)))
@@ -120,10 +143,20 @@ internal class PushMetricsTest(
         ask(first, Nudge(1, 0, emptySet()), recipient = night)
         dispatch()
 
-        transactions.execute { notifications.cancel(listOf(first)) } shouldBe 1
-        transactions.execute { notifications.cancel(listOf(first)) } shouldBe 0
+        transactions.execute { notifications.cancel(listOf(first), CancelReason.WRITTEN) } shouldBe 1
+        transactions.execute { notifications.cancel(listOf(first), CancelReason.WRITTEN) } shouldBe 0
 
         cancelled("REMINDER", "1", "written") shouldBe 1.0
+    }
+
+    @Test
+    fun `the reason a caller gives is the reason counted`() {
+        ask(first, Nudge(1, 0, emptySet()))
+
+        transactions.execute { notifications.cancel(listOf(first), CancelReason.PROPOSAL_CLOSED) } shouldBe 1
+
+        cancelled("REMINDER", "1", "proposal_closed") shouldBe 1.0
+        cancelled("REMINDER", "1", "written") shouldBe 0.0
     }
 
     @Test
@@ -217,8 +250,8 @@ internal class PushMetricsTest(
         jdbc.update("UPDATE notifications SET status = 'REQUESTED', sent_at = NULL WHERE dedupe_key IN (?, ?)", first, second)
         jdbc.update("UPDATE notifications SET status = 'SENT' WHERE dedupe_key = ?", "$first:sent")
 
-        transactions.execute { notifications.cancel(listOf(first, second, "$first:sent")) } shouldBe 2
-        transactions.execute { notifications.cancel(listOf(first, second, "$first:sent")) } shouldBe 0
+        transactions.execute { notifications.cancel(listOf(first, second, "$first:sent"), CancelReason.WRITTEN) } shouldBe 2
+        transactions.execute { notifications.cancel(listOf(first, second, "$first:sent"), CancelReason.WRITTEN) } shouldBe 0
 
         cancelled("REMINDER", "1", "written") shouldBe 1.0
         cancelled("REMINDER", "2", "written") shouldBe 1.0
@@ -231,7 +264,7 @@ internal class PushMetricsTest(
         ask(first, Nudge(1, 0, emptySet()))
         ask(second, Nudge(2, 0, setOf(first)))
         dispatch()
-        transactions.execute { notifications.cancel(listOf(second)) }
+        transactions.execute { notifications.cancel(listOf(second), CancelReason.WRITTEN) }
 
         val ours = meters.meters.filter { it.id.name.startsWith("notification.push.") }
         (ours.size > 0) shouldBe true
@@ -289,6 +322,7 @@ internal class PushMetricsTest(
         category: PushCategory = PushCategory.REMINDER,
         recipient: PushRecipient = recipient(),
         staleAfter: Instant = start.plus(Duration.ofDays(1)),
+        sharedChange: SharedChange? = null,
     ): Boolean =
         transactions.execute {
             notifications.request(
@@ -301,6 +335,7 @@ internal class PushMetricsTest(
                     recipient = recipient,
                     bondDate = date,
                     nudge = nudge,
+                    sharedChange = sharedChange,
                 ),
             )
         }

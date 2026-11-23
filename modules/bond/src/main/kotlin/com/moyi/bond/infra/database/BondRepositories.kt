@@ -303,7 +303,12 @@ internal interface BondInviteRepository : Repository<BondInviteEntity, UUID> {
 internal interface BondProposalRepository : Repository<BondProposalEntity, UUID> {
     fun save(proposal: BondProposalEntity): BondProposalEntity
 
-    /** The open, unlapsed proposal of one kind, if there is one. */
+    /**
+     * The open, unlapsed proposal of one kind, if there is one.
+     *
+     * Its three conditions are the live predicate (ADR-0030); [findLatestEndedOf] is written as
+     * their complement, and the two must change together.
+     */
     @Query(
         """
         SELECT p FROM BondProposalEntity p
@@ -342,12 +347,47 @@ internal interface BondProposalRepository : Repository<BondProposalEntity, UUID>
     ): List<BondProposalEntity>
 
     /**
+     * The latest **ended** proposal of each kind, for each listed bond (issue #205, spec B14).
+     *
+     * Ended is "not live" by [findLive]'s three conditions, written here as their complement,
+     * `NOT (…)`, and nowhere else: confirmed, cancelled, or open past its expiry (a lapse
+     * nothing has yet closed). Latest by when it ended — confirmed, cancelled, or, for that
+     * unclosed lapse, expired — then by when it was made and by id, so a tie has one answer.
+     *
+     * Native for `DISTINCT ON`, which says "one per bond and kind" in the statement rather
+     * than in a loop over every proposal a bond has ever had.
+     */
+    @Query(
+        value = """
+        SELECT DISTINCT ON (p.bond_id, p.kind) p.*
+          FROM bond_proposals p
+         WHERE p.bond_id IN (:bondIds)
+           AND NOT (p.confirmed_at IS NULL AND p.cancelled_at IS NULL AND p.expires_at > :now)
+         ORDER BY p.bond_id, p.kind,
+                  coalesce(p.confirmed_at, p.cancelled_at, p.expires_at) DESC, p.proposed_at DESC, p.id DESC
+        """,
+        nativeQuery = true,
+    )
+    fun findLatestEndedOf(
+        bondIds: Collection<UUID>,
+        now: Instant,
+    ): List<BondProposalEntity>
+
+    /** One proposal, by id within its bond, whatever its state; `null` if it is not this bond's. */
+    @Query("SELECT p FROM BondProposalEntity p WHERE p.bondId = :bondId AND p.id = :id")
+    fun findInBond(
+        bondId: UUID,
+        id: UUID,
+    ): BondProposalEntity?
+
+    /**
      * Closes a **lapsed** proposal of this kind, so V10's partial unique index
      * stops holding its slot (ADR-0030).
      *
      * `cancelled_at` rather than a third ending, because from the system's point
      * of view a lapsed proposal is one nobody will ever confirm and this is the
-     * moment it stopped being considered. Nothing runs on a schedule — a row is
+     * moment it stopped being considered; since V70 its cause says `LAPSED`, naming
+     * nobody. Nothing runs on a schedule — a row is
      * closed only when a new proposal needs the slot, which is what spec §6.4's
      * "never reaped" means in practice.
      *
@@ -358,7 +398,8 @@ internal interface BondProposalRepository : Repository<BondProposalEntity, UUID>
     @Query(
         """
         UPDATE BondProposalEntity p
-           SET p.cancelledAt = :now
+           SET p.cancelledAt = :now,
+               p.cancelCause = com.moyi.bond.domain.CancelCause.LAPSED
          WHERE p.bondId = :bondId
            AND p.kind = :kind
            AND p.confirmedAt IS NULL
@@ -416,12 +457,20 @@ internal interface BondProposalRepository : Repository<BondProposalEntity, UUID>
      * the tests assert and the one the contract documents; this method is
      * simply not where that decision is taken. Corrected by the second review
      * of PR #41.
+     *
+     * [by] is recorded as the member who called it off, unless the row had already lapsed:
+     * then it is recorded `LAPSED` and names nobody, as V70's backfill reads the same history
+     * (`cancelled_at >= expires_at`), so a lapse is never read as somebody's refusal. Every
+     * statement here that closes an open row makes that same split.
      */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
         """
         UPDATE BondProposalEntity p
-           SET p.cancelledAt = :now
+           SET p.cancelledAt = :now,
+               p.cancelCause = CASE WHEN p.expiresAt <= :now THEN com.moyi.bond.domain.CancelCause.LAPSED
+                                    ELSE com.moyi.bond.domain.CancelCause.MEMBER END,
+               p.cancelledByMemberId = CASE WHEN p.expiresAt <= :now THEN NULL ELSE :by END
          WHERE p.id = :id
            AND p.confirmedAt IS NULL
            AND p.cancelledAt IS NULL
@@ -429,6 +478,7 @@ internal interface BondProposalRepository : Repository<BondProposalEntity, UUID>
     )
     fun cancel(
         id: UUID,
+        by: UUID,
         now: Instant,
     ): Int
 
@@ -438,13 +488,20 @@ internal interface BondProposalRepository : Repository<BondProposalEntity, UUID>
      * exist. A confirmation arriving on an archived bond would otherwise try to
      * move the anchor zone of a bond that has ended.
      *
+     * **Names no member**, whoever's leave or block ended the bond: the cause is `BOND_ENDED`
+     * (or `LAPSED` for a row already past its expiry, as in [cancel]), and V70's CHECK refuses
+     * a member beside either. Recording the leaver or blocker would let the other member read
+     * "declined" as "they left" (T-09, doc 26 §2.1).
+     *
      * @return how many were cancelled, for the test and the log line.
      */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
         """
         UPDATE BondProposalEntity p
-           SET p.cancelledAt = :now
+           SET p.cancelledAt = :now,
+               p.cancelCause = CASE WHEN p.expiresAt <= :now THEN com.moyi.bond.domain.CancelCause.LAPSED
+                                    ELSE com.moyi.bond.domain.CancelCause.BOND_ENDED END
          WHERE p.bondId = :bondId
            AND p.confirmedAt IS NULL
            AND p.cancelledAt IS NULL
@@ -458,13 +515,16 @@ internal interface BondProposalRepository : Repository<BondProposalEntity, UUID>
     /**
      * [cancelLiveOf] for one kind only: what turning semantic search off does to
      * a pending request to turn it on (ADR-0054), leaving a pending deletion or
-     * timezone change alone.
+     * timezone change alone. Recorded as [by]'s, as [cancel] records it, lapse included.
      */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
         """
         UPDATE BondProposalEntity p
-           SET p.cancelledAt = :now
+           SET p.cancelledAt = :now,
+               p.cancelCause = CASE WHEN p.expiresAt <= :now THEN com.moyi.bond.domain.CancelCause.LAPSED
+                                    ELSE com.moyi.bond.domain.CancelCause.MEMBER END,
+               p.cancelledByMemberId = CASE WHEN p.expiresAt <= :now THEN NULL ELSE :by END
          WHERE p.bondId = :bondId
            AND p.kind = :kind
            AND p.confirmedAt IS NULL
@@ -474,6 +534,7 @@ internal interface BondProposalRepository : Repository<BondProposalEntity, UUID>
     fun cancelLive(
         bondId: UUID,
         kind: ProposalKind,
+        by: UUID,
         now: Instant,
     ): Int
 }

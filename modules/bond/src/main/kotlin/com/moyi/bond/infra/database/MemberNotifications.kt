@@ -40,7 +40,7 @@ internal class MemberNotifications(
                 memberId,
             ).firstOrNull()
 
-    /** Replaces one member's preferences, all six written out. */
+    /** Replaces one member's preferences, all seven written out. */
     fun replace(
         memberId: UUID,
         preferences: NotificationPreferences,
@@ -124,6 +124,7 @@ internal class MemberNotifications(
             milestone = node.flag(MILESTONE) ?: defaults.milestone,
             onThisDay = node.flag(ON_THIS_DAY) ?: defaults.onThisDay,
             proposal = node.flag(PROPOSAL) ?: defaults.proposal,
+            sharedSettings = node.flag(SHARED_SETTINGS) ?: defaults.sharedSettings,
         )
     }
 
@@ -135,6 +136,7 @@ internal class MemberNotifications(
             MILESTONE to preferences.milestone,
             ON_THIS_DAY to preferences.onThisDay,
             PROPOSAL to preferences.proposal,
+            SHARED_SETTINGS to preferences.sharedSettings,
         )
 
     /** A stored yes or no; anything else, or nothing, is no answer. */
@@ -148,6 +150,7 @@ internal class MemberNotifications(
         const val MILESTONE = "milestone"
         const val ON_THIS_DAY = "onThisDay"
         const val PROPOSAL = "proposal"
+        const val SHARED_SETTINGS = "sharedSettings"
     }
 }
 

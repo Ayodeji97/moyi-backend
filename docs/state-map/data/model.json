@@ -222,7 +222,7 @@
             },
             {
               "id": "CANCELLED",
-              "label": "cancelled"
+              "label": "cancelled: withdrawn by the one who proposed it, declined by the other, or closed by the bond ending (the cause is on the row, read as outcome)"
             },
             {
               "id": "LAPSED",
@@ -530,12 +530,22 @@
     },
     {
       "id": "event:partner-confirms",
-      "label": "your partner agrees to your proposal",
+      "label": "your partner agrees to your proposal, and you are told",
       "actor": "partner"
     },
     {
-      "id": "event:partner-cancels",
-      "label": "your partner calls a proposal or the deletion off",
+      "id": "event:partner-withdraws-proposal",
+      "label": "your partner takes back the proposal that waits on you, and you are told",
+      "actor": "partner"
+    },
+    {
+      "id": "event:partner-declines",
+      "label": "your partner declines your proposal, and you are told",
+      "actor": "partner"
+    },
+    {
+      "id": "event:partner-changes-a-setting",
+      "label": "your partner changes a shared setting, or calls the deletion countdown off, and you are told",
       "actor": "partner"
     },
     {

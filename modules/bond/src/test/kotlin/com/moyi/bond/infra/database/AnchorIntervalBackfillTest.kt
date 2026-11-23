@@ -4,12 +4,14 @@ import com.moyi.bond.domain.BondId
 import com.moyi.bond.infra.BondTestApplication
 import com.moyi.bond.infra.FakeAccountStanding
 import com.moyi.bond.infra.FakeUserDirectory
+import com.moyi.bond.infra.NoNotifications
 import com.moyi.common.events.EventConsumer
 import com.moyi.common.security.TokenRevocation
 import com.moyi.common.security.TokenRevocations
 import com.moyi.common.testing.PostgresIntegrationTest
 import com.moyi.identity.api.AccountStanding
 import com.moyi.identity.api.UserDirectory
+import com.moyi.notification.api.Notifications
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -216,6 +218,10 @@ internal class AnchorIntervalBackfillTest(
 
         @Bean
         fun tokenRevocations(): TokenRevocations = TokenRevocations { TokenRevocation(invalidBefore = null) }
+
+        /** `notification` is not scanned here, and `EndBond` asks for its port (ADR-0069). */
+        @Bean
+        fun notifications(): Notifications = NoNotifications()
     }
 
     companion object {

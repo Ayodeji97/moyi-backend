@@ -26,6 +26,7 @@ internal data class MemberNotificationsRequest(
             milestone = asked.milestone ?: current.milestone,
             onThisDay = asked.onThisDay ?: current.onThisDay,
             proposal = asked.proposal ?: current.proposal,
+            sharedSettings = asked.sharedSettings ?: current.sharedSettings,
         )
     }
 }
@@ -39,6 +40,7 @@ internal data class MemberNotificationsRequest(
  * - `milestone`: 7, 30, 100 or 365 days you both wrote (ADR-0041).
  * - `onThisDay`: an earlier year's entry on this date, at most weekly. Off until turned on (FR-092).
  * - `proposal`: a change the other member proposed, waiting on you (Q13).
+ * - `sharedSettings`: something you share in the Bond changed, or a proposal was answered or withdrawn (#205).
  */
 internal data class NotificationCategoriesRequest(
     val reminder: Boolean? = null,
@@ -47,6 +49,7 @@ internal data class NotificationCategoriesRequest(
     val milestone: Boolean? = null,
     val onThisDay: Boolean? = null,
     val proposal: Boolean? = null,
+    val sharedSettings: Boolean? = null,
 )
 
 /** The caller's toggles in one bond, every one of them: a member who never chose is shown the defaults. */
@@ -63,6 +66,7 @@ internal data class MemberNotificationsResponse(
                     milestone = preferences.milestone,
                     onThisDay = preferences.onThisDay,
                     proposal = preferences.proposal,
+                    sharedSettings = preferences.sharedSettings,
                 ),
             )
     }
@@ -76,4 +80,5 @@ internal data class NotificationCategoriesResponse(
     val milestone: Boolean,
     val onThisDay: Boolean,
     val proposal: Boolean,
+    val sharedSettings: Boolean,
 )

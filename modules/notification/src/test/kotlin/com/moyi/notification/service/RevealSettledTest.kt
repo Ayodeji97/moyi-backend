@@ -180,6 +180,7 @@ internal class RevealSettledTest(
                     recipient = PushRecipient(ZoneId.of("Africa/Lagos"), null, NotificationPreferences.DEFAULTS),
                     bondDate = date,
                     nudge = null,
+                    sharedChange = null,
                 ),
             )
         }

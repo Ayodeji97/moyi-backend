@@ -622,5 +622,13 @@ internal class BondTest {
         create().timezoneChangeAllowedFrom(now).shouldBeNull()
     }
 
+    @Test
+    fun `a bond has ended when it is archived or deleted, and only an unended bond can be ended`() {
+        // ADR-0069 decision 4's gate, and the rule `canBeEnded` reads rather than restates.
+        BondStatus.entries.filter { it.hasEnded } shouldBe listOf(BondStatus.ARCHIVED, BondStatus.DELETED)
+        create().canBeEnded shouldBe true
+        create().copy(status = BondStatus.ARCHIVED).canBeEnded shouldBe false
+    }
+
     private fun joiner(bond: Bond): Member = Member.member(MemberId(UUID.randomUUID()), bond.id, UserId(UUID.randomUUID()), lagos, now)
 }

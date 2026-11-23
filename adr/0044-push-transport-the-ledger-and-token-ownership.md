@@ -225,6 +225,8 @@ ADR-0019's keys). `\\n` is what a vault's `\n` becomes, because Kamal writes its
 read only `\n`, and the API would not start. The vault holds the key on one line with no `\n`
 (ops/notification/README.md step 3, which also has a check that runs before the deploy).
 
+*Amended 2026-11-16 (issue #205, ADR-0069):* decision 9: a push of the new category `SHARED_SETTING_CHANGED` carries `data.change` (one of `SETTING`, `PROPOSAL_ACCEPTED`, `PROPOSAL_DECLINED`, `PROPOSAL_WITHDRAWN`, `SEVERAL`), on this category only, and its `android.notification.tag` is `SHARED_SETTING_CHANGED:{bondId}` (ADR-0069 decision 9).
+
 ## Consequences
 
 **Positive.** No cycle, and the module meant to be extracted first stays the one with no inbound

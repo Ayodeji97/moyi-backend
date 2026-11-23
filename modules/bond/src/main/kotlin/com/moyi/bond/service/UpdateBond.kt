@@ -89,7 +89,14 @@ internal class UpdateBond(
             val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
             // In this transaction, so the switch and the order to delete the vectors commit together (ADR-0054).
             support.events.publish(SemanticSearchDisabled.of(bond, now))
-            proposals.cancelLive(bond.id, ProposalKind.SEMANTIC_SEARCH_ON, now) // never a pending deletion or timezone change
+            // Never a pending deletion or timezone change; recorded as this member's call (issue #205).
+            // No ProposalClosed for it: the change below is the one push this PATCH makes (ADR-0069).
+            proposals.cancelLive(bond.id, ProposalKind.SEMANTIC_SEARCH_ON, membership.memberId, now)
+        }
+        // The bond before and after compared: a PATCH that changes no value still moves the
+        // version, as it always has, but tells nobody (ADR-0069, a client re-sending the same name).
+        if (updated != bond) {
+            support.events.publish(BondSettingsChanged.of(membership, clock.instant().truncatedTo(ChronoUnit.MICROS)))
         }
         log.info("Bond {} settings updated", membership.bondId.value)
         // Re-read, so the `ETag` carries the version the row now has rather than

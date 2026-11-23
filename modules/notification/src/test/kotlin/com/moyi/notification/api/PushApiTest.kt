@@ -34,10 +34,11 @@ internal class PushApiTest {
         val user = UUID.randomUUID()
         val bond = UUID.randomUUID()
         val at = Instant.parse("2026-10-28T00:00:00Z")
-        PushRequest(user, bond, PushCategory.MILESTONE, "k".repeat(PushRequest.MAX_DEDUPE_KEY_LENGTH), at, RECIPIENT, null, null)
-        shouldThrow<IllegalArgumentException> { PushRequest(user, bond, PushCategory.MILESTONE, "", at, RECIPIENT, null, null) }
+        PushRequest(user, bond, PushCategory.MILESTONE, "k".repeat(PushRequest.MAX_DEDUPE_KEY_LENGTH), at, RECIPIENT, null, null, null)
+        shouldThrow<IllegalArgumentException> { PushRequest(user, bond, PushCategory.MILESTONE, "", at, RECIPIENT, null, null, null) }
         shouldThrow<IllegalArgumentException> {
-            PushRequest(user, bond, PushCategory.MILESTONE, "k".repeat(PushRequest.MAX_DEDUPE_KEY_LENGTH + 1), at, RECIPIENT, null, null)
+            val tooLong = "k".repeat(PushRequest.MAX_DEDUPE_KEY_LENGTH + 1)
+            PushRequest(user, bond, PushCategory.MILESTONE, tooLong, at, RECIPIENT, null, null, null)
         }
     }
 
@@ -45,9 +46,49 @@ internal class PushApiTest {
     fun `a nudge on any category but REMINDER is refused`() {
         val at = Instant.parse("2026-11-16T00:00:00Z")
         shouldThrow<IllegalArgumentException> {
-            PushRequest(UUID.randomUUID(), UUID.randomUUID(), PushCategory.REVEAL, "k", at, RECIPIENT, null, Nudge(1, 0, emptySet()))
+            PushRequest(UUID.randomUUID(), UUID.randomUUID(), PushCategory.REVEAL, "k", at, RECIPIENT, null, Nudge(1, 0, emptySet()), null)
         }
-        PushRequest(UUID.randomUUID(), UUID.randomUUID(), PushCategory.REMINDER, "k", at, RECIPIENT, null, Nudge(1, 0, emptySet()))
+        PushRequest(UUID.randomUUID(), UUID.randomUUID(), PushCategory.REMINDER, "k", at, RECIPIENT, null, Nudge(1, 0, emptySet()), null)
+    }
+
+    @Test
+    fun `a shared change is required on the category and refused on any other`() {
+        val at = Instant.parse("2026-11-16T00:00:00Z")
+
+        fun ask(
+            category: PushCategory,
+            change: SharedChange?,
+        ) = PushRequest(UUID.randomUUID(), UUID.randomUUID(), category, "k", at, RECIPIENT, null, null, change)
+        ask(PushCategory.SHARED_SETTING_CHANGED, SharedChange.SETTING)
+        shouldThrow<IllegalArgumentException> { ask(PushCategory.SHARED_SETTING_CHANGED, null) }
+        shouldThrow<IllegalArgumentException> { ask(PushCategory.REVEAL, SharedChange.SETTING) }
+        shouldThrow<IllegalArgumentException> { ask(PushCategory.PROPOSAL_OPENED, SharedChange.PROPOSAL_ACCEPTED) }
+    }
+
+    @Test
+    fun `SEVERAL cannot be asked for`() {
+        val at = Instant.parse("2026-11-16T00:00:00Z")
+        shouldThrow<IllegalArgumentException> {
+            PushRequest(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                PushCategory.SHARED_SETTING_CHANGED,
+                "k",
+                at,
+                RECIPIENT,
+                null,
+                null,
+                SharedChange.SEVERAL,
+            )
+        }
+    }
+
+    @Test
+    fun `the sharedSettings toggle governs the category and is on by default`() {
+        NotificationPreferences.DEFAULTS.sharedSettings shouldBe true
+        NotificationPreferences.DEFAULTS.allows(PushCategory.SHARED_SETTING_CHANGED) shouldBe true
+        NotificationPreferences(sharedSettings = false).allows(PushCategory.SHARED_SETTING_CHANGED) shouldBe false
+        PushCategory.SHARED_SETTING_CHANGED.isRevealClass shouldBe false
     }
 
     @Test
@@ -81,6 +122,7 @@ internal class PushApiTest {
                 NotificationPreferences(reveal = false) to setOf(PushCategory.REVEAL, PushCategory.SOLO_UNLOCK),
                 NotificationPreferences(milestone = false) to setOf(PushCategory.MILESTONE),
                 NotificationPreferences(proposal = false) to setOf(PushCategory.PROPOSAL_OPENED),
+                NotificationPreferences(sharedSettings = false) to setOf(PushCategory.SHARED_SETTING_CHANGED),
                 NotificationPreferences(onThisDay = true) to emptySet(),
             )
         governs.forEach { (preferences, off) ->
