@@ -750,6 +750,14 @@
         "evidence": "smoke",
         "evidenceRef": "remember: no q is one 422 on q",
         "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/RememberQuery.kt#if (size == null || terms == null) throw DaysQueryNotValidException(violations)"
+      },
+      {
+        "status": 429,
+        "code": "RATE_LIMITED",
+        "reason": "remember:user, thirty an hour per account, its own bucket beside the per-user limit every call counts against: each question may be sent to the embedding provider. Spent before the bond is looked at, so a stranger's 404 and a 422 use one too. Retry-After is always sent, in whole seconds, at least 1.",
+        "evidence": "test",
+        "evidenceRef": "RememberRateLimitTest#the 31st call in an hour is a 429",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/RememberController.kt#@RateLimited(RateLimitBucket.REMEMBER_USER)"
       }
     ],
     "curl": "curl -G \"$API/bonds/$BOND/remember\" --data-urlencode \"q=the walk by the river\" -H \"Authorization: Bearer $TOKEN\""

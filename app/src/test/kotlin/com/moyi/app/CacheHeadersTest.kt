@@ -41,7 +41,7 @@ import javax.sql.DataSource
  * because it is the same for everyone and holds nothing about anyone.
  *
  * The archive's two reads are the exception (search and on-this-day, slice
- * C6b, are not: they keep the default), and the reason the default now
+ * C6b, and "Remember when", ADR-0054, are not: they keep the default), and the reason the default now
  * needs holding: they send `Cache-Control: private, no-cache` beside an
  * `ETag`, which works *because* the writer leaves alone a response that has
  * a `Cache-Control` already. So both halves are asked here: the exception is
@@ -116,6 +116,10 @@ class CacheHeadersTest(
         neverStored("GET /search", get("/bonds/$bond/search?q=anything", ada), 200)
         neverStored("GET /search, a q that cannot be searched", get("/bonds/$bond/search?q=", ada), 422)
         neverStored("GET /search, a stranger", get("/bonds/$bond/search?q=anything", eve), 404)
+        // "Remember when" (ADR-0054): kept by nobody, as search, for a member, a q that cannot be read, and a stranger.
+        neverStored("GET /remember", get("/bonds/$bond/remember?q=anything", ada), 200)
+        neverStored("GET /remember, a q that cannot be searched", get("/bonds/$bond/remember?q=", ada), 422)
+        neverStored("GET /remember, a stranger", get("/bonds/$bond/remember?q=anything", eve), 404)
         neverStored("GET /on-this-day", get("/bonds/$bond/on-this-day", ada), 200)
         neverStored("GET /on-this-day, a stranger", get("/bonds/$bond/on-this-day", eve), 404)
         // Milestones (slice C6c): the API's default, as search and on-this-day (ADR-0041 decision 11).

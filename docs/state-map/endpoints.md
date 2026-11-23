@@ -2030,6 +2030,7 @@ curl -G "$API/bonds/$BOND/remember" --data-urlencode "q=the walk by the river" -
 |---|---|---|---|
 | 404 | `NOT_FOUND` | The bond does not exist, the id is not a UUID, or you are not a member. One answer for all, decided before q is read, so nothing of q is sent to a provider for a stranger. | smoke |
 | 422 | `VALIDATION_FAILED` | q is missing, blank, longer than 100 characters or 1,024 bytes, or holds NUL (search's own rules); or limit is not a whole number from 1 to 20. Each parameter is named, never its value. | smoke |
+| 429 | `RATE_LIMITED` | remember:user, thirty an hour per account, its own bucket beside the per-user limit every call counts against: each question may be sent to the embedding provider. Spent before the bond is looked at, so a stranger's 404 and a 422 use one too. Retry-After is always sent, in whole seconds, at least 1. | test |
 
 ### GET /bonds/{bondId}/on-this-day
 
