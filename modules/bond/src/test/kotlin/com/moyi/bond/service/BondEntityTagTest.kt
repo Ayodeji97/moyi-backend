@@ -32,7 +32,8 @@ internal class BondEntityTagTest {
                 now,
             )
         val member = bond.members.single()
-        val view = BondView(bond = bond, members = listOf(MemberView(member, "Ada")), me = member, invite = null)
+        val view =
+            BondView(bond = bond, members = listOf(MemberView(member, "Ada")), me = member, invite = null, semanticSearchActive = false)
         val ended =
             Proposal
                 .timezoneChange(ProposalId(UUID.randomUUID()), bond.id, RegionZone.of("Europe/London"), member.id, now)
@@ -57,7 +58,8 @@ internal class BondEntityTagTest {
                 now,
             )
         val member = bond.members.single()
-        val view = BondView(bond = bond, members = listOf(MemberView(member, "Ada")), me = member, invite = null)
+        val view =
+            BondView(bond = bond, members = listOf(MemberView(member, "Ada")), me = member, invite = null, semanticSearchActive = false)
         val unclosed = Proposal.timezoneChange(ProposalId(UUID.randomUUID()), bond.id, RegionZone.of("Europe/London"), member.id, now)
         val closedLater =
             unclosed.copy(cancelledAt = unclosed.expiresAt.plusSeconds(3600), cancelCause = com.moyi.bond.domain.CancelCause.LAPSED)
@@ -65,5 +67,23 @@ internal class BondEntityTagTest {
         closedLater.closedAt shouldBe unclosed.expiresAt
         unclosed.closedAt shouldBe unclosed.expiresAt
         view.copy(closedProposals = listOf(closedLater)).entityTag() shouldBe view.copy(closedProposals = listOf(unclosed)).entityTag()
+    }
+
+    @Test
+    fun `two views that differ only in whether search is by meaning now have different entity tags`() {
+        // ADR-0070: a deploy or an ADMIN's switch moves no bond row, so without `semanticSearchActive`
+        // in the digest a client holding the old tag is answered 304 and keeps a stale answer.
+        val bond =
+            Bond.create(
+                BondId(UUID.randomUUID()),
+                MemberId(UUID.randomUUID()),
+                BondDraft(UserId(UUID.randomUUID()), BondType.COUPLE, "Us", lagos, null, null),
+                now,
+            )
+        val member = bond.members.single()
+        val view =
+            BondView(bond = bond, members = listOf(MemberView(member, "Ada")), me = member, invite = null, semanticSearchActive = false)
+
+        view.copy(semanticSearchActive = true).entityTag() shouldNotBe view.copy(semanticSearchActive = false).entityTag()
     }
 }

@@ -164,7 +164,9 @@ class OpenApiContractTest(
             val responses = op.responses.keys
             responses shouldContainAll listOf("401", "429", "500")
             if (op.requestBody != null) responses shouldContainAll listOf("400", "415", "422")
-            if (!isPublic(name)) op.responses shouldContainKey "403" else op.responses.keys shouldNotContain "403"
+            // Search and "Remember when" are signed-in and still never 403 (ADR-0070 decision 4): a stranger's is the 404.
+            val forbiddable = !isPublic(name) && name !in NEVER_FORBIDDEN
+            if (forbiddable) op.responses shouldContainKey "403" else op.responses.keys shouldNotContain "403"
             // An operation that names a resource by id can answer "not found
             // or not permitted to know it exists" (doc 06 §2), and a
             // generated client has to be able to model that (Codex on #35).
@@ -1534,5 +1536,8 @@ class OpenApiContractTest(
         val GENERATED = File("build/openapi/openapi.json")
         val COMMITTED = File("../contracts/openapi.json")
         const val SCHEMAS = "#/components/schemas/"
+
+        /** Written out, not read from the contracts module: the routes a stranger gets the bond's 404 on and nothing 403s (ADR-0070). */
+        val NEVER_FORBIDDEN = setOf("GET /api/v1/bonds/{bondId}/search", "GET /api/v1/bonds/{bondId}/remember")
     }
 }

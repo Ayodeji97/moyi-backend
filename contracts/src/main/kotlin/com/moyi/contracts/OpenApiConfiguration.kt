@@ -278,9 +278,10 @@ class OpenApiConfiguration {
             // the same way); the API-wide 400 is owed (ADR-0039, final review m1).
             if (operation.operationId == SEARCH_OPERATION || operation.operationId == REMEMBER_OPERATION) add(HttpStatus.BAD_REQUEST)
             // 401 everywhere: a public route needs no token, but one that is sent is still checked, and the refusals of
-            // login and refresh are 401s of their own (doc 06 §3.1). 403 only where a token is required.
+            // login and refresh are 401s of their own (doc 06 §3.1). 403 only where a token is required, and not on the
+            // archive's two question routes, which nothing can answer 403 (ADR-0070 decision 4).
             add(HttpStatus.UNAUTHORIZED)
-            if (!public) add(HttpStatus.FORBIDDEN)
+            if (canBeForbidden(operation.operationId, public)) add(HttpStatus.FORBIDDEN)
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER }) add(HttpStatus.NOT_FOUND)
             if (operation.operationId in PATHLESS_NOT_FOUND_OPERATIONS) add(HttpStatus.NOT_FOUND)
             if (operation.operationId in CONFLICTING_OPERATIONS) add(HttpStatus.CONFLICT)

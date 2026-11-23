@@ -5,6 +5,7 @@ import com.moyi.common.testing.IntegrationTest
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.identity.api.UserDirectory
+import io.kotest.matchers.longs.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -47,7 +48,8 @@ internal class RememberRateLimitTest(
         limited.status shouldBe 429
         limited.getHeader("X-RateLimit-Limit") shouldBe "30"
         limited.getHeader("X-RateLimit-Remaining") shouldBe "0"
-        (limited.getHeader("Retry-After") != null) shouldBe true
+        // Whole seconds, rounded up, so never a zero that means "now" (RateLimitExceededException).
+        limited.getHeader("Retry-After")!!.toLong() shouldBeGreaterThanOrEqual 1L
         attempt(bea).status shouldBe 404
         attempt(bea).getHeader("X-RateLimit-Remaining") shouldBe "28"
     }

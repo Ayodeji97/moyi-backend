@@ -1,6 +1,5 @@
 package com.moyi.gratitude.infra
 
-import com.moyi.common.core.FeatureFlags
 import com.moyi.common.security.TokenRevocation
 import com.moyi.common.security.TokenRevocations
 import com.moyi.common.security.VerifiedEmails
@@ -133,9 +132,9 @@ internal class GratitudeTestApplication {
     @Bean
     fun fakeEmbeddingPort(): FakeEmbeddingPort = FakeEmbeddingPort()
 
-    /** `admin` owns `feature_flags` and is not in this context: every flag on (ADR-0067). */
+    /** `admin` owns `feature_flags` and is not in this context: every flag on (ADR-0067), unless a test switches one off. */
     @Bean
-    fun featureFlags(): FeatureFlags = FeatureFlags { true }
+    fun featureFlags(): SwitchableFeatureFlags = SwitchableFeatureFlags()
 
     companion object {
         /**

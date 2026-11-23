@@ -40,6 +40,12 @@ internal data class BondResponse(
     val strictMode: Boolean,
     /** FR-204, ADR-0054: whether this bond's entries are embedded for semantic search. On by default. */
     val semanticSearchEnabled: Boolean,
+    /**
+     * ADR-0070: whether this bond's entries are searched by meaning **now**: [semanticSearchEnabled]
+     * and an embedding provider configured, with a max-distance for its model, and `AI_EMBEDDINGS`
+     * on. Search and "Remember when" decide from the same answer; while false both are keywords only.
+     */
+    val semanticSearchActive: Boolean,
     val status: BondStatus,
     val maxMembers: Int,
     val createdAt: Instant,
@@ -88,6 +94,7 @@ internal data class BondResponse(
                 revealTimeLocal = view.bond.revealTimeLocal?.let(HH_MM::format),
                 strictMode = view.bond.strictMode,
                 semanticSearchEnabled = view.bond.semanticSearchEnabled,
+                semanticSearchActive = view.semanticSearchActive,
                 status = view.bond.status,
                 maxMembers = view.bond.maxMembers,
                 createdAt = view.bond.createdAt,

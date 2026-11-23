@@ -66,6 +66,10 @@ internal class BondTestApplication {
     @Bean
     fun meterRegistry(): MeterRegistry = SimpleMeterRegistry()
 
+    /** `gratitude`'s port (ADR-0070), which this context does not boot: a switch each test may turn. */
+    @Bean
+    fun semanticSearchAvailability(): FakeSemanticSearchAvailability = FakeSemanticSearchAvailability()
+
     @Bean
     fun tokenRevocations(): TokenRevocations = TokenRevocations { TokenRevocation(invalidBefore = null) }
 }

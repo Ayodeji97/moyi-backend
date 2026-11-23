@@ -5,6 +5,7 @@ import com.moyi.bond.domain.ProposalId
 import com.moyi.bond.domain.ProposalOutcome
 import com.moyi.bond.infra.BondTestApplication
 import com.moyi.bond.infra.FakeAccountStanding
+import com.moyi.bond.infra.FakeSemanticSearchAvailability
 import com.moyi.bond.infra.FakeUserDirectory
 import com.moyi.bond.infra.NoNotifications
 import com.moyi.common.events.EventConsumer
@@ -225,6 +226,10 @@ internal class ProposalEndingsMigrationTest(
         /** `notification` is not scanned here, and `EndBond` asks for its port (ADR-0069). */
         @Bean
         fun notifications(): Notifications = NoNotifications()
+
+        /** `gratitude`'s port (ADR-0070), which this context does not boot. */
+        @Bean
+        fun semanticSearchAvailability(): FakeSemanticSearchAvailability = FakeSemanticSearchAvailability()
     }
 
     companion object {

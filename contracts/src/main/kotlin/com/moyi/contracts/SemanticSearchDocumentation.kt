@@ -8,6 +8,7 @@ private const val BOND_RESPONSE = "BondResponse"
 private const val PATCH_BOND_REQUEST = "PatchBondRequest"
 private const val SETTING_PROPERTY = "semanticSearchEnabled"
 private const val PENDING_PROPERTY = "pendingSemanticSearchRequest"
+private const val ACTIVE_PROPERTY = "semanticSearchActive"
 
 /**
  * The bond's semantic-search setting (FR-204, ADR-0054): off by one member through
@@ -25,6 +26,7 @@ internal fun documentSemanticSearch(api: OpenAPI) {
     api.components.schemas[BOND_RESPONSE]?.properties?.let { properties ->
         properties[SETTING_PROPERTY]?.description = SETTING_DESCRIPTION
         properties[PENDING_PROPERTY]?.description = PENDING_DESCRIPTION
+        properties[ACTIVE_PROPERTY]?.description = ACTIVE_DESCRIPTION
     }
     api.components.schemas[PATCH_BOND_REQUEST]
         ?.properties
@@ -36,6 +38,14 @@ private const val SETTING_DESCRIPTION =
     "Whether the bond's entries are embedded so that search and \"Remember when\" also find by meaning. On by " +
         "default. While on, the words of each entry are sent to the embedding provider, once a provider is configured. " +
         "Either member turns it off alone; on again needs both."
+
+private const val ACTIVE_DESCRIPTION =
+    "Whether search and \"Remember when\" find this bond's entries by meaning now (ADR-0070): `semanticSearchEnabled` " +
+        "is on, an embedding provider is configured with a threshold for its model, and the operator has not switched " +
+        "it off. While false, both answer by words alone, still `200`; a client that offers \"Remember when\" " +
+        "only for a meaning search reads this. It changes without any change to the bond (a deploy, the operator's " +
+        "switch), and the `ETag` changes with it. True says the search asks by meaning, not that every entry has been " +
+        "embedded yet: an entry is found by meaning once the background job, which runs every minute, has embedded it."
 
 private const val PENDING_DESCRIPTION =
     "A request by one member to turn semantic search back on, waiting for the other to agree through the same " +
