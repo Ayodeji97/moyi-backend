@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# ADR-0070 (semanticSearchActive) adds four probes to the semantic search section: with the provider
+# `none` the bond reads not active, on the one and in the list, and still not active once both
+# members turn the setting back on. Last run on 2026-11-23, on feat/semantic-search-active, from a
+# jar of the branch's tree on 7247ebe4, on a fresh database that applied 65 migrations to V71,
+# against its own compose project (moyi-ssa471: Postgres 55471, Valkey 56471, MinIO 57471), the jar
+# booted by hand (local profile, the five crons at */5, ports 18471/18472) and --attach: 2021
+# passed, 0 failed, 0 skipped.
+#
 # Issue #205 (shared-setting pushes, ADR-0069) adds a section before the media section: a setting
 # PATCH asks one SHARED_SETTING_CHANGED push for the other member, REQUESTED until the consumer holds
 # it; a second change inside two minutes coalesces into SEVERAL; a proposal's ending calls off its
@@ -2821,6 +2829,11 @@ MS_BOND="$RB_BOND"; MS_A_ENTRY="$RB_A_ENTRY"
 ms_bond() { curl -s -D - -o /dev/null "$API/bonds/$MS_BOND" -H "Authorization: Bearer $1" | tr -d '\r' | grep -i '^etag:' | head -1 | cut -d' ' -f2-; }
 
 expect "semantic: a new bond has it on" 200 '"semanticSearchEnabled":true' -- "$API/bonds/$MS_BOND" -H "Authorization: Bearer $MS_A"
+# ADR-0070: on, but with the provider `none` nothing is searched by meaning, and the bond says so, on
+# the one and in the list, so that a client hides "Remember when" rather than offer a keyword search.
+expect "semantic: …but with no provider it is not active" 200 '"semanticSearchActive":false' -- "$API/bonds/$MS_BOND" -H "Authorization: Bearer $MS_A"
+expect "semantic: …nor in the list" 200 '"semanticSearchActive":false' -- "$API/bonds" -H "Authorization: Bearer $MS_A"
+[[ "$LAST_BODY" != *'"semanticSearchActive":true'* ]] && pass "semantic: …for any bond of hers" || fail "semantic: a bond active with no provider" "${LAST_BODY:0:300}"
 expect "semantic: search with no provider is 200, by words alone" 200 'we walked the dog along the river' -- -G "$API/bonds/$MS_BOND/search" --data-urlencode "q=river" -H "Authorization: Bearer $MS_A"
 expect "semantic: …and a word no entry holds finds nothing, however near its meaning" 200 '"items":[]' -- -G "$API/bonds/$MS_BOND/search" --data-urlencode "q=stream" -H "Authorization: Bearer $MS_A"
 
@@ -2861,6 +2874,7 @@ expect "semantic: the other member calls it off: 204" 204 "" -- -X DELETE "$API/
 expect "semantic: …and nothing is pending" 200 '"pendingSemanticSearchRequest":null' -- "$API/bonds/$MS_BOND" -H "Authorization: Bearer $MS_A"
 expect "semantic: she asks again: 202" 202 '"semanticSearchEnabled":false' -- -X POST "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_A"
 expect "semantic: the other member's request turns it on: 202" 202 '"semanticSearchEnabled":true' -- -X POST "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_B"
+[[ "$LAST_BODY" == *'"semanticSearchActive":false'* ]] && pass "semantic: …and, with no provider, still not active" || fail "semantic: active with no provider" "${LAST_BODY:0:300}"
 expect "semantic: asking while it is on changes nothing: 202" 202 '"pendingSemanticSearchRequest":null' -- -X POST "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_A"
 expect "semantic: a stranger asking is 404" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_O"
 expect "semantic: a stranger calling it off is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_O"

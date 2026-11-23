@@ -60,7 +60,8 @@ private const val REMEMBER_DESCRIPTION =
         "the feed's day shape. Two rankings of the entries the caller can read in full are fused: by the question's " +
         "words, and by its meaning, when the bond's semantic search is on and the meaning can be read in time. When it " +
         "cannot (the setting is off, no provider is configured, the provider fails or is slow), the answer is the " +
-        "words' ranking alone, still `200`: the client renders one state. Only entries a person wrote are returned, " +
+        "words' ranking alone, still `200`: the client renders one state; the bond's `semanticSearchActive` says " +
+        "beforehand whether the meaning half runs at all. Only entries a person wrote are returned, " +
         "never generated text, and nothing says which entry of a day was relevant or why.\n\n" +
         "There is no cursor: it is one answer, not a feed. It may hold fewer days than `limit`, or none, because a day " +
         "is shown only when the caller can read the relevant entry in full, and the answer is bounded by its size. " +

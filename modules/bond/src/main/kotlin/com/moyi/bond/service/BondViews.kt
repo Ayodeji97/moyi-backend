@@ -1,5 +1,6 @@
 package com.moyi.bond.service
 
+import com.moyi.bond.api.SemanticSearchAvailability
 import com.moyi.bond.domain.Bond
 import com.moyi.bond.domain.Invite
 import com.moyi.bond.domain.Member
@@ -32,6 +33,7 @@ import java.time.LocalDate
  * to live and go stale.
  */
 @Component
+@Suppress("LongParameterList") // One collaborator per thing a view shows, each read once for every bond of the call.
 internal class BondViews(
     private val users: UserDirectory,
     private val invites: InviteStore,
@@ -39,6 +41,7 @@ internal class BondViews(
     private val links: InviteLinks,
     private val clock: Clock,
     private val pause: BondPause,
+    private val semanticSearch: SemanticSearchAvailability,
 ) {
     fun of(
         bond: Bond,
@@ -61,6 +64,9 @@ internal class BondViews(
         val paused = pause.pausedAmong(bonds)
         // The complement of the live query, batched the same way: how each kind last ended (spec B14).
         val closed = this.proposals.findLatestEndedOf(bonds.map { it.id }, now)
+        // Asked once for however many bonds, and only when one of them has the setting on: with every
+        // setting off the answer is false whatever it says, as search asks nothing then either (ADR-0070).
+        val byMeaning = bonds.any { it.semanticSearchEnabled } && semanticSearch.isAvailable()
         return bonds.map { bond ->
             BondView(
                 bond = bond,
@@ -75,6 +81,7 @@ internal class BondViews(
                 timezoneChangeAllowedFrom = bond.timezoneChangeAllowedFrom(now),
                 paused = paused.getValue(bond.id.value),
                 closedProposals = closed[bond.id].orEmpty(),
+                semanticSearchActive = bond.semanticSearchEnabled && byMeaning,
             )
         }
     }
@@ -130,6 +137,12 @@ internal data class BondView(
      * with no write (a proposal lapses), so `entityTag` digests it.
      */
     val closedProposals: List<Proposal> = emptyList(),
+    /**
+     * ADR-0070: the bond's entries are searched by meaning now, its setting on and
+     * [SemanticSearchAvailability] true. The second half is configuration and an `ADMIN`'s switch,
+     * which move no bond row, so `entityTag` digests it, as it does [paused].
+     */
+    val semanticSearchActive: Boolean = false,
 ) {
     val timezoneChange: Proposal? get() = proposals.firstOrNull { it.kind == ProposalKind.TIMEZONE_CHANGE }
 

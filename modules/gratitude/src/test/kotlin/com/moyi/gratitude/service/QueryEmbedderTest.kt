@@ -52,7 +52,8 @@ internal class QueryEmbedderTest(
     @Autowired private val access: BondAccess,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
-    private val rig = WithdrawalRig(mockMvc, tokens, JdbcTemplate(dataSource))
+    private val jdbc = JdbcTemplate(dataSource)
+    private val rig = WithdrawalRig(mockMvc, tokens, jdbc)
     private val meters = SimpleMeterRegistry()
     private val embedders = mutableListOf<QueryEmbedder>()
     private lateinit var membership: BondMembership
@@ -161,6 +162,46 @@ internal class QueryEmbedderTest(
         counted("used") shouldBe 1.0
     }
 
+    /**
+     * ADR-0070: `BondResponse.semanticSearchActive` is the bond's setting and [SemanticSearchReadiness.isAvailable];
+     * search asks by meaning exactly then. Every combination of the four inputs, so that neither can drift from the
+     * other: a provider answering every call, so only the predicate decides whether there is a match.
+     */
+    @Test
+    fun `a match is made exactly when the setting is on and the readiness the bond reports is available`() {
+        val bondId = membership.bondId
+        val off =
+            run {
+                jdbc.update("UPDATE bonds SET semantic_search_enabled = false WHERE id = ?", bondId)
+                access.membershipOf(membership.userId, bondId).also { it.semanticSearchEnabled shouldBe false }
+            }
+        jdbc.update("UPDATE bonds SET semantic_search_enabled = true WHERE id = ?", bondId)
+        val on = access.membershipOf(membership.userId, bondId).also { it.semanticSearchEnabled shouldBe true }
+        val combinations =
+            listOf(true, false).flatMap { flag ->
+                listOf(SPACE, null).flatMap { space ->
+                    listOf(mapOf(SPACE to MAX_DISTANCE), emptyMap()).map { threshold -> Triple(flag, space, threshold) }
+                }
+            }
+        combinations.size shouldBe 8
+        combinations.forEach { (flag, space, threshold) ->
+            val port =
+                object : EmbeddingPort {
+                    override val space = space
+
+                    override fun embed(texts: List<String>): List<FloatArray> = texts.map { FloatArray(SPACE.dimensions) }
+                }
+            val properties = SemanticSearchProperties(Duration.ofSeconds(AWAIT_SECONDS), threshold)
+            val readiness = SemanticSearchReadiness(port, properties, FeatureFlags { !(it == FeatureFlag.AI_EMBEDDINGS && !flag) })
+            val embedder = QueryEmbedder(port, properties, readiness, meters).also { embedders += it }
+            val available = flag && space != null && threshold.isNotEmpty()
+
+            readiness.isAvailable() shouldBe available
+            (embedder.matchFor(on, "calm light") != null) shouldBe available
+            embedder.matchFor(off, "calm light").shouldBeNull()
+        }
+    }
+
     private fun counted(outcome: String) = meters.counter("gratitude.search.semantic", "outcome", outcome).count()
 
     private fun embedder(
@@ -168,7 +209,10 @@ internal class QueryEmbedderTest(
         timeout: Duration = Duration.ofSeconds(AWAIT_SECONDS),
         maxDistance: Map<EmbeddingSpace, Double> = mapOf(SPACE to MAX_DISTANCE),
         flags: FeatureFlags = FeatureFlags { true },
-    ): QueryEmbedder = QueryEmbedder(port, SemanticSearchProperties(timeout, maxDistance), flags, meters).also { embedders += it }
+    ): QueryEmbedder {
+        val properties = SemanticSearchProperties(timeout, maxDistance)
+        return QueryEmbedder(port, properties, SemanticSearchReadiness(port, properties, flags), meters).also { embedders += it }
+    }
 
     private fun port(answer: (String) -> FloatArray): EmbeddingPort =
         object : EmbeddingPort {

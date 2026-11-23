@@ -17,6 +17,22 @@ internal const val SEARCH_MAX_OCTETS = 1024
 internal const val SEARCH_MAX_GRAPHEMES = 100
 
 /**
+ * Signed-in operations that cannot answer `403` (ADR-0070 decision 4): search and "Remember when". The only `403`s a
+ * signed-in call can meet are a refused authority (no route here asks for one beyond a valid token) and
+ * `EMAIL_NOT_VERIFIED` (creating or joining a bond), and a stranger gets the bond's `404`, never a `403` (doc 06 §2).
+ * Every other bond-scoped read is in the same position and still documents the blanket `403`: narrowing them all is
+ * owed, in one pass rather than route by route. Here, not in `OpenApiConfiguration`, which sits at detekt's
+ * `TooManyFunctions` threshold.
+ */
+private val NO_FORBIDDEN_OPERATIONS = setOf(SEARCH_OPERATION, REMEMBER_OPERATION)
+
+/** A signed-in route answers `403`, unless it is one of [NO_FORBIDDEN_OPERATIONS]. */
+internal fun canBeForbidden(
+    operationId: String?,
+    public: Boolean,
+): Boolean = !public && operationId !in NO_FORBIDDEN_OPERATIONS
+
+/**
  * The rules `q` is read by (ADR-0039 decision 9), stated once for the two routes that read it the
  * same way (`SearchQuery.termsOf`): the search box and "Remember when" (ADR-0054).
  */

@@ -3,8 +3,6 @@ package com.moyi.gratitude.service
 import com.moyi.ai.api.EmbeddingPort
 import com.moyi.ai.api.EmbeddingUnavailableException
 import com.moyi.bond.api.BondMembership
-import com.moyi.common.core.FeatureFlag
-import com.moyi.common.core.FeatureFlags
 import com.moyi.gratitude.domain.SemanticMatch
 import com.moyi.gratitude.infra.database.EntryEmbeddings
 import io.micrometer.core.instrument.Counter
@@ -23,11 +21,12 @@ import java.util.concurrent.TimeoutException
  * `q` as a vector, for the search's meaning half (ADR-0054, spec §3.5), or `null` whenever that
  * half must be dropped and the search is keywords only, still `200`.
  *
- * **Dropped, counted `disabled`**, before anything is sent: an `ADMIN` has switched
- * `AI_EMBEDDINGS` off (ADR-0067 decision 7, read here, on the request's thread, so the read is
- * not inside the provider's timeout), the bond's setting is off, no provider is configured, or the
- * provider's model has no threshold ([SemanticSearchProperties.maxDistance]). With the setting or
- * the flag off, `q` never leaves the server.
+ * **Dropped, counted `disabled`**, before anything is sent: the bond's setting is off, or
+ * [SemanticSearchReadiness] says no: an `ADMIN` has switched `AI_EMBEDDINGS` off (ADR-0067 decision
+ * 7, read on the request's thread, so the read is not inside the provider's timeout), no provider is
+ * configured, or the provider's model has no threshold ([SemanticSearchProperties.maxDistance]).
+ * That readiness is also what `BondResponse.semanticSearchActive` reports (ADR-0070). With the
+ * setting or the flag off, `q` never leaves the server.
  *
  * **Dropped, counted `degraded`**, when the provider fails, answers with a vector of the wrong
  * size, or has not answered within [SemanticSearchProperties.queryTimeout] (5 s). The call runs
@@ -42,7 +41,7 @@ import java.util.concurrent.TimeoutException
 internal class QueryEmbedder(
     private val port: EmbeddingPort,
     private val properties: SemanticSearchProperties,
-    private val flags: FeatureFlags,
+    private val readiness: SemanticSearchReadiness,
     meters: MeterRegistry,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -59,14 +58,14 @@ internal class QueryEmbedder(
         membership: BondMembership,
         query: String,
     ): SemanticMatch? {
-        val space = port.space
-        val maxDistance = space?.let { properties.maxDistance[it] }
-        // The bond's setting first: when it is off, the flag is not read at all.
-        val wanted = membership.semanticSearchEnabled && flags.isOn(FeatureFlag.AI_EMBEDDINGS)
-        if (!wanted || space == null || maxDistance == null) {
+        // The bond's setting first: when it is off, the flag is not read at all. Then the readiness
+        // `BondResponse.semanticSearchActive` is answered from (ADR-0070): the same call, not a copy.
+        val ready = if (membership.semanticSearchEnabled) readiness.ready() else null
+        if (ready == null) {
             disabled.increment()
             return null
         }
+        val (space, maxDistance) = ready
         val table = EntryEmbeddings.vectorTableOf(space)
         val match = embed(query)?.takeIf { it.size == space.dimensions }?.let { SemanticMatch(table, it, maxDistance) }
         (if (match == null) degraded else used).increment()

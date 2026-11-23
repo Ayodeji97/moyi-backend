@@ -29,6 +29,8 @@ internal fun BondView.entityTag(): String {
                     timezoneChangeAllowedFrom,
                     // A3: a suspension and its lift move no bond row; the pause is read, not stored.
                     paused,
+                    // ADR-0070: configuration and an ADMIN's switch move no bond row either.
+                    semanticSearchActive,
                 ),
             )
             members.forEach { view ->

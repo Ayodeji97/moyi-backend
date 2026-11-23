@@ -3148,7 +3148,7 @@
     },
     "/api/v1/bonds/{bondId}/remember" : {
       "get" : {
-        "description" : "\"Remember when\": the days of the bond most relevant to a question, most relevant first, each day whole and in the feed's day shape. Two rankings of the entries the caller can read in full are fused: by the question's words, and by its meaning, when the bond's semantic search is on and the meaning can be read in time. When it cannot (the setting is off, no provider is configured, the provider fails or is slow), the answer is the words' ranking alone, still `200`: the client renders one state. Only entries a person wrote are returned, never generated text, and nothing says which entry of a day was relevant or why.\n\nThere is no cursor: it is one answer, not a feed. It may hold fewer days than `limit`, or none, because a day is shown only when the caller can read the relevant entry in full, and the answer is bounded by its size. The caller's own entry is found before it is revealed; the partner's only once it has been.\n\n`q` is never echoed in a refusal, and the response is never to be stored. Thirty questions an hour per account: each may be sent to the embedding provider.",
+        "description" : "\"Remember when\": the days of the bond most relevant to a question, most relevant first, each day whole and in the feed's day shape. Two rankings of the entries the caller can read in full are fused: by the question's words, and by its meaning, when the bond's semantic search is on and the meaning can be read in time. When it cannot (the setting is off, no provider is configured, the provider fails or is slow), the answer is the words' ranking alone, still `200`: the client renders one state; the bond's `semanticSearchActive` says beforehand whether the meaning half runs at all. Only entries a person wrote are returned, never generated text, and nothing says which entry of a day was relevant or why.\n\nThere is no cursor: it is one answer, not a feed. It may hold fewer days than `limit`, or none, because a day is shown only when the caller can read the relevant entry in full, and the answer is bounded by its size. The caller's own entry is found before it is revealed; the partner's only once it has been.\n\n`q` is never echoed in a refusal, and the response is never to be stored. Thirty questions an hour per account: each may be sent to the embedding provider.",
         "operationId" : "remember",
         "parameters" : [ {
           "in" : "path",
@@ -3210,16 +3210,6 @@
               }
             },
             "description" : "Unauthorized"
-          },
-          "403" : {
-            "content" : {
-              "application/problem+json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description" : "Forbidden"
           },
           "404" : {
             "content" : {
@@ -3338,16 +3328,6 @@
               }
             },
             "description" : "Unauthorized"
-          },
-          "403" : {
-            "content" : {
-              "application/problem+json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description" : "Forbidden"
           },
           "404" : {
             "content" : {
@@ -6373,6 +6353,10 @@
           "revealTimeLocal" : {
             "type" : [ "string", "null" ]
           },
+          "semanticSearchActive" : {
+            "type" : "boolean",
+            "description" : "Whether search and \"Remember when\" find this bond's entries by meaning now (ADR-0070): `semanticSearchEnabled` is on, an embedding provider is configured with a threshold for its model, and the operator has not paused sending to it. While false, both answer by words alone, still `200`; a client that offers \"Remember when\" only for a meaning search reads this. It changes without any change to the bond (a deploy, the operator's switch), and the `ETag` changes with it. True says the search asks by meaning, not that every entry has been embedded yet: an entry is found by meaning once the background job, which runs every minute, has embedded it."
+          },
           "semanticSearchEnabled" : {
             "type" : "boolean",
             "description" : "Whether the bond's entries are embedded so that search and \"Remember when\" also find by meaning. On by default. While on, the words of each entry are sent to the embedding provider, once a provider is configured. Either member turns it off alone; on again needs both."
@@ -6394,7 +6378,7 @@
             "enum" : [ "COUPLE", "FRIENDS", "FAMILY", "PARENT_CHILD" ]
           }
         },
-        "required" : [ "anchorTimezone", "archivedAt", "closedProposals", "createdAt", "deletionScheduledFor", "id", "invite", "maxMembers", "me", "members", "name", "paused", "pendingDeletionRequest", "pendingSemanticSearchRequest", "pendingTimezoneChange", "revealTimeLocal", "semanticSearchEnabled", "status", "strictMode", "timezoneChangeAllowedFrom", "type" ]
+        "required" : [ "anchorTimezone", "archivedAt", "closedProposals", "createdAt", "deletionScheduledFor", "id", "invite", "maxMembers", "me", "members", "name", "paused", "pendingDeletionRequest", "pendingSemanticSearchRequest", "pendingTimezoneChange", "revealTimeLocal", "semanticSearchActive", "semanticSearchEnabled", "status", "strictMode", "timezoneChangeAllowedFrom", "type" ]
       },
       "BondsResponse" : {
         "type" : "object",
