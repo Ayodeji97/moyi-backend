@@ -99,3 +99,6 @@ A provider is switched on in production (the field turns true for every bond wit
 the privacy-policy precondition of ADR-0054 Owed still holds first). The threshold moves out of
 `gratitude`. A reason appears to narrow the field by bond state, which would have to narrow search
 first.
+
+When a provider is switched on, add a smoke probe that reads `semanticSearchActive: true`: until then
+the true path is proven only by tests with fakes (review S2).

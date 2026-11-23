@@ -32,7 +32,8 @@ internal class BondEntityTagTest {
                 now,
             )
         val member = bond.members.single()
-        val view = BondView(bond = bond, members = listOf(MemberView(member, "Ada")), me = member, invite = null)
+        val view =
+            BondView(bond = bond, members = listOf(MemberView(member, "Ada")), me = member, invite = null, semanticSearchActive = false)
         val ended =
             Proposal
                 .timezoneChange(ProposalId(UUID.randomUUID()), bond.id, RegionZone.of("Europe/London"), member.id, now)
@@ -57,7 +58,8 @@ internal class BondEntityTagTest {
                 now,
             )
         val member = bond.members.single()
-        val view = BondView(bond = bond, members = listOf(MemberView(member, "Ada")), me = member, invite = null)
+        val view =
+            BondView(bond = bond, members = listOf(MemberView(member, "Ada")), me = member, invite = null, semanticSearchActive = false)
         val unclosed = Proposal.timezoneChange(ProposalId(UUID.randomUUID()), bond.id, RegionZone.of("Europe/London"), member.id, now)
         val closedLater =
             unclosed.copy(cancelledAt = unclosed.expiresAt.plusSeconds(3600), cancelCause = com.moyi.bond.domain.CancelCause.LAPSED)
@@ -79,7 +81,8 @@ internal class BondEntityTagTest {
                 now,
             )
         val member = bond.members.single()
-        val view = BondView(bond = bond, members = listOf(MemberView(member, "Ada")), me = member, invite = null)
+        val view =
+            BondView(bond = bond, members = listOf(MemberView(member, "Ada")), me = member, invite = null, semanticSearchActive = false)
 
         view.copy(semanticSearchActive = true).entityTag() shouldNotBe view.copy(semanticSearchActive = false).entityTag()
     }

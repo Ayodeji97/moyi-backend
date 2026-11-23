@@ -41,8 +41,8 @@ private const val SETTING_DESCRIPTION =
 
 private const val ACTIVE_DESCRIPTION =
     "Whether search and \"Remember when\" find this bond's entries by meaning now (ADR-0070): `semanticSearchEnabled` " +
-        "is on, an embedding provider is configured with a threshold for its model, and the operator has not paused " +
-        "sending to it. While false, both answer by words alone, still `200`; a client that offers \"Remember when\" " +
+        "is on, an embedding provider is configured with a threshold for its model, and the operator has not switched " +
+        "it off. While false, both answer by words alone, still `200`; a client that offers \"Remember when\" " +
         "only for a meaning search reads this. It changes without any change to the bond (a deploy, the operator's " +
         "switch), and the `ETag` changes with it. True says the search asks by meaning, not that every entry has been " +
         "embedded yet: an entry is found by meaning once the background job, which runs every minute, has embedded it."

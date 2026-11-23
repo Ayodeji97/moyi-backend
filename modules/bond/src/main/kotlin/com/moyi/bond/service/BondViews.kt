@@ -142,7 +142,7 @@ internal data class BondView(
      * [SemanticSearchAvailability] true. The second half is configuration and an `ADMIN`'s switch,
      * which move no bond row, so `entityTag` digests it, as it does [paused].
      */
-    val semanticSearchActive: Boolean = false,
+    val semanticSearchActive: Boolean,
 ) {
     val timezoneChange: Proposal? get() = proposals.firstOrNull { it.kind == ProposalKind.TIMEZONE_CHANGE }
 
